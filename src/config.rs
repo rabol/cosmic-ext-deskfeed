@@ -14,7 +14,7 @@ use crate::settings::ConnectionSettings;
 #[allow(clippy::struct_field_names)]
 pub struct Config {
     /// Logon setting that last worked, per resource. Keys are opaque hashes
-    /// of account, tenant and resource ID (spec §7: titles are never
+    /// of account, tenant, workspace and resource ID (spec §7: titles are never
     /// identity). No credentials are stored here.
     pub logon_settings: BTreeMap<String, LogonSetting>,
     /// Connection defaults per account (keys: `accounts::account_id`).

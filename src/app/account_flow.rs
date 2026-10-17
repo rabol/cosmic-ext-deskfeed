@@ -480,11 +480,31 @@ impl AppModel {
             *loading = false;
             match result {
                 Ok(list) => {
+                    let pairs: Vec<(String, String)> = list
+                        .iter()
+                        .flat_map(|w| &w.resources)
+                        .map(|r| (r.legacy_key.clone(), r.key.clone()))
+                        .collect();
                     *workspaces = list;
                     *error = None;
+                    self.migrate_resource_keys(&pairs);
                 }
                 Err(e) => *error = Some(e),
             }
+        }
+    }
+
+    /// Saved per-desktop settings under keys from before workspaces were
+    /// part of them move to the new keys.
+    fn migrate_resource_keys(&mut self, pairs: &[(String, String)]) {
+        let Some(handler) = &self.config_handler else {
+            return;
+        };
+        if let Some(map) = migrate_keys(&self.config.logon_settings, pairs) {
+            let _ = self.config.set_logon_settings(handler, map);
+        }
+        if let Some(map) = migrate_keys(&self.config.desktop_settings, pairs) {
+            let _ = self.config.set_desktop_settings(handler, map);
         }
     }
 

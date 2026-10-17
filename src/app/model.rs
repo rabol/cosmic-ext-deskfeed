@@ -93,8 +93,10 @@ pub struct WorkspaceView {
 
 #[derive(Debug, Clone)]
 pub struct ResourceView {
-    /// Opaque key: hash of account, tenant and resource ID.
+    /// Opaque key: hash of account, tenant, workspace and resource ID.
     pub(super) key: String,
+    /// The key before workspaces were part of it, to move saved settings.
+    pub(super) legacy_key: String,
     pub(super) title: String,
     pub(super) kind: ResourceKind,
     pub(super) connection_file: Option<Url>,
@@ -292,18 +294,61 @@ pub(super) fn logon_index(setting: &LogonSetting) -> (usize, String) {
 }
 
 /// Opaque key for a resource: hash of account, tenant and resource ID.
-pub(super) fn resource_key(account: &SignedIn, tenant: &str, resource_id: &str) -> String {
-    let mut h = sha2::Sha256::new();
-    for part in [
-        account.identity.tenant_id.as_str(),
-        account.identity.object_id.as_str(),
+/// Opaque key for a resource (spec §7): account, tenant, workspace (the
+/// feed's publisher ID) and resource ID, so the same resource ID in two
+/// workspaces gets two keys.
+pub(super) fn resource_key(
+    account: &SignedIn,
+    tenant: &str,
+    workspace: &str,
+    resource_id: &str,
+) -> String {
+    hash_key(&[
+        "v2",
+        &account.identity.tenant_id,
+        &account.identity.object_id,
+        tenant,
+        workspace,
+        resource_id,
+    ])
+}
+
+/// The key before the workspace was part of it.
+pub(super) fn legacy_resource_key(account: &SignedIn, tenant: &str, resource_id: &str) -> String {
+    hash_key(&[
+        &account.identity.tenant_id,
+        &account.identity.object_id,
         tenant,
         resource_id,
-    ] {
+    ])
+}
+
+fn hash_key(parts: &[&str]) -> String {
+    let mut h = sha2::Sha256::new();
+    for part in parts {
         h.update(part.as_bytes());
         h.update([0]);
     }
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&h.finalize()[..18])
+}
+
+/// Moves saved values from legacy keys to the new ones (`(legacy, new)`).
+/// A value already under the new key wins. Returns the new map if anything
+/// changed.
+pub(super) fn migrate_keys<V: Clone + PartialEq>(
+    map: &BTreeMap<String, V>,
+    pairs: &[(String, String)],
+) -> Option<BTreeMap<String, V>> {
+    let mut out = map.clone();
+    for (legacy, new) in pairs {
+        if let Some(value) = map.get(legacy) {
+            out.entry(new.clone()).or_insert_with(|| value.clone());
+        }
+    }
+    for (legacy, _) in pairs {
+        out.remove(legacy);
+    }
+    (out != *map).then_some(out)
 }
 
 pub(super) fn valid_domain(d: &str) -> bool {
@@ -322,29 +367,85 @@ pub(super) fn workspace_view(account: &SignedIn, feed: discovery::WorkspaceFeed)
         .unwrap_or_else(|| fl!("unnamed-workspace"));
     let tenant = feed.tenant.tenant_id.clone();
     match feed.result {
-        Ok(ws) => WorkspaceView {
-            name: if ws.name.is_empty() {
-                fallback
-            } else {
-                ws.name
-            },
-            error: None,
-            resources: ws
-                .resources
-                .into_iter()
-                .filter(|r| r.show_by_default)
-                .map(|r| ResourceView {
-                    key: resource_key(account, &tenant, &r.id),
-                    title: r.title,
-                    kind: r.kind,
-                    connection_file: r.connection_file,
-                })
-                .collect(),
-        },
+        Ok(ws) => {
+            let workspace = ws.publisher_id.clone().unwrap_or_default();
+            WorkspaceView {
+                name: if ws.name.is_empty() {
+                    fallback
+                } else {
+                    ws.name
+                },
+                error: None,
+                resources: ws
+                    .resources
+                    .into_iter()
+                    .filter(|r| r.show_by_default)
+                    .map(|r| ResourceView {
+                        key: resource_key(account, &tenant, &workspace, &r.id),
+                        legacy_key: legacy_resource_key(account, &tenant, &r.id),
+                        title: r.title,
+                        kind: r.kind,
+                        connection_file: r.connection_file,
+                    })
+                    .collect(),
+            }
+        }
         Err(e) => WorkspaceView {
             name: fallback,
             error: Some(describe_fetch_error(&e)),
             resources: Vec::new(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::token::TokenSet;
+    use crate::service::http::BearerToken;
+
+    fn me() -> SignedIn {
+        SignedIn {
+            identity: Identity {
+                tenant_id: "t".into(),
+                object_id: "o".into(),
+                username: None,
+                display_name: None,
+            },
+            tokens: TokenSet {
+                access_token: BearerToken::new("a".into()),
+                refresh_token: None,
+                id_token: None,
+                expires_at: Instant::now(),
+            },
+        }
+    }
+
+    #[test]
+    fn the_same_resource_in_two_workspaces_has_two_keys() {
+        let a = resource_key(&me(), "tenant", "workspace-a", "res-1");
+        let b = resource_key(&me(), "tenant", "workspace-b", "res-1");
+        assert_ne!(a, b);
+        assert_eq!(a, resource_key(&me(), "tenant", "workspace-a", "res-1"));
+        assert_ne!(a, legacy_resource_key(&me(), "tenant", "res-1"));
+    }
+
+    #[test]
+    fn saved_settings_move_to_the_new_keys() {
+        let map: BTreeMap<String, u32> = [
+            ("old-1".into(), 1),
+            ("old-2".into(), 2),
+            ("new-2".into(), 20),
+        ]
+        .into();
+        let pairs = [
+            ("old-1".to_owned(), "new-1".to_owned()),
+            ("old-2".to_owned(), "new-2".to_owned()),
+        ];
+        let moved = migrate_keys(&map, &pairs).unwrap();
+        // Moved; a value already under the new key wins; legacy keys go.
+        assert_eq!(moved, [("new-1".into(), 1), ("new-2".into(), 20)].into());
+        // Nothing to move: no change.
+        assert_eq!(migrate_keys(&moved, &pairs), None);
     }
 }
