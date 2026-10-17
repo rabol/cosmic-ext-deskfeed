@@ -105,7 +105,9 @@ struct ErrorResponse {
 /// without the trace and correlation IDs that follow it. Bounded, no
 /// control characters.
 fn description_first_line(d: &str) -> String {
-    d.split(['\r', '\n'])
+    let line = d.split(['\r', '\n']).next().unwrap_or_default();
+    // Microsoft may put the IDs on the same line (seen 2026-10-17).
+    line.split(" Trace ID:")
         .next()
         .unwrap_or_default()
         .chars()
@@ -245,6 +247,12 @@ mod description_tests {
         let line = description_first_line(d);
         assert!(line.ends_with("is 3600."));
         assert!(!line.contains("Trace") && !line.contains("Correlation"));
+        // As seen from Microsoft: everything on one line.
+        let one = "AADSTS70043: ... lifetime for this request is 300. Trace ID: x Correlation ID: y Timestamp: z";
+        assert_eq!(
+            description_first_line(one),
+            "AADSTS70043: ... lifetime for this request is 300."
+        );
     }
 }
 
