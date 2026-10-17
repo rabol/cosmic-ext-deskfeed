@@ -35,7 +35,6 @@ const FREERDP_BINARIES: &[&str] = &["sdl-freerdp3", "sdl-freerdp"];
 const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
-const ACTIVATION_TIMEOUT_MS: u32 = 120_000;
 
 const ENV_ALLOWLIST: &[&str] = &[
     "WAYLAND_DISPLAY",
@@ -96,6 +95,24 @@ pub struct LaunchSpec {
     /// `libfreerdp/core/settings.c`) and skips its own request when one is
     /// given (`gateway/arm.c`), which saves the user a sign-in prompt.
     pub gateway_token: Option<BearerToken>,
+    /// Effective connection settings (account, then desktop overrides).
+    pub settings: crate::settings::Effective,
+    /// Window title and Wayland app ID for FreeRDP's window, so the dock
+    /// groups it with the app and "open on a new workspace" can find it.
+    pub window_title: String,
+    pub app_id: String,
+}
+
+/// A window title FreeRDP can take as one argument line: no control
+/// characters, bounded length.
+pub fn safe_title(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,15 +201,24 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
     args.extend([
         "/dynamic-resolution".to_owned(),
         "/log-level:info".to_owned(),
-        // FreeRDP waits `TcpAckTimeout` (default 9000 ms) for the session
-        // host to finish activation, including the Entra exchange
-        // (`connection.c` `rdp_client_wait_for_activation`). Measured on the
-        // owner's host (2026-10-17), the Entra exchange alone took 0.45 s,
-        // 24.3 s and 49.8 s, so 9 s fails and 60 s is too close. `/timeout`
-        // is FreeRDP's documented setting for this ("use if you encounter
-        // timeout failures"); its maximum is 600 s.
-        format!("/timeout:{ACTIVATION_TIMEOUT_MS}"),
     ]);
+    // Display, devices and `/timeout`. FreeRDP waits `TcpAckTimeout`
+    // (default 9 s) for the session host to finish activation, including
+    // the Entra exchange (`connection.c` `rdp_client_wait_for_activation`);
+    // measured on the owner's host it took up to 49.8 s (settings.rs).
+    args.extend(spec.settings.freerdp_args());
+    let title = safe_title(&spec.window_title);
+    if !title.is_empty() {
+        args.push(format!("/title:{title}"));
+    }
+    if !spec.app_id.is_empty()
+        && spec
+            .app_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    {
+        args.push(format!("/wm-class:{}", spec.app_id));
+    }
     if args.iter().any(|a| a.contains(['\n', '\r', '\0'])) {
         return Err(LaunchError::Io("bad argument".into()));
     }
@@ -550,6 +576,9 @@ mod tests {
             helper: PathBuf::from("/usr/libexec/cosmic-ext-avd/cosmic-ext-avd-signin"),
             profile: PathBuf::from("/tmp/p"),
             gateway_token: None,
+            settings: crate::settings::DEFAULTS,
+            window_title: String::new(),
+            app_id: String::new(),
         }
     }
 
@@ -602,6 +631,22 @@ mod tests {
                     .any(|x| x.starts_with("/p:") || x.starts_with("/d:"))
             );
         }
+    }
+
+    #[test]
+    fn window_title_and_app_id() {
+        let mut s = spec(LogonSetting::EntraSignIn, None, false);
+        s.window_title = "Standard Desktop – anna@example.com\n/p:x".into();
+        s.app_id = "io.github.rabol.cosmic-ext-avd".into();
+        let a = args(&s);
+        // The line break is dropped, so nothing becomes a separate argument.
+        assert!(a.contains(&"/title:Standard Desktop – anna@example.com/p:x".into()));
+        assert!(a.contains(&"/wm-class:io.github.rabol.cosmic-ext-avd".into()));
+        assert!(!a.iter().any(|x| x == "/p:x"));
+        s.app_id = "bad id;x".into();
+        assert!(!args(&s).iter().any(|x| x.starts_with("/wm-class:")));
+        s.window_title = "\n".into();
+        assert!(!args(&s).iter().any(|x| x.starts_with("/title:")));
     }
 
     #[test]
@@ -829,6 +874,9 @@ mod tests {
             helper: PathBuf::from("/nonexistent/helper"),
             profile: dir.join("profile"),
             gateway_token: None,
+            settings: crate::settings::DEFAULTS,
+            window_title: String::new(),
+            app_id: String::new(),
         };
         let (tx, rx) = std::sync::mpsc::channel();
         let freerdp = find_freerdp().expect("sdl-freerdp3 installed");

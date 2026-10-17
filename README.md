@@ -15,7 +15,7 @@ Native packages only; there is no Flatpak ([ADR 0010](./docs/adr/0010-native-onl
 
 | Dependency | Minimum | Needed for | Arch Linux package |
 |---|---|---|---|
-| COSMIC desktop | Epoch 1 | The app itself | `cosmic-session` |
+| COSMIC desktop (cosmic-comp with window management v4) | Epoch 1 | The app itself; "Open on a new workspace" | `cosmic-session` |
 | FreeRDP with the SDL client (`sdl-freerdp3`), built with `WITH_AAD=ON` | 3.32.2 | Connecting to desktops, Entra sign-in to desktops | `freerdp` |
 | WebKitGTK 6 and GTK 4 | 2.52 | The Microsoft sign-in window | `webkitgtk-6.0` |
 | A Secret Service (oo7, GNOME Keyring, …) | — | Staying signed in (optional) | `oo7` or `gnome-keyring` |

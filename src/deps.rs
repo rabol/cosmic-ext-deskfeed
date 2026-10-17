@@ -29,13 +29,15 @@ pub enum Dependency {
     SignInHelper,
     SecretService,
     RuntimeDir,
+    /// COSMIC's window management, for "open on a new workspace".
+    CosmicWindows,
 }
 
 impl Dependency {
     /// Required ones block connecting or signing in; optional ones only
     /// remove a feature.
     pub fn required(self) -> bool {
-        !matches!(self, Self::SecretService)
+        !matches!(self, Self::SecretService | Self::CosmicWindows)
     }
 }
 
@@ -91,6 +93,13 @@ pub fn check_all() -> Vec<Check> {
         Check {
             dependency: Dependency::RuntimeDir,
             status: check_runtime_dir(),
+        },
+        Check {
+            dependency: Dependency::CosmicWindows,
+            status: match crate::workspace::check() {
+                Ok(()) => Status::Ok(String::new()),
+                Err(e) => Status::Broken(e),
+            },
         },
     ]
 }

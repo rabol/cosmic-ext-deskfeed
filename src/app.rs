@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use base64::Engine as _;
@@ -31,6 +32,7 @@ use crate::service::feed::ResourceKind;
 use crate::service::http::{Http, HttpError};
 use crate::sessions::launcher::{self, LaunchSpec, LogonSetting, SessionEnd, SessionEvent};
 use crate::sessions::rdpfile::ConnectionFile;
+use crate::settings::{self, ConnectionSettings, Toggle};
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
@@ -71,6 +73,13 @@ pub struct AppModel {
     logon_labels: Vec<String>,
     /// Last dependency check; `None` while it runs.
     deps: Option<Vec<Check>>,
+    /// Account ID or resource key the settings drawer shows.
+    settings_target: Option<String>,
+    /// Desktop setting choices when the account's value is on / off.
+    follow_on: Vec<String>,
+    follow_off: Vec<String>,
+    /// "Open on a new workspace" waits per running session; set to stop.
+    movers: HashMap<String, Arc<AtomicBool>>,
 }
 
 /// A page in the sidebar.
@@ -257,6 +266,16 @@ pub enum Message {
     Disconnect(String),
     CheckDependencies,
     DependenciesChecked(Vec<Check>),
+    OpenAccountSettings(String),
+    OpenDesktopSettings(String),
+    AccountToggle(String, Toggle, bool),
+    AccountTimeout(String, u32),
+    /// Resource key, setting, dropdown choice (0: follow the account).
+    DesktopToggle(String, Toggle, usize),
+    /// `None`: follow the account.
+    DesktopTimeout(String, Option<u32>),
+    /// Resource key; outcome of "open on a new workspace" (log text).
+    WorkspaceMoved(String, Result<(), String>),
 }
 
 /// Sign-in failures, cheap to clone for messages.
@@ -338,6 +357,10 @@ impl cosmic::Application for AppModel {
                 fl!("logon-entra"),
             ],
             deps: None,
+            settings_target: None,
+            follow_on: vec![fl!("follow-account-on"), fl!("on"), fl!("off")],
+            follow_off: vec![fl!("follow-account-off"), fl!("on"), fl!("off")],
+            movers: HashMap::new(),
         };
         app.rebuild_nav(&Page::Add);
         let title = app.update_title();
@@ -391,13 +414,24 @@ impl cosmic::Application for AppModel {
             return vec![];
         };
         let AccountState::Ready { loading, .. } = &account.state else {
-            return vec![];
+            return vec![
+                widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
+                    .tooltip(fl!("account-settings"))
+                    .on_press(Message::OpenAccountSettings(account.id.clone()))
+                    .into(),
+            ];
         };
         let mut refresh = widget::button::text(fl!("refresh"));
         if !loading {
             refresh = refresh.on_press(Message::Refresh(account.id.clone()));
         }
-        vec![refresh.into()]
+        vec![
+            refresh.into(),
+            widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
+                .tooltip(fl!("account-settings"))
+                .on_press(Message::OpenAccountSettings(account.id.clone()))
+                .into(),
+        ]
     }
 
     fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Self::Message>> {
@@ -422,6 +456,31 @@ impl cosmic::Application for AppModel {
                 }
                 b
             }),
+            ContextPage::AccountSettings => {
+                let id = self.settings_target.clone().unwrap_or_default();
+                let title = self.account(&id).map(Account::label).unwrap_or_default();
+                context_drawer::context_drawer(
+                    self.account_settings_view(&id),
+                    Message::ToggleContextPage(ContextPage::AccountSettings),
+                )
+                .title(title)
+                .actions(
+                    widget::button::destructive(fl!("sign-out")).on_press(Message::SignOut(id)),
+                )
+            }
+            ContextPage::DesktopSettings => {
+                let key = self.settings_target.clone().unwrap_or_default();
+                let title = self
+                    .account_of_resource(&key)
+                    .and_then(|a| a.resource(&key))
+                    .map(|r| r.title.clone())
+                    .unwrap_or_default();
+                context_drawer::context_drawer(
+                    self.desktop_settings_view(&key),
+                    Message::ToggleContextPage(ContextPage::DesktopSettings),
+                )
+                .title(title)
+            }
         })
     }
 
@@ -635,9 +694,50 @@ impl cosmic::Application for AppModel {
                     s.disconnect();
                 }
             }
+            Message::OpenAccountSettings(id) => {
+                self.settings_target = Some(id);
+                self.context_page = ContextPage::AccountSettings;
+                self.core.window.show_context = true;
+            }
+            Message::OpenDesktopSettings(key) => {
+                self.settings_target = Some(key);
+                self.context_page = ContextPage::DesktopSettings;
+                self.core.window.show_context = true;
+            }
+            Message::AccountToggle(id, t, on) => {
+                self.edit_settings(Level::Account, &id, |s| s.set_toggle(t, Some(on)));
+            }
+            Message::AccountTimeout(id, secs) => {
+                self.edit_settings(Level::Account, &id, |s| s.set_timeout(Some(secs)));
+            }
+            Message::DesktopToggle(key, t, choice) => {
+                let value = match choice {
+                    1 => Some(true),
+                    2 => Some(false),
+                    _ => None,
+                };
+                self.edit_settings(Level::Desktop, &key, |s| s.set_toggle(t, value));
+            }
+            Message::DesktopTimeout(key, secs) => {
+                self.edit_settings(Level::Desktop, &key, |s| s.set_timeout(secs));
+            }
+            Message::WorkspaceMoved(key, result) => {
+                self.movers.remove(&key);
+                // Not worth interrupting the user: the desktop opened, only
+                // not on a new workspace.
+                if let Err(e) = result {
+                    eprintln!("open on a new workspace: not moved ({e})");
+                }
+            }
         }
         Task::none()
     }
+}
+
+#[derive(Clone, Copy)]
+enum Level {
+    Account,
+    Desktop,
 }
 
 impl AppModel {
@@ -702,6 +802,164 @@ impl AppModel {
         if select == &Page::Add || self.accounts.is_empty() {
             add.activate();
         }
+    }
+
+    /// Changes one account's or desktop's settings and saves the config.
+    /// Empty entries are removed.
+    fn edit_settings(&mut self, level: Level, key: &str, f: impl FnOnce(&mut ConnectionSettings)) {
+        let mut map = match level {
+            Level::Account => self.config.account_settings.clone(),
+            Level::Desktop => self.config.desktop_settings.clone(),
+        };
+        let entry = map.entry(key.to_owned()).or_default();
+        f(entry);
+        if entry.is_empty() {
+            map.remove(key);
+        }
+        let Some(handler) = &self.config_handler else {
+            match level {
+                Level::Account => self.config.account_settings = map,
+                Level::Desktop => self.config.desktop_settings = map,
+            }
+            return;
+        };
+        let _ = match level {
+            Level::Account => self.config.set_account_settings(handler, map),
+            Level::Desktop => self.config.set_desktop_settings(handler, map),
+        };
+    }
+
+    /// The settings a desktop of `account` uses.
+    fn effective_settings(&self, account: &str, key: &str) -> settings::Effective {
+        settings::effective(
+            self.config.account_settings.get(account),
+            self.config.desktop_settings.get(key),
+        )
+    }
+
+    fn account_settings_view(&self, id: &str) -> Element<'_, Message> {
+        let current = settings::effective(self.config.account_settings.get(id), None);
+        let toggle = |t: Toggle| {
+            let (name, description) = toggle_text(t);
+            let id = id.to_owned();
+            widget::settings::item::builder(name)
+                .description(description)
+                .toggler(current.toggle(t), move |on| {
+                    Message::AccountToggle(id.clone(), t, on)
+                })
+        };
+        let timeout_id = id.to_owned();
+        let connection = widget::settings::section()
+            .title(fl!("settings-connection"))
+            .add(
+                widget::settings::item::builder(fl!("setting-timeout"))
+                    .description(fl!("setting-timeout-desc"))
+                    .control(widget::spin_button(
+                        fl!("seconds", value = current.timeout_secs),
+                        fl!("setting-timeout"),
+                        current.timeout_secs,
+                        10,
+                        settings::TIMEOUT_MIN_SECS,
+                        settings::TIMEOUT_MAX_SECS,
+                        move |v| Message::AccountTimeout(timeout_id.clone(), v),
+                    )),
+            );
+        let display = widget::settings::section()
+            .title(fl!("settings-display"))
+            .add(toggle(Toggle::Fullscreen))
+            .add(toggle(Toggle::AllMonitors))
+            .add(toggle(Toggle::NewWorkspace));
+        let devices = widget::settings::section()
+            .title(fl!("settings-devices"))
+            .add(toggle(Toggle::Sound))
+            .add(toggle(Toggle::Microphone))
+            .add(toggle(Toggle::Clipboard));
+        widget::settings::view_column(vec![
+            widget::text::body(fl!("account-settings-hint")).into(),
+            connection.into(),
+            display.into(),
+            devices.into(),
+        ])
+        .into()
+    }
+
+    fn desktop_settings_view(&self, key: &str) -> Element<'_, Message> {
+        let Some(account) = self.account_of_resource(key) else {
+            return widget::text::body(fl!("desktop-gone")).into();
+        };
+        let inherited = settings::effective(self.config.account_settings.get(&account.id), None);
+        let own = self
+            .config
+            .desktop_settings
+            .get(key)
+            .cloned()
+            .unwrap_or_default();
+        let current = self.effective_settings(&account.id, key);
+        let choice = |t: Toggle| {
+            let (name, description) = toggle_text(t);
+            let labels = if inherited.toggle(t) {
+                &self.follow_on
+            } else {
+                &self.follow_off
+            };
+            let selected = match own.toggle(t) {
+                None => 0,
+                Some(true) => 1,
+                Some(false) => 2,
+            };
+            let key = key.to_owned();
+            widget::settings::item::builder(name)
+                .description(description)
+                .control(widget::dropdown(labels, Some(selected), move |i| {
+                    Message::DesktopToggle(key.clone(), t, i)
+                }))
+        };
+        let timeout_key = key.to_owned();
+        let mut timeout_row = widget::row::with_capacity(2)
+            .spacing(cosmic::theme::spacing().space_xs)
+            .align_y(Alignment::Center)
+            .push(widget::spin_button(
+                fl!("seconds", value = current.timeout_secs),
+                fl!("setting-timeout"),
+                current.timeout_secs,
+                10,
+                settings::TIMEOUT_MIN_SECS,
+                settings::TIMEOUT_MAX_SECS,
+                move |v| Message::DesktopTimeout(timeout_key.clone(), Some(v)),
+            ));
+        if own.timeout_secs.is_some() {
+            timeout_row = timeout_row.push(
+                widget::button::text(fl!("use-account-setting"))
+                    .on_press(Message::DesktopTimeout(key.to_owned(), None)),
+            );
+        }
+        let connection = widget::settings::section()
+            .title(fl!("settings-connection"))
+            .add(
+                widget::settings::item::builder(fl!("setting-timeout"))
+                    .description(fl!(
+                        "setting-timeout-desktop-desc",
+                        value = inherited.timeout_secs
+                    ))
+                    .control(timeout_row),
+            );
+        let display = widget::settings::section()
+            .title(fl!("settings-display"))
+            .add(choice(Toggle::Fullscreen))
+            .add(choice(Toggle::AllMonitors))
+            .add(choice(Toggle::NewWorkspace));
+        let devices = widget::settings::section()
+            .title(fl!("settings-devices"))
+            .add(choice(Toggle::Sound))
+            .add(choice(Toggle::Microphone))
+            .add(choice(Toggle::Clipboard));
+        widget::settings::view_column(vec![
+            widget::text::body(fl!("desktop-settings-hint", account = account.label())).into(),
+            connection.into(),
+            display.into(),
+            devices.into(),
+        ])
+        .into()
     }
 
     fn check_dependencies(&mut self) -> Task<cosmic::Action<Message>> {
@@ -1352,6 +1610,11 @@ impl AppModel {
             );
             return Task::none();
         };
+        let settings = self.effective_settings(account, key);
+        let window_title = self
+            .account(account)
+            .and_then(|a| Some(format!("{} – {}", a.resource(key)?.title, a.label())))
+            .unwrap_or_default();
         let spec = LaunchSpec {
             connection: (**connection).clone(),
             username: signed_in.identity.username.clone(),
@@ -1361,6 +1624,9 @@ impl AppModel {
             profile,
             gateway_token: (!signed_in.tokens.needs_refresh(Instant::now()))
                 .then(|| signed_in.tokens.access_token.clone()),
+            settings,
+            window_title: window_title.clone(),
+            app_id: <Self as cosmic::Application>::APP_ID.to_owned(),
         };
         // No secrets here: the setting and, for a custom domain, its name.
         eprintln!("Starting FreeRDP with logon setting {logon:?}");
@@ -1375,10 +1641,40 @@ impl AppModel {
                     .insert(key.to_owned(), Connection::Connecting);
                 self.pending_logon
                     .insert(key.to_owned(), (logon, connection.clone()));
-                let (account, key) = (account.to_owned(), key.to_owned());
-                cosmic::task::stream(
-                    rx.map(move |e| Message::Session(account.clone(), epoch, key.clone(), e)),
-                )
+                let events = {
+                    let (account, key) = (account.to_owned(), key.to_owned());
+                    cosmic::task::stream(
+                        rx.map(move |e| Message::Session(account.clone(), epoch, key.clone(), e)),
+                    )
+                };
+                if !settings.new_workspace {
+                    return events;
+                }
+                let stop = Arc::new(AtomicBool::new(false));
+                self.movers.insert(key.to_owned(), stop.clone());
+                let title = launcher::safe_title(&window_title);
+                // The window appears after authentication: wait as long as
+                // the connection may take, plus the sign-in page.
+                let wait = std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 180);
+                let key = key.to_owned();
+                let mover = cosmic::task::future(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        crate::workspace::move_to_new_workspace(
+                            <AppModel as cosmic::Application>::APP_ID,
+                            &title,
+                            wait,
+                            &stop,
+                        )
+                    })
+                    .await;
+                    let result = match result {
+                        Ok(Ok(())) => Ok(()),
+                        Ok(Err(e)) => Err(e.to_string()),
+                        Err(_) => Err("task".to_owned()),
+                    };
+                    Message::WorkspaceMoved(key, result)
+                });
+                Task::batch([events, mover])
             }
             Err(e) => {
                 let text = match e {
@@ -1406,6 +1702,9 @@ impl AppModel {
             }
             SessionEvent::Ended { end, log } => {
                 self.running.remove(key);
+                if let Some(stop) = self.movers.remove(key) {
+                    stop.store(true, Ordering::SeqCst);
+                }
                 let pending = self.pending_logon.remove(key);
                 if !log.is_empty() && end != SessionEnd::Closed {
                     eprintln!("FreeRDP ended ({end:?}); last log lines:");
@@ -1494,6 +1793,26 @@ pub enum ContextPage {
     #[default]
     About,
     Dependencies,
+    AccountSettings,
+    DesktopSettings,
+}
+
+/// Name and description of an on/off setting.
+fn toggle_text(t: Toggle) -> (String, String) {
+    match t {
+        Toggle::Fullscreen => (fl!("setting-fullscreen"), fl!("setting-fullscreen-desc")),
+        Toggle::AllMonitors => (
+            fl!("setting-all-monitors"),
+            fl!("setting-all-monitors-desc"),
+        ),
+        Toggle::NewWorkspace => (
+            fl!("setting-new-workspace"),
+            fl!("setting-new-workspace-desc"),
+        ),
+        Toggle::Sound => (fl!("setting-sound"), fl!("setting-sound-desc")),
+        Toggle::Microphone => (fl!("setting-microphone"), fl!("setting-microphone-desc")),
+        Toggle::Clipboard => (fl!("setting-clipboard"), fl!("setting-clipboard-desc")),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1714,6 +2033,7 @@ fn dependency_text(d: Dependency) -> (String, String) {
         Dependency::SignInHelper => (fl!("dep-signin"), fl!("dep-signin-hint")),
         Dependency::SecretService => (fl!("dep-keyring"), fl!("dep-keyring-hint")),
         Dependency::RuntimeDir => (fl!("dep-runtime"), fl!("dep-runtime-hint")),
+        Dependency::CosmicWindows => (fl!("dep-cosmic-windows"), fl!("dep-cosmic-windows-hint")),
     }
 }
 
@@ -1758,9 +2078,18 @@ fn resource_row<'a>(r: &'a ResourceView, conn: Option<&'a Connection>) -> Elemen
         Some(s) => format!("{kind} · {s}"),
         None => kind,
     };
+    let settings = widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
+        .tooltip(fl!("desktop-settings"))
+        .on_press(Message::OpenDesktopSettings(r.key.clone()));
     widget::settings::item::builder(r.title.clone())
         .description(description)
-        .control(control)
+        .control(
+            widget::row::with_capacity(2)
+                .push(settings)
+                .push(control)
+                .spacing(cosmic::theme::spacing().space_xs)
+                .align_y(Alignment::Center),
+        )
         .into()
 }
 

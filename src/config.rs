@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 
 use crate::sessions::launcher::LogonSetting;
+use crate::settings::ConnectionSettings;
 
 #[derive(Debug, Default, Clone, CosmicConfigEntry, Eq, PartialEq)]
 #[version = 1]
@@ -13,4 +14,8 @@ pub struct Config {
     /// of account, tenant and resource ID (spec §7: titles are never
     /// identity). No credentials are stored here.
     pub logon_settings: BTreeMap<String, LogonSetting>,
+    /// Connection defaults per account (keys: `accounts::account_id`).
+    pub account_settings: BTreeMap<String, ConnectionSettings>,
+    /// Per-desktop overrides (keys: resource keys, as above).
+    pub desktop_settings: BTreeMap<String, ConnectionSettings>,
 }
