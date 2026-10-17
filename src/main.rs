@@ -11,6 +11,8 @@ mod secrets;
 mod service;
 mod sessions;
 mod settings;
+#[cfg(test)]
+mod test_util;
 mod workspace;
 
 fn main() -> cosmic::iced::Result {

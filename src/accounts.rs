@@ -17,7 +17,7 @@ use sha2::Digest;
 use crate::auth::attempt::ClientConfig;
 use crate::auth::id_token::{self, Identity};
 use crate::auth::signin::SignedIn;
-use crate::auth::token::{self, TokenError};
+use crate::auth::token::{self, Secret, TokenError};
 use crate::fl;
 use crate::secrets::{self, SecretsError, Stored};
 use crate::service::http::Http;
@@ -154,18 +154,60 @@ fn note_sign_out(id: &str) {
     }
 }
 
-fn config() -> ClientConfig {
-    ClientConfig::public_remote_desktop()
+/// Where saved sign-ins live: the desktop keyring, or a fake in tests.
+trait Store {
+    fn load_all(&self, config: &ClientConfig) -> Result<Vec<Stored>, SecretsError>;
+    fn save(
+        &self,
+        config: &ClientConfig,
+        identity: &Identity,
+        refresh_token: &Secret,
+    ) -> Result<(), SecretsError>;
+    fn delete(&self, config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError>;
+}
+
+/// The desktop keyring (Secret Service).
+struct Keyring;
+
+impl Store for Keyring {
+    fn load_all(&self, config: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
+        secrets::load_all(config)
+    }
+    fn save(
+        &self,
+        config: &ClientConfig,
+        identity: &Identity,
+        refresh_token: &Secret,
+    ) -> Result<(), SecretsError> {
+        secrets::save(config, identity, refresh_token)
+    }
+    fn delete(&self, config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
+        secrets::delete(config, identity)
+    }
+}
+
+/// What the functions below work with: the client identity (its token
+/// endpoint) and the store.
+struct Env<'a> {
+    config: ClientConfig,
+    store: &'a dyn Store,
+}
+
+fn system() -> Env<'static> {
+    Env {
+        config: ClientConfig::public_remote_desktop(),
+        store: &Keyring,
+    }
 }
 
 /// Saves the account's refresh token, unless it was signed out since
 /// `started` (a [`sign_out_count`]). The error is the notice to show.
 pub fn save(account: &SignedIn, started: u64) -> Result<(), String> {
     let _renewal = RENEWAL.lock();
-    save_locked(account, started)
+    save_locked(&system(), account, started)
 }
 
-fn save_locked(account: &SignedIn, started: u64) -> Result<(), String> {
+fn save_locked(env: &Env, account: &SignedIn, started: u64) -> Result<(), String> {
     if sign_out_count(&account_id(&account.identity)) != started {
         crate::app_log!("saved sign-in: not stored (signed out meanwhile)");
         return Ok(());
@@ -174,7 +216,9 @@ fn save_locked(account: &SignedIn, started: u64) -> Result<(), String> {
         crate::app_log!("saved sign-in: not stored (no refresh token in the response)");
         return Err(fl!("notice-not-saved", detail = "no refresh token"));
     };
-    let result = secrets::save(&config(), &account.identity, refresh_token);
+    let result = env
+        .store
+        .save(&env.config, &account.identity, refresh_token);
     // Diagnostics: outcome and error kind only, never tokens or IDs.
     match &result {
         Ok(()) => crate::app_log!("saved sign-in: stored"),
@@ -186,9 +230,13 @@ fn save_locked(account: &SignedIn, started: u64) -> Result<(), String> {
 /// Signs the account out: from now on its tokens aren't saved, and its
 /// keyring item is deleted.
 pub fn delete(identity: &Identity) -> Result<(), String> {
+    delete_in(&system(), identity)
+}
+
+fn delete_in(env: &Env, identity: &Identity) -> Result<(), String> {
     note_sign_out(&account_id(identity));
     let _renewal = RENEWAL.lock();
-    let deleted = secrets::delete(&config(), identity);
+    let deleted = env.store.delete(&env.config, identity);
     crate::app_log!("saved sign-in: deleted (sign-out): {deleted:?}");
     deleted.map_err(|_| fl!("error-sign-out-incomplete"))
 }
@@ -218,8 +266,12 @@ fn token_error_kind(e: &TokenError) -> String {
 
 /// All saved sign-ins, or the text to show if the keyring can't be read.
 pub fn load_saved() -> Result<Vec<Stored>, String> {
+    load_saved_in(&system())
+}
+
+fn load_saved_in(env: &Env) -> Result<Vec<Stored>, String> {
     let _renewal = RENEWAL.lock();
-    match secrets::load_all(&config()) {
+    match env.store.load_all(&env.config) {
         Ok(all) => {
             crate::app_log!("saved sign-in: {} found", all.len());
             Ok(all)
@@ -245,11 +297,15 @@ pub enum Restore {
 
 /// Signs in with a saved refresh token.
 pub fn restore(http: &Http, stored: &Stored) -> Restore {
-    let config = config();
+    restore_in(http, &system(), stored)
+}
+
+fn restore_in(http: &Http, env: &Env, stored: &Stored) -> Restore {
+    let config = &env.config;
     let id = account_id(&stored.identity);
     let started = sign_out_count(&id);
     let _renewal = RENEWAL.lock();
-    let renewed = token::refresh(http, &config, &stored.refresh_token);
+    let renewed = token::refresh(http, config, &stored.refresh_token);
     if let Err(e) = &renewed {
         crate::app_log!("saved sign-in: renewal failed ({})", token_error_kind(e));
     }
@@ -258,7 +314,7 @@ pub fn restore(http: &Http, stored: &Stored) -> Restore {
         Err(TokenError::Transient(_)) => return Restore::Retry(fl!("error-restore-network")),
         Err(TokenError::InvalidGrant { aadsts }) => {
             // Revoked or expired for good: forget it.
-            let deleted = secrets::delete(&config, &stored.identity);
+            let deleted = env.store.delete(config, &stored.identity);
             crate::app_log!("saved sign-in: deleted (invalid_grant): {deleted:?}");
             // AADSTS70043 "BadTokenDueToSignInFrequency": the organization's
             // Conditional Access asks for a new sign-in after a set time
@@ -299,7 +355,7 @@ pub fn restore(http: &Http, stored: &Stored) -> Restore {
     );
     let account = SignedIn { identity, tokens };
     let notice = if rotated {
-        save_locked(&account, started).err()
+        save_locked(env, &account, started).err()
     } else {
         None
     };
@@ -309,6 +365,10 @@ pub fn restore(http: &Http, stored: &Stored) -> Restore {
 /// Renews the tokens when the access token expires within the margin, and
 /// saves a rotated refresh token.
 pub fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, String> {
+    renew_in(http, &system(), account)
+}
+
+fn renew_in(http: &Http, env: &Env, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, String> {
     if !account.tokens.needs_refresh(Instant::now()) {
         return Ok(account);
     }
@@ -317,7 +377,7 @@ pub fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<Signed
     let Some(refresh_token) = &account.tokens.refresh_token else {
         return Err(fl!("error-session-expired"));
     };
-    match token::refresh(http, &config(), refresh_token) {
+    match token::refresh(http, &env.config, refresh_token) {
         Ok(tokens) => {
             let renewed = SignedIn {
                 identity: account.identity.clone(),
@@ -330,7 +390,7 @@ pub fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<Signed
                 .is_some_and(|t| t.expose() != refresh_token.expose());
             if rotated {
                 // Best effort: if this fails, the next start asks to sign in.
-                let _ = save_locked(&renewed, started);
+                let _ = save_locked(env, &renewed, started);
             }
             Ok(Arc::new(renewed))
         }
@@ -342,6 +402,329 @@ pub fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<Signed
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::token::TokenSet;
+    use crate::service::endpoint::EndpointPolicy;
+    use crate::service::http::BearerToken;
+    use crate::test_util::serve_once;
+    use std::time::Duration;
+    use url::Url;
+
+    /// An in-memory keyring. `fail` makes every call fail like a locked or
+    /// missing Secret Service.
+    #[derive(Default)]
+    struct FakeStore {
+        saved: Mutex<Vec<(Identity, String)>>,
+        fail: bool,
+    }
+
+    impl FakeStore {
+        fn with(identity: &Identity, token: &str) -> Self {
+            let s = Self::default();
+            s.saved
+                .lock()
+                .unwrap()
+                .push((identity.clone(), token.to_owned()));
+            s
+        }
+        fn tokens(&self) -> Vec<String> {
+            self.saved
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, t)| t.clone())
+                .collect()
+        }
+        fn err() -> SecretsError {
+            SecretsError::Unavailable("test".into())
+        }
+    }
+
+    impl Store for FakeStore {
+        fn load_all(&self, _: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
+            if self.fail {
+                return Err(Self::err());
+            }
+            Ok(self
+                .saved
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(identity, t)| Stored {
+                    identity: identity.clone(),
+                    refresh_token: Secret::new(t.clone()),
+                })
+                .collect())
+        }
+        fn save(
+            &self,
+            _: &ClientConfig,
+            identity: &Identity,
+            rt: &Secret,
+        ) -> Result<(), SecretsError> {
+            if self.fail {
+                return Err(Self::err());
+            }
+            let mut saved = self.saved.lock().unwrap();
+            saved.retain(|(i, _)| i != identity);
+            saved.push((identity.clone(), rt.expose().to_owned()));
+            Ok(())
+        }
+        fn delete(&self, _: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
+            if self.fail {
+                return Err(Self::err());
+            }
+            self.saved.lock().unwrap().retain(|(i, _)| i != identity);
+            Ok(())
+        }
+    }
+
+    /// The token endpoint on a local test server; the store given.
+    fn env(port: u16, store: &FakeStore) -> Env<'_> {
+        let mut config = ClientConfig::public_remote_desktop();
+        config.authority = Url::parse(&format!("http://127.0.0.1:{port}/organizations")).unwrap();
+        Env { config, store }
+    }
+
+    fn http(port: u16) -> Http {
+        Http::new(EndpointPolicy::local_test(port))
+    }
+
+    fn stored(identity: &Identity, token: &str) -> Stored {
+        Stored {
+            identity: identity.clone(),
+            refresh_token: Secret::new(token.into()),
+        }
+    }
+
+    /// A signed-in account whose access token expires in `valid_for`.
+    fn signed_in(identity: &Identity, refresh: Option<&str>, valid_for: Duration) -> Arc<SignedIn> {
+        Arc::new(SignedIn {
+            identity: identity.clone(),
+            tokens: TokenSet {
+                access_token: BearerToken::new("old-access".into()),
+                refresh_token: refresh.map(|t| Secret::new(t.into())),
+                id_token: None,
+                expires_at: Instant::now() + valid_for,
+            },
+        })
+    }
+
+    const OK_SAME: &str = r#"{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"refresh_token":"rt-old"}"#;
+    const OK_ROTATED: &str = r#"{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"refresh_token":"rt-new"}"#;
+    const BAD: &str = "400 Bad Request";
+
+    #[test]
+    fn restore_without_rotation_saves_nothing() {
+        let me = identity("00000000-0000-0000-0000-0000000000a1");
+        let (port, _) = serve_once("200 OK", OK_SAME);
+        let store = FakeStore::default();
+        match restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old")) {
+            Restore::Ready(account, notice) => {
+                assert_eq!(account.identity, me);
+                assert!(notice.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(store.tokens(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn restore_saves_a_rotated_token() {
+        let me = identity("00000000-0000-0000-0000-0000000000a2");
+        let (port, sent) = serve_once("200 OK", OK_ROTATED);
+        let store = FakeStore::with(&me, "rt-old");
+        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        assert!(matches!(outcome, Restore::Ready(_, None)), "{outcome:?}");
+        assert_eq!(store.tokens(), ["rt-new"]);
+        // The renewal used the saved token.
+        assert!(sent.lock().unwrap().contains("refresh_token=rt-old"));
+    }
+
+    #[test]
+    fn restore_reports_when_the_rotated_token_cant_be_saved() {
+        let me = identity("00000000-0000-0000-0000-0000000000a3");
+        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let store = FakeStore {
+            fail: true,
+            ..FakeStore::default()
+        };
+        match restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old")) {
+            // Signed in all the same, with a notice.
+            Restore::Ready(_, Some(notice)) => {
+                assert_eq!(
+                    notice,
+                    fl!(
+                        "notice-not-saved",
+                        detail = keyring_detail(&FakeStore::err())
+                    )
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_saved_sign_in_is_deleted() {
+        let me = identity("00000000-0000-0000-0000-0000000000a4");
+        let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
+        let store = FakeStore::with(&me, "rt-old");
+        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        assert!(
+            matches!(&outcome, Restore::SignInAgain(m) if *m == fl!("error-saved-sign-in-expired")),
+            "{outcome:?}"
+        );
+        assert_eq!(store.tokens(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn sign_in_frequency_is_explained() {
+        let me = identity("00000000-0000-0000-0000-0000000000a5");
+        let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
+        let store = FakeStore::with(&me, "rt-old");
+        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        assert!(
+            matches!(&outcome, Restore::SignInAgain(m) if *m == fl!("error-sign-in-frequency")),
+            "{outcome:?}"
+        );
+        assert_eq!(store.tokens(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn interaction_required_keeps_the_saved_sign_in() {
+        // An interactive sign-in will replace it; nothing is deleted.
+        let me = identity("00000000-0000-0000-0000-0000000000a6");
+        let (port, _) = serve_once(
+            BAD,
+            r#"{"error":"interaction_required","error_codes":[50076]}"#,
+        );
+        let store = FakeStore::with(&me, "rt-old");
+        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        assert!(matches!(outcome, Restore::SignInAgain(_)), "{outcome:?}");
+        assert_eq!(store.tokens(), ["rt-old"]);
+    }
+
+    #[test]
+    fn network_trouble_offers_retry_and_keeps_the_saved_sign_in() {
+        let me = identity("00000000-0000-0000-0000-0000000000a7");
+        let (port, _) = serve_once("503 Service Unavailable", "busy");
+        let store = FakeStore::with(&me, "rt-old");
+        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        assert!(
+            matches!(&outcome, Restore::Retry(m) if *m == fl!("error-restore-network")),
+            "{outcome:?}"
+        );
+        assert_eq!(store.tokens(), ["rt-old"]);
+    }
+
+    #[test]
+    fn a_renewed_id_token_is_never_taken_unchecked() {
+        // Its signature must be checked against Microsoft's keys; when they
+        // can't be fetched (here: not an allowed address), retry later.
+        let me = identity("00000000-0000-0000-0000-0000000000a8");
+        let (port, _) = serve_once(
+            "200 OK",
+            r#"{"access_token":"a","token_type":"Bearer","refresh_token":"rt-old","id_token":"x.y.z"}"#,
+        );
+        let store = FakeStore::default();
+        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        assert!(matches!(outcome, Restore::Retry(_)), "{outcome:?}");
+    }
+
+    #[test]
+    fn renewal_is_skipped_while_the_token_is_fresh() {
+        let me = identity("00000000-0000-0000-0000-0000000000b1");
+        let store = FakeStore::default();
+        let account = signed_in(&me, Some("rt-old"), Duration::from_secs(3600));
+        // Port 1: any request would fail, so success means none was made.
+        let renewed = renew_in(&http(1), &env(1, &store), account.clone()).unwrap();
+        assert!(Arc::ptr_eq(&renewed, &account));
+    }
+
+    #[test]
+    fn renewal_saves_a_rotated_token() {
+        let me = identity("00000000-0000-0000-0000-0000000000b2");
+        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let store = FakeStore::with(&me, "rt-old");
+        let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
+        let renewed = renew_in(&http(port), &env(port, &store), account).unwrap();
+        assert_eq!(renewed.tokens.access_token.expose(), "new-access");
+        assert_eq!(store.tokens(), ["rt-new"]);
+    }
+
+    #[test]
+    fn renewal_failures_are_explained() {
+        let me = identity("00000000-0000-0000-0000-0000000000b3");
+        let store = FakeStore::default();
+        let (port, _) = serve_once("503 Service Unavailable", "busy");
+        let account = signed_in(&me, Some("rt"), Duration::ZERO);
+        assert_eq!(
+            renew_in(&http(port), &env(port, &store), account).unwrap_err(),
+            fl!("error-generic")
+        );
+        let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
+        let account = signed_in(&me, Some("rt"), Duration::ZERO);
+        assert_eq!(
+            renew_in(&http(port), &env(port, &store), account).unwrap_err(),
+            fl!("error-session-expired")
+        );
+        // No refresh token: nothing to renew with, no request.
+        let account = signed_in(&me, None, Duration::ZERO);
+        assert_eq!(
+            renew_in(&http(1), &env(1, &store), account).unwrap_err(),
+            fl!("error-session-expired")
+        );
+    }
+
+    #[test]
+    fn work_started_before_a_sign_out_never_saves_afterwards() {
+        // Spec §6: late callbacks must not restore the account.
+        let me = identity("00000000-0000-0000-0000-0000000000c1");
+        let store = FakeStore::default();
+        let account = signed_in(&me, Some("rt-late"), Duration::from_secs(3600));
+        let started = sign_out_count(&account_id(&me));
+        delete_in(&env(1, &store), &me).unwrap();
+        assert_eq!(save_locked(&env(1, &store), &account, started), Ok(()));
+        assert_eq!(store.tokens(), Vec::<String>::new());
+        // A sign-in after the sign-out saves normally.
+        let started = sign_out_count(&account_id(&me));
+        save_locked(&env(1, &store), &account, started).unwrap();
+        assert_eq!(store.tokens(), ["rt-late"]);
+    }
+
+    #[test]
+    fn sign_out_blocks_late_saves_even_if_the_keyring_fails() {
+        let me = identity("00000000-0000-0000-0000-0000000000c2");
+        let failing = FakeStore {
+            fail: true,
+            ..FakeStore::default()
+        };
+        let before = sign_out_count(&account_id(&me));
+        assert_eq!(
+            delete_in(&env(1, &failing), &me).unwrap_err(),
+            fl!("error-sign-out-incomplete")
+        );
+        assert_eq!(sign_out_count(&account_id(&me)), before + 1);
+    }
+
+    #[test]
+    fn loading_saved_sign_ins() {
+        let me = identity("00000000-0000-0000-0000-0000000000d1");
+        let store = FakeStore::with(&me, "rt");
+        let all = load_saved_in(&env(1, &store)).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].identity, me);
+        let failing = FakeStore {
+            fail: true,
+            ..FakeStore::default()
+        };
+        assert_eq!(
+            load_saved_in(&env(1, &failing)).unwrap_err(),
+            fl!(
+                "error-keyring-load",
+                detail = keyring_detail(&FakeStore::err())
+            )
+        );
+    }
 
     fn identity(oid: &str) -> Identity {
         Identity {

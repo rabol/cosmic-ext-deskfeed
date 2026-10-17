@@ -13,7 +13,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -40,27 +40,32 @@ pub fn dir() -> Option<PathBuf> {
 pub fn write(message: &str) {
     let line = format!("{} {}", timestamp(SystemTime::now()), redact(message));
     eprintln!("{line}");
+    // Tests never write to the user's real log file.
+    if cfg!(test) {
+        return;
+    }
     let Ok(mut out) = OUT.lock() else { return };
     if out.is_none() {
-        *out = open();
+        *out = dir().and_then(|d| open_in(&d));
     }
     let Some(file) = out.as_mut() else { return };
     let _ = writeln!(file, "{line}");
     if file.metadata().is_ok_and(|m| m.len() > MAX_SIZE) {
         *out = None;
         rotate();
-        *out = open();
+        *out = dir().and_then(|d| open_in(&d));
     }
 }
 
-fn open() -> Option<File> {
-    let dir = dir()?;
+/// Opens (creating if needed) the log file in `dir`: folder 0700, file
+/// 0600.
+fn open_in(dir: &Path) -> Option<File> {
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(&dir)
+        .create(dir)
         .ok()?;
-    let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+    let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
     OpenOptions::new()
         .create(true)
         .append(true)
@@ -145,18 +150,21 @@ mod tests {
 
     #[test]
     fn writes_a_private_file() {
-        let base = std::env::temp_dir().join(format!("avd-log-{}", std::process::id()));
-        // SAFETY: only this test reads XDG_STATE_HOME in this binary.
-        unsafe { std::env::set_var("XDG_STATE_HOME", &base) };
-        write("hello from the test");
-        let dir = dir().unwrap();
-        assert!(dir.starts_with(&base));
+        let base = std::env::temp_dir().join(format!("deskfeed-log-{}", std::process::id()));
+        let dir = base.join("cosmic-ext-deskfeed");
+        let mut file = open_in(&dir).unwrap();
+        writeln!(file, "hello from the test").unwrap();
         let text = fs::read_to_string(dir.join(FILE)).unwrap();
-        assert!(text.trim_end().ends_with("hello from the test"));
+        assert_eq!(text, "hello from the test\n");
         let mode = |p: PathBuf| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(dir.join(FILE)), 0o600);
         assert_eq!(mode(dir.clone()), 0o700);
-        *OUT.lock().unwrap() = None;
+        // Appends, never truncates.
+        writeln!(open_in(&dir).unwrap(), "second").unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join(FILE)).unwrap(),
+            "hello from the test\nsecond\n"
+        );
         fs::remove_dir_all(base).unwrap();
     }
 
