@@ -164,7 +164,11 @@ impl Http {
         role: Role,
         token: Option<&BearerToken>,
     ) -> Result<Response, HttpError> {
-        self.policy.check(url, role)?;
+        if let Err(e) = self.policy.check(url, role) {
+            // Diagnostics for the endpoint rules; IDs and the query removed.
+            eprintln!("refused {role:?} URL ({e:?}): {}", redacted(url));
+            return Err(e.into());
+        }
         if token.is_some() && !role.sends_avd_token() {
             return Err(HttpError::TokenNotAllowed);
         }
@@ -197,6 +201,27 @@ impl Http {
     }
 }
 
+/// `scheme://host:port/path` with GUID-like and long path segments
+/// replaced by `<id>`, and no query or fragment. For diagnostics only.
+pub fn redacted(url: &Url) -> String {
+    let path: Vec<&str> = url
+        .path()
+        .split('/')
+        .map(|seg| {
+            let hexish = seg.len() >= 16
+                && seg.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+            if hexish || seg.len() > 40 { "<id>" } else { seg }
+        })
+        .collect();
+    format!(
+        "{}://{}:{}{}",
+        url.scheme(),
+        url.host_str().unwrap_or("?"),
+        url.port_or_known_default().unwrap_or(0),
+        path.join("/")
+    )
+}
+
 fn finish(mut resp: ureq::http::Response<ureq::Body>, role: Role) -> Result<Response, HttpError> {
     let status = resp.status().as_u16();
     if (300..400).contains(&status) {
@@ -220,6 +245,20 @@ fn finish(mut resp: ureq::http::Response<ureq::Body>, role: Role) -> Result<Resp
         content_type,
         body,
     })
+}
+
+#[cfg(test)]
+mod redact_tests {
+    use super::*;
+
+    #[test]
+    fn redacts_ids_and_query() {
+        let u = Url::parse("https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery/tenants/00000000-0000-0000-0000-000000000001/resource?x=secret").unwrap();
+        assert_eq!(
+            redacted(&u),
+            "https://rdweb.wvd.microsoft.com:443/api/arm/feeddiscovery/tenants/<id>/resource"
+        );
+    }
 }
 
 #[cfg(test)]
