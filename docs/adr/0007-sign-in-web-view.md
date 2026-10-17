@@ -24,7 +24,7 @@ Options considered:
 - Use **WebKitGTK 6** in a separate binary, `cosmic-ext-avd-signin`, a Cargo workspace member. The main app does not link GTK or WebKit.
 - The helper follows spec §6: HTTPS only, starts at `login.microsoftonline.com`, shows the current host, blocks pop-ups, downloads and file access, no script bridge, stops at the `nativeclient` redirect, and returns only `code`, `state` and error fields over a private pipe. One cookie store per account in the app's private data directory, deleted on sign-out.
 - The same helper serves FreeRDP's `/azure:auth-helper` requests, forwarded by the app ([ADR 0004](0004-freerdp-version-and-sign-in-helper.md)).
-- Native builds require the distro's `webkitgtk-6.0` package. The Flatpak runtime decision (bundle WebKitGTK or use a runtime that has it) is made during packaging (spec §11).
+- Requires the distro's `webkitgtk-6.0` package (native only, [ADR 0010](0010-native-only-and-dependency-check.md)); the startup dependency check tests that the helper starts.
 
 ## Implementation notes (2026-10-17)
 

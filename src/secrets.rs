@@ -239,6 +239,16 @@ impl Keyring {
     }
 }
 
+/// Whether a Secret Service answers and has a default keyring.
+pub fn check() -> Result<(), SecretsError> {
+    let keyring = Keyring::open()?;
+    let path: OwnedObjectPath = keyring.service()?.call("ReadAlias", &("default",))?;
+    if path.as_str() == "/" {
+        return Err(SecretsError::Unavailable("no default keyring".into()));
+    }
+    Ok(())
+}
+
 /// Loads the saved sign-in for this client identity, if any. With more
 /// than one (not created by this version), the first readable one wins.
 pub fn load(config: &ClientConfig) -> Result<Option<Stored>, SecretsError> {

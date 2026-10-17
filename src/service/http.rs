@@ -208,9 +208,12 @@ pub fn redacted(url: &Url) -> String {
         .path()
         .split('/')
         .map(|seg| {
-            let hexish = seg.len() >= 16
-                && seg.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
-            if hexish || seg.len() > 40 { "<id>" } else { seg }
+            let hexish = seg.len() >= 16 && seg.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+            if hexish || seg.len() > 40 {
+                "<id>"
+            } else {
+                seg
+            }
         })
         .collect();
     format!(

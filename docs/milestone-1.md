@@ -15,7 +15,7 @@ Tracks spec §4. Since [ADR 0006](adr/0006-build-app-alongside-compatibility-wor
 | F | Feed discovery probe: endpoints, `X-MS-User-Agent`, client ID acceptance per stage (steps 1, 3, 4) | Build: no. Test: **yes** | Done (app, 2026-10-17 14:23) |
 | G | Backend comparison and session stability on COSMIC (step 7) | **Yes** | Not started. Step C gives the first `sdl-freerdp3` native Wayland data point |
 | H | Administrator-provided registration mode (steps 2–3, 5) | Needs a tenant admin | Not started; may be documented as unavailable |
-| I | Flatpak validation of both sign-in routes (step 5) | **Yes** | After E/F |
+| I | ~~Flatpak validation~~ | — | Dropped: native only ([0010](adr/0010-native-only-and-dependency-check.md)) |
 | J | Compatibility matrix and limitations (step 8) | — | Ongoing, below |
 
 ## Observations

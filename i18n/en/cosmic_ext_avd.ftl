@@ -86,3 +86,26 @@ error-account-disabled = Your account is disabled. Contact your IT department.
 error-auth-failed = Authentication failed. Try signing out and in again.
 error-freerdp-crashed = The remote desktop client stopped unexpectedly.
 error-session-failed = The connection ended with an error (code { $code }).
+
+# Dependencies
+dependencies = Dependencies
+check-again = Check again
+deps-checking = Checking…
+deps-missing = Some required software is missing or not usable, so connecting may not work. Close this message to see the details.
+deps-required = Required
+deps-optional = Optional
+dep-ok = Found
+dep-ok-version = Version { $version }
+dep-missing = Not found
+dep-too-old = Version { $version } found, { $min } or newer needed
+dep-broken = Not usable ({ $reason })
+dep-freerdp = FreeRDP (sdl-freerdp3)
+dep-freerdp-hint = Connects to your desktops. Install FreeRDP 3.32.2 or newer with the SDL client (Arch Linux: freerdp).
+dep-freerdp-entra = FreeRDP Microsoft Entra support
+dep-freerdp-entra-hint = Needed for Entra sign-in to desktops. FreeRDP must be built with WITH_AAD=ON (Arch Linux's freerdp is).
+dep-signin = Sign-in window
+dep-signin-hint = Shows Microsoft's sign-in pages. Part of AVD Client; needs WebKitGTK 6 (Arch Linux: webkitgtk-6.0).
+dep-keyring = Keyring (Secret Service)
+dep-keyring-hint = Keeps you signed in between starts. Without it you sign in each time. Install and start a Secret Service such as oo7 or GNOME Keyring.
+dep-runtime = User runtime folder
+dep-runtime-hint = Private folder for connection files (XDG_RUNTIME_DIR), provided by your login session.

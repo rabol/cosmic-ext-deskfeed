@@ -22,6 +22,7 @@ use crate::auth::id_token;
 use crate::auth::signin::{self, Cancel, SignInError, SignedIn};
 use crate::auth::token::{self, Secret, TokenError};
 use crate::config::Config;
+use crate::deps::{self, Check, Dependency, Status};
 use crate::fl;
 use crate::secrets::{self, SecretsError};
 use crate::service::discovery::{self, FetchError};
@@ -66,6 +67,8 @@ pub struct AppModel {
     /// The saved sign-in couldn't be renewed for a temporary reason; the
     /// signed-out view offers to try again.
     can_retry_restore: bool,
+    /// Last dependency check; `None` while it runs.
+    deps: Option<Vec<Check>>,
 }
 
 enum Session {
@@ -162,6 +165,8 @@ pub enum Message {
     /// The keyring saved (or failed to save) the sign-in.
     Saved(u64, Result<(), String>),
     SignOutFinished(u64, Result<(), String>),
+    CheckDependencies,
+    DependenciesChecked(Vec<Check>),
 }
 
 /// The outcome of signing in with the saved refresh token.
@@ -246,6 +251,7 @@ impl cosmic::Application for AppModel {
             entra_failed: HashSet::new(),
             notice: None,
             can_retry_restore: false,
+            deps: None,
             logon_labels: vec![
                 fl!("logon-automatic"),
                 fl!("logon-empty-domain"),
@@ -255,7 +261,8 @@ impl cosmic::Application for AppModel {
         };
         let title = app.update_title();
         let restore = app.start_restore();
-        (app, Task::batch([title, restore]))
+        let deps = app.check_dependencies();
+        (app, Task::batch([title, restore, deps]))
     }
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
@@ -263,7 +270,10 @@ impl cosmic::Application for AppModel {
             menu::root(fl!("view")).apply(Element::from),
             menu::items(
                 &self.key_binds,
-                vec![menu::Item::Button(fl!("about"), None, MenuAction::About)],
+                vec![
+                    menu::Item::Button(fl!("dependencies"), None, MenuAction::Dependencies),
+                    menu::Item::Button(fl!("about"), None, MenuAction::About),
+                ],
             ),
         )]);
         vec![menu_bar.into()]
@@ -305,6 +315,18 @@ impl cosmic::Application for AppModel {
                 |url| Message::LaunchUrl(url.to_string()),
                 Message::ToggleContextPage(ContextPage::About),
             ),
+            ContextPage::Dependencies => context_drawer::context_drawer(
+                dependencies_view(self.deps.as_deref()),
+                Message::ToggleContextPage(ContextPage::Dependencies),
+            )
+            .title(fl!("dependencies"))
+            .actions({
+                let mut b = widget::button::standard(fl!("check-again"));
+                if self.deps.is_some() {
+                    b = b.on_press(Message::CheckDependencies);
+                }
+                b
+            }),
         })
     }
 
@@ -365,6 +387,45 @@ impl cosmic::Application for AppModel {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
+        let main = self.session_view();
+        // Missing required dependencies: a warning above everything, with
+        // the details in the context drawer.
+        match &self.deps {
+            Some(checks) if !deps::required_ok(checks) => widget::column::with_capacity(2)
+                .push(
+                    widget::warning(fl!("deps-missing"))
+                        .on_close(Message::ToggleContextPage(ContextPage::Dependencies)),
+                )
+                .push(main)
+                .spacing(cosmic::theme::spacing().space_s)
+                .into(),
+            _ => main,
+        }
+    }
+
+    fn subscription(&self) -> Subscription<Self::Message> {
+        self.core()
+            .watch_config::<Config>(Self::APP_ID)
+            .map(|update| Message::UpdateConfig(update.config))
+    }
+
+    fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
+        self.update_main(message)
+    }
+}
+
+impl AppModel {
+    fn check_dependencies(&mut self) -> Task<cosmic::Action<Message>> {
+        self.deps = None;
+        cosmic::task::future(async move {
+            let checks = tokio::task::spawn_blocking(deps::check_all)
+                .await
+                .unwrap_or_default();
+            Message::DependenciesChecked(checks)
+        })
+    }
+
+    fn session_view(&self) -> Element<'_, Message> {
         match &self.session {
             Session::SignedOut { error } => {
                 signed_out_view(error.as_deref(), self.can_retry_restore)
@@ -401,14 +462,17 @@ impl cosmic::Application for AppModel {
         }
     }
 
-    fn subscription(&self) -> Subscription<Self::Message> {
-        self.core()
-            .watch_config::<Config>(Self::APP_ID)
-            .map(|update| Message::UpdateConfig(update.config))
-    }
-
-    fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
+    fn update_main(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
+            Message::CheckDependencies => return self.check_dependencies(),
+            Message::DependenciesChecked(checks) => {
+                for c in &checks {
+                    if !c.status.is_ok() {
+                        eprintln!("dependency {:?}: {:?}", c.dependency, c.status);
+                    }
+                }
+                self.deps = Some(checks);
+            }
             Message::ToggleContextPage(page) => {
                 if self.context_page == page {
                     self.core.window.show_context = !self.core.window.show_context;
@@ -1328,6 +1392,82 @@ fn centered(content: Element<'_, Message>) -> Element<'_, Message> {
         .into()
 }
 
+/// The dependency list, as COSMIC Settings-style sections.
+fn dependencies_view(checks: Option<&[Check]>) -> Element<'_, Message> {
+    let Some(checks) = checks else {
+        return widget::text::body(fl!("deps-checking")).into();
+    };
+    let section = |required: bool| {
+        let mut sec = widget::settings::section().title(if required {
+            fl!("deps-required")
+        } else {
+            fl!("deps-optional")
+        });
+        for c in checks
+            .iter()
+            .filter(|c| c.dependency.required() == required)
+        {
+            let (name, hint) = dependency_text(c.dependency);
+            let state = match &c.status {
+                Status::Ok(v) if v.is_empty() => fl!("dep-ok"),
+                Status::Ok(v) => fl!("dep-ok-version", version = v.clone()),
+                Status::Missing => fl!("dep-missing"),
+                Status::TooOld(v) => fl!(
+                    "dep-too-old",
+                    version = v.clone(),
+                    min = format!(
+                        "{}.{}.{}",
+                        deps::MIN_FREERDP.0,
+                        deps::MIN_FREERDP.1,
+                        deps::MIN_FREERDP.2
+                    )
+                ),
+                Status::Broken(why) => fl!("dep-broken", reason = why.clone()),
+            };
+            let description = if c.status.is_ok() {
+                hint
+            } else {
+                format!("{state}. {hint}")
+            };
+            let icon = if c.status.is_ok() {
+                "emblem-ok-symbolic"
+            } else if required {
+                "dialog-error-symbolic"
+            } else {
+                "dialog-warning-symbolic"
+            };
+            sec = sec.add(
+                widget::settings::item::builder(name)
+                    .description(description)
+                    .control(
+                        widget::row::with_capacity(2)
+                            .push(widget::icon::from_name(icon).size(16))
+                            .push(widget::text::body(if c.status.is_ok() {
+                                state
+                            } else {
+                                String::new()
+                            }))
+                            .spacing(cosmic::theme::spacing().space_xxs)
+                            .align_y(Alignment::Center),
+                    ),
+            );
+        }
+        sec
+    };
+    widget::settings::view_column(vec![section(true).into(), section(false).into()]).into()
+}
+
+/// Name and what to install, per dependency.
+fn dependency_text(d: Dependency) -> (String, String) {
+    match d {
+        Dependency::FreeRdp => (fl!("dep-freerdp"), fl!("dep-freerdp-hint")),
+        Dependency::FreeRdpEntra => (fl!("dep-freerdp-entra"), fl!("dep-freerdp-entra-hint")),
+        Dependency::SignInHelper => (fl!("dep-signin"), fl!("dep-signin-hint")),
+        Dependency::SecretService => (fl!("dep-keyring"), fl!("dep-keyring-hint")),
+        Dependency::RuntimeDir => (fl!("dep-runtime"), fl!("dep-runtime-hint")),
+    }
+}
+
 fn signed_out_view(error: Option<&str>, can_retry: bool) -> Element<'_, Message> {
     let space = cosmic::theme::spacing();
     let mut col = widget::column::with_capacity(6)
@@ -1444,11 +1584,13 @@ fn resources_view<'a>(
 pub enum ContextPage {
     #[default]
     About,
+    Dependencies,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MenuAction {
     About,
+    Dependencies,
 }
 
 impl menu::action::MenuAction for MenuAction {
@@ -1457,6 +1599,7 @@ impl menu::action::MenuAction for MenuAction {
     fn message(&self) -> Self::Message {
         match self {
             MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+            MenuAction::Dependencies => Message::ToggleContextPage(ContextPage::Dependencies),
         }
     }
 }

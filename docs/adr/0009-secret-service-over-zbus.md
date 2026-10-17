@@ -22,4 +22,4 @@ Candidates: the `oo7`, `secret-service` and `keyring` crates, or the D-Bus API d
 ## Consequences
 
 - No new crates. Tested against `oo7-daemon` 0.6 with an opt-in test (`cargo test -- --ignored keyring`) that uses a test client ID.
-- Flatpak needs `--talk-name=org.freedesktop.secrets` (step I), or a move to the Secret portal later.
+- No Flatpak ([ADR 0010](0010-native-only-and-dependency-check.md)), so no sandbox permission is needed.

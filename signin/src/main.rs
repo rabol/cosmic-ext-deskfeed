@@ -33,6 +33,12 @@ use view::{Show, SignInView};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Dependency check (app's `deps.rs`): reaching this line means the
+    // process and its libraries (GTK, WebKitGTK) loaded.
+    if args == ["--check"] {
+        println!("ok");
+        return ExitCode::SUCCESS;
+    }
     if args.iter().any(|a| a.starts_with("--cmdInFd=")) {
         return freerdp::run(&args);
     }

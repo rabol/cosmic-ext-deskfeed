@@ -47,7 +47,7 @@ Inspected at the commit listed in §15:
 
 ### Initial usable release
 
-- One signed-in organizational account at a time, including resources from multiple entitled tenant feeds.
+- Several signed-in organizational accounts side by side (owner decision 2026-10-17), each including resources from multiple entitled tenant feeds, each with its own connection defaults.
 - Entra sign-in in both identity modes (§4, §6), MFA interaction, secure remembered sessions, and silent renewal where policy permits.
 - Discovery and refresh of workspaces, desktops, Windows 365 Cloud PCs, and RemoteApps exposed through the validated feed integration.
 - Resource icons, grouping, search, favorites, last successful refresh time, and clearly marked cached resources.
@@ -75,7 +75,7 @@ Before substantial UI work, prove the complete sign-in → discovery → connect
    - **Optional: administrator-provided registration.** A public-client registration that a tenant administrator creates and consents to (AVD delegated permission plus session-host sign-in), with a loopback redirect and the system browser. Native applications must not contain client secrets. COSMIC AVD does not ship its own multi-tenant registration unless milestone 1 shows the feed and gateway accept it without per-tenant administrator work.
 3. Test feed, gateway, and session-host access with both identities. Record which stages accept a non-Microsoft client ID, which require the approved `X-MS-User-Agent`, and how the service reacts to client version strings. Plan for that header to need occasional updates.
 4. If Microsoft blocks the default identity or the header, document the evidence and rely on the administrator-provided mode; do not work around new restrictions. These interfaces are not documented public APIs, so record the observed behavior and its date.
-5. Validate both sign-in routes in a native build and in Flatpak, including gateway/session-host authentication. Do not promise a single sign-in or silent connection authentication until tested.
+5. Validate both sign-in routes in the native build, including gateway/session-host authentication. There is no Flatpak ([ADR 0010](docs/adr/0010-native-only-and-dependency-check.md)). Do not promise a single sign-in or silent connection authentication until tested.
 6. Inspect and test the selected FreeRDP version's AVD gateway and Entra mechanisms before proposing a custom helper or patch: the out-of-process sign-in helper protocol (`/azure:auth-helper:<path>`, documented in `client/common/aad-helper-protocol.md`), the `GetAccessToken` callback, `/args-from`, and optional Microsoft Identity Broker support (`sso-mib`). Also test host pools without Entra single sign-on (password/RDSTLS login), including which user name and domain format they accept. Distinguish upstream functionality from gaps in how COSMIC AVD invokes and supervises it. Record the selected version, build options, capabilities, integration approach, and any demonstrated need for patches in an architecture decision record.
 7. Reproduce the reference app's session failures on COSMIC and record the symptoms and logs. Compare `sdl-freerdp` on native Wayland, `sdl-freerdp` on XWayland, and `xfreerdp` on XWayland for stability, input, display changes, scaling, audio, clipboard, and RemoteApp. Choose the default backend from this evidence.
 8. Produce a compatibility matrix describing the configurations actually tested and the unsupported cases. Include Conditional Access failures and distinguish missing assignments from unsupported authentication.
@@ -127,7 +127,7 @@ Treat network metadata, XML, icons, connection files, resource names, and backen
 - Disable automatic authenticated redirects. Either reject them or follow a bounded chain through explicit validation on every hop. Never forward bearer credentials to a different origin by default, even if both hosts are Microsoft-owned. Reject HTTPS downgrades.
 - Maintain reviewed endpoint-role allowlists and token-audience bindings derived from the validated service integration. Broad `*.microsoft.com` matching alone is insufficient. User-supplied feed URLs must not receive an existing token merely because the user entered them.
 - Preserve TLS chain and hostname validation. Support normal system trust and documented enterprise CA installation; provide no global ignore-TLS switch.
-- Honor system proxy settings (environment variables natively, the proxy portal in Flatpak) and pass an equivalent proxy to FreeRDP. Proxy credentials follow the same rules as tokens. Endpoint and credential rules apply to the destination, not the proxy.
+- Honor system proxy settings (environment variables) and pass an equivalent proxy to FreeRDP. Proxy credentials follow the same rules as tokens. Endpoint and credential rules apply to the destination, not the proxy.
 - Keep the `X-MS-User-Agent` client string as one reviewed value owned by the service integration. When the service reports an incompatible client version, show an error that says so instead of a generic failure.
 - Refresh feeds at startup, after resume, on request, and on a bounded interval (default one hour, with jitter). Never refresh in a tight loop after errors.
 - Bound request time, redirects, response/decompressed body sizes, XML depth and resource counts, and icon dimensions. Disable external entity resolution and network/file access from XML parsing. Reject unsupported formats and malformed connection properties safely.
@@ -190,11 +190,9 @@ Persist configuration and caches according to XDG/COSMIC conventions; use the ru
 
 ## 11. Packaging, licensing, and GitHub readiness
 
-- Support native developer builds through the official template's `just` workflow. Add a Flatpak package after core interoperability is proven.
-- Native builds may use a documented compatible installed FreeRDP; Flatpak should bundle a tested pinned version and necessary reviewed patches for consistent behavior. Do not download executables at application runtime or track FreeRDP `master` without a revision pin.
-- Prefer a minimal supported Flatpak runtime suitable for libcosmic. Avoid a GNOME runtime solely inherited from the reference app. Determine the exact runtime during packaging validation.
-- Document minimum versions: Rust MSRV, the libcosmic revision, and the minimum FreeRDP 3.x for native builds. Build `sso-mib` support as an optional feature.
-- Request only demonstrated permissions. No blanket home filesystem access, host command execution, or unconditional `--device=all`. Use the Wayland socket for the app and add X11 only if the chosen backend mode needs it. Test system-browser sign-in, Secret Service, Wayland, notifications, and optional tray integration inside the sandbox.
+- Native packages only, built with the official template's `just` workflow; never a Flatpak (owner decision, [ADR 0010](docs/adr/0010-native-only-and-dependency-check.md)).
+- Use the system's installed FreeRDP at a documented minimum version. Do not download executables at application runtime.
+- Document every runtime dependency and its minimum version in the README: FreeRDP, WebKitGTK, a Secret Service, COSMIC. The app checks them at startup and on request ("Check again") and explains what to install. Also document Rust MSRV and the libcosmic revision. Build `sso-mib` support as an optional feature.
 - Include desktop entry, original icons, AppStream metadata, screenshots without real tenant data, README, MIT `LICENSE`, third-party notices, contribution instructions, changelog, and `SECURITY.md` before public release.
 - Use a single release version across Cargo, UI, AppStream, tags, and artifacts. Record source and backend revisions and produce dependency/license inventories.
 - GitHub Actions must run formatting, linting, tests, build, metadata validation, and relevant dependency/security checks. Pin third-party actions to reviewed commit SHAs, minimize job permissions, and isolate signing credentials from untrusted pull requests.
@@ -229,7 +227,7 @@ Manual release matrix on COSMIC Wayland:
 - Multi-hour session soak on COSMIC with the default backend, plus each reproduced reference-app session failure.
 - Corporate HTTP proxy.
 - Authorized AVD desktop and Windows 365 connection, on a host pool with Entra single sign-on and on one without it (password login, the issue #38 case); RemoteApp before declaring it supported.
-- Native and Flatpak installations; locked/unavailable keyring and memory-only sessions.
+- Native installation with missing or too-old dependencies (the startup check); locked/unavailable keyring and memory-only sessions.
 - Windowed/fullscreen, selected monitors, mixed DPI, display hotplug, keyboard shortcuts, and supported clipboard directions.
 - Audio device changes during a session; microphone/camera opt-in and unplug/replug when those features are enabled.
 - Network interruption, suspend/resume, backend crash, app quit, and sign-out with active sessions.
@@ -244,7 +242,7 @@ Release acceptance: the documented core flow works with both identity modes (or 
 3. **Account and discovery:** secure credentials, browser callbacks, refresh, typed feeds, resource UI, and offline metadata.
 4. **Connection:** supervised backend, FreeRDP sign-in helper, native password dialog for hosts without single sign-on, certificate handling, protected IPC, cancellation, cleanup, and stable core sessions.
 5. **Parity:** RemoteApp, advanced displays, redirection, tray/background behavior, and additional account support according to validated capabilities.
-6. **Distribution:** Flatpak permission review, native installation checks, documentation, license inventory, and GitHub release preparation.
+6. **Distribution:** native packaging, the dependency check, documentation, license inventory, and GitHub release preparation.
 
 Resolve implementation decisions through evidence and record them; revise this specification when feasibility changes the design. Do not weaken security guarantees merely to reproduce a workaround from the reference app.
 

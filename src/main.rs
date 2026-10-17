@@ -3,6 +3,7 @@
 mod app;
 mod auth;
 mod config;
+mod deps;
 mod i18n;
 mod secrets;
 mod service;

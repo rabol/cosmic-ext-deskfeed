@@ -140,9 +140,17 @@ impl EndpointPolicy {
                 // Token endpoints are /{tenant}/oauth2/v2.0/token; checked in
                 // `check` because the tenant segment varies.
                 rule(Role::Token, exact(login), "/"),
-                rule(Role::SigningKeys, exact(login), "/common/discovery/v2.0/keys"),
+                rule(
+                    Role::SigningKeys,
+                    exact(login),
+                    "/common/discovery/v2.0/keys",
+                ),
                 rule(Role::FeedDiscovery, exact(feed), "/api/arm/feeddiscovery"),
-                rule(Role::Feed, tenant_feeds.clone(), "/api/arm/feeddiscovery/tenants"),
+                rule(
+                    Role::Feed,
+                    tenant_feeds.clone(),
+                    "/api/arm/feeddiscovery/tenants",
+                ),
                 rule(
                     Role::ConnectionFile,
                     tenant_feeds.clone(),
