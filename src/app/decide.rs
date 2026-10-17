@@ -16,17 +16,13 @@ pub(super) enum FirstStep {
 }
 
 /// Entra sign-in first: it needs no password, so trying it can't count
-/// toward an account lockout (ADR 0005). The password dialog only when the
-/// user chose a password setting for this desktop, or after Entra sign-in
-/// failed for it in this run.
-pub(super) fn first_step(
-    file_requests_entra: bool,
-    remembered: Option<&LogonSetting>,
-    entra_failed_here: bool,
-) -> FirstStep {
-    let entra_first =
-        file_requests_entra || matches!(remembered, None | Some(LogonSetting::EntraSignIn));
-    if entra_first && !entra_failed_here {
+/// toward an account lockout (ADR 0005). The password dialog when the user
+/// chose a password setting for this desktop (that choice wins, even if
+/// the connection file asks for Entra), or after Entra sign-in failed for
+/// it in this run.
+pub(super) fn first_step(remembered: Option<&LogonSetting>, entra_failed_here: bool) -> FirstStep {
+    let wants_entra = matches!(remembered, None | Some(LogonSetting::EntraSignIn));
+    if wants_entra && !entra_failed_here {
         return FirstStep::Entra;
     }
     FirstStep::AskPassword(match remembered {
@@ -40,32 +36,52 @@ pub(super) fn first_step(
 pub(super) enum EndOutcome {
     /// Normal end: clear the status.
     Clear,
-    /// Entra sign-in never worked here: offer the password next time.
+    /// Entra sign-in isn't working here: offer the password next time.
     OfferPassword,
-    /// Windows rejected the password: say so, the user retries.
+    /// Windows rejected the typed password: say so, the user retries.
     WrongPassword,
     /// Any other error, shown on the row.
     Failed,
 }
 
-/// `was_connected`: the session got connected before it ended.
-/// `entra_worked_before`: Entra sign-in is the remembered setting.
-/// `tried`: the logon setting this attempt used.
+/// What a session that ended means.
+///
+/// - `was_connected`: it got connected before it ended. Then the error is
+///   not about how the user logged on.
+/// - `remembered`: the logon setting saved for this desktop (the one that
+///   last worked).
+/// - `tried`: the setting this attempt used (`None` if unknown).
+/// - `earlier_entra_failures`: Entra attempts on this desktop that failed
+///   since it last connected, in this run.
+///
+/// If Entra has never worked here, one failure offers the password. If it
+/// worked before, one failure is treated as temporary, but a second one in
+/// a row offers the password, so the user is never stuck with Entra.
 pub(super) fn end_outcome(
     end: &SessionEnd,
     was_connected: bool,
-    entra_worked_before: bool,
+    remembered: Option<&LogonSetting>,
     tried: Option<&LogonSetting>,
+    earlier_entra_failures: u32,
 ) -> EndOutcome {
-    // Only a session that never got connected says anything about the
-    // logon method; once Entra sign-in has worked for a desktop, a failure
-    // is more likely temporary.
-    let entra_never_worked =
-        !was_connected && !entra_worked_before && matches!(tried, Some(LogonSetting::EntraSignIn));
-    match end {
-        SessionEnd::Closed | SessionEnd::Cancelled => EndOutcome::Clear,
-        _ if entra_never_worked => EndOutcome::OfferPassword,
-        SessionEnd::LogonFailed => EndOutcome::WrongPassword,
+    if matches!(end, SessionEnd::Closed | SessionEnd::Cancelled) {
+        return EndOutcome::Clear;
+    }
+    if was_connected {
+        return EndOutcome::Failed;
+    }
+    match tried {
+        Some(LogonSetting::EntraSignIn) => {
+            let worked_before = remembered == Some(&LogonSetting::EntraSignIn);
+            if !worked_before || earlier_entra_failures >= 1 {
+                EndOutcome::OfferPassword
+            } else {
+                EndOutcome::Failed
+            }
+        }
+        Some(password) if password.needs_password() && *end == SessionEnd::LogonFailed => {
+            EndOutcome::WrongPassword
+        }
         _ => EndOutcome::Failed,
     }
 }
@@ -75,8 +91,10 @@ pub(super) fn end_outcome(
 pub(super) enum AfterSignIn {
     /// A new account: file the fresh cookie profile under its ID.
     AdoptProfile,
-    /// The window of account `0` was used to sign in to another account:
-    /// that one stays signed out, the other is added.
+    /// Account `0`'s sign-in window was used to sign in to another account.
+    /// That one stays signed out; the profile now holds the other account's
+    /// cookies, so it is filed under the other account (account `0` gets a
+    /// fresh profile next time).
     ResetOther(String),
     /// The same account signed in again.
     Nothing,
@@ -95,43 +113,35 @@ pub(super) fn after_sign_in(origin: Option<&str>, signed_in_id: &str) -> AfterSi
 mod tests {
     use super::*;
 
+    const ENTRA: LogonSetting = LogonSetting::EntraSignIn;
+    const PASSWORD: LogonSetting = LogonSetting::Automatic;
+
     #[test]
     fn connect_tries_entra_first() {
-        // Nothing remembered: Entra, whatever the connection file says.
-        assert_eq!(first_step(false, None, false), FirstStep::Entra);
-        assert_eq!(first_step(true, None, false), FirstStep::Entra);
-        // Remembered Entra.
-        assert_eq!(
-            first_step(false, Some(&LogonSetting::EntraSignIn), false),
-            FirstStep::Entra
-        );
+        assert_eq!(first_step(None, false), FirstStep::Entra);
+        assert_eq!(first_step(Some(&ENTRA), false), FirstStep::Entra);
     }
 
     #[test]
-    fn password_when_chosen_or_after_entra_failed() {
+    fn a_chosen_password_setting_sticks() {
+        // Review finding 1: the saved choice wins, every time.
         assert_eq!(
-            first_step(false, Some(&LogonSetting::EmptyDomain), false),
+            first_step(Some(&LogonSetting::EmptyDomain), false),
             FirstStep::AskPassword(LogonSetting::EmptyDomain)
         );
         let custom = LogonSetting::CustomDomain("CORP".into());
         assert_eq!(
-            first_step(false, Some(&custom), false),
+            first_step(Some(&custom), false),
             FirstStep::AskPassword(custom)
         );
-        // Entra failed here: the dialog, preset to the standard password
-        // setting, not to Entra again.
+    }
+
+    #[test]
+    fn after_entra_failed_the_dialog_starts_at_the_standard_password() {
+        assert_eq!(first_step(None, true), FirstStep::AskPassword(PASSWORD));
         assert_eq!(
-            first_step(false, None, true),
-            FirstStep::AskPassword(LogonSetting::Automatic)
-        );
-        assert_eq!(
-            first_step(true, Some(&LogonSetting::EntraSignIn), true),
-            FirstStep::AskPassword(LogonSetting::Automatic)
-        );
-        // A file asking for Entra wins over a remembered password setting.
-        assert_eq!(
-            first_step(true, Some(&LogonSetting::EmptyDomain), false),
-            FirstStep::Entra
+            first_step(Some(&ENTRA), true),
+            FirstStep::AskPassword(PASSWORD)
         );
     }
 
@@ -139,54 +149,83 @@ mod tests {
     fn normal_ends_clear_the_row() {
         for end in [SessionEnd::Closed, SessionEnd::Cancelled] {
             for connected in [false, true] {
-                assert_eq!(
-                    end_outcome(&end, connected, false, Some(&LogonSetting::EntraSignIn)),
-                    EndOutcome::Clear
-                );
+                for tried in [None, Some(&ENTRA), Some(&PASSWORD)] {
+                    assert_eq!(
+                        end_outcome(&end, connected, None, tried, 0),
+                        EndOutcome::Clear
+                    );
+                }
             }
         }
     }
 
     #[test]
-    fn entra_that_never_worked_offers_the_password() {
-        let entra = Some(&LogonSetting::EntraSignIn);
+    fn errors_after_connecting_are_ordinary() {
+        for tried in [Some(&ENTRA), Some(&PASSWORD), None] {
+            assert_eq!(
+                end_outcome(&SessionEnd::LogonFailed, true, None, tried, 3),
+                EndOutcome::Failed
+            );
+        }
+    }
+
+    #[test]
+    fn entra_that_never_worked_offers_the_password_at_once() {
         for end in [
             SessionEnd::Failed { code: 131 },
             SessionEnd::LogonFailed,
             SessionEnd::AuthenticationFailed,
         ] {
             assert_eq!(
-                end_outcome(&end, false, false, entra),
+                end_outcome(&end, false, None, Some(&ENTRA), 0),
                 EndOutcome::OfferPassword
             );
         }
     }
 
     #[test]
-    fn entra_that_worked_before_or_connected_is_an_ordinary_error() {
-        let entra = Some(&LogonSetting::EntraSignIn);
+    fn entra_that_worked_before_gets_one_more_chance_then_the_password() {
+        // Review finding 2: never stuck with Entra.
         let timeout = SessionEnd::Failed { code: 131 };
-        // Worked on this desktop before: probably temporary.
         assert_eq!(
-            end_outcome(&timeout, false, true, entra),
+            end_outcome(&timeout, false, Some(&ENTRA), Some(&ENTRA), 0),
             EndOutcome::Failed
         );
-        // Connected, then failed: not about the logon method.
         assert_eq!(
-            end_outcome(&timeout, true, false, entra),
-            EndOutcome::Failed
+            end_outcome(&timeout, false, Some(&ENTRA), Some(&ENTRA), 1),
+            EndOutcome::OfferPassword
         );
     }
 
     #[test]
-    fn rejected_password_says_so() {
-        let pw = Some(&LogonSetting::Automatic);
+    fn wrong_password_only_when_a_password_was_used() {
+        // Review findings 3 and 5.
         assert_eq!(
-            end_outcome(&SessionEnd::LogonFailed, false, false, pw),
+            end_outcome(&SessionEnd::LogonFailed, false, None, Some(&PASSWORD), 0),
             EndOutcome::WrongPassword
         );
         assert_eq!(
-            end_outcome(&SessionEnd::Failed { code: 131 }, false, false, pw),
+            end_outcome(
+                &SessionEnd::LogonFailed,
+                false,
+                Some(&ENTRA),
+                Some(&ENTRA),
+                0
+            ),
+            EndOutcome::Failed
+        );
+        assert_eq!(
+            end_outcome(&SessionEnd::LogonFailed, false, None, None, 0),
+            EndOutcome::Failed
+        );
+        assert_eq!(
+            end_outcome(
+                &SessionEnd::Failed { code: 131 },
+                false,
+                None,
+                Some(&PASSWORD),
+                0
+            ),
             EndOutcome::Failed
         );
     }

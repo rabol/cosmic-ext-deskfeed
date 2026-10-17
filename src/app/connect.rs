@@ -73,7 +73,6 @@ impl AppModel {
             }
         };
         let remembered = match decide::first_step(
-            connection.entra_sso(),
             self.config.logon_settings.get(&key),
             self.entra_failed.contains(&key),
         ) {
@@ -245,6 +244,7 @@ impl AppModel {
                 self.connections
                     .insert(key.to_owned(), Connection::Connected);
                 self.entra_failed.remove(key);
+                self.entra_failures.remove(key);
                 // Remember the logon setting that worked.
                 if let Some((logon, _)) = self.pending_logon.get(key).cloned() {
                     self.remember_logon(key, logon);
@@ -262,12 +262,22 @@ impl AppModel {
                         crate::app_log!("  {line}");
                     }
                 }
+                let was_connected =
+                    matches!(self.connections.get(key), Some(Connection::Connected));
+                let tried = pending.as_ref().map(|(logon, _)| logon);
                 let outcome = decide::end_outcome(
                     &end,
-                    matches!(self.connections.get(key), Some(Connection::Connected)),
-                    self.config.logon_settings.get(key) == Some(&LogonSetting::EntraSignIn),
-                    pending.as_ref().map(|(logon, _)| logon),
+                    was_connected,
+                    self.config.logon_settings.get(key),
+                    tried,
+                    self.entra_failures.get(key).copied().unwrap_or(0),
                 );
+                if outcome != decide::EndOutcome::Clear
+                    && !was_connected
+                    && tried == Some(&LogonSetting::EntraSignIn)
+                {
+                    *self.entra_failures.entry(key.to_owned()).or_insert(0) += 1;
+                }
                 match outcome {
                     decide::EndOutcome::Clear => {
                         self.connections.remove(key);

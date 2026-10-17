@@ -245,6 +245,8 @@ impl AppModel {
                 accounts::adopt_profile(&profile, &id);
             }
             decide::AfterSignIn::ResetOther(old) => {
+                // The profile now holds this account's cookies.
+                accounts::adopt_profile(&profile, &id);
                 if let Some(a) = self.account_mut(&old) {
                     a.state = AccountState::NeedsSignIn { error: None };
                 }
@@ -369,6 +371,7 @@ impl AppModel {
             self.pending_logon.remove(&key);
             self.last_failure.remove(&key);
             self.entra_failed.remove(&key);
+            self.entra_failures.remove(&key);
         }
         if self.dialog.as_ref().is_some_and(|d| d.account == id) {
             self.dialog = None;

@@ -83,6 +83,8 @@ pub struct AppModel {
     /// Resources where Entra sign-in failed in this run: the next Connect
     /// asks for a password instead of trying it again.
     entra_failed: HashSet<String>,
+    /// Entra attempts that failed per resource since it last connected.
+    entra_failures: HashMap<String, u32>,
     logon_labels: Vec<String>,
     /// Last dependency check; `None` while it runs.
     deps: Option<Vec<Check>>,
@@ -164,6 +166,7 @@ impl cosmic::Application for AppModel {
             dialog: None,
             last_failure: HashMap::new(),
             entra_failed: HashSet::new(),
+            entra_failures: HashMap::new(),
             logon_labels: vec![
                 fl!("logon-automatic"),
                 fl!("logon-empty-domain"),

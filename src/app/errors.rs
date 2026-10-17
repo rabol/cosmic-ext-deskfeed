@@ -57,6 +57,7 @@ pub(super) fn describe_session_end(end: &SessionEnd) -> String {
         SessionEnd::TlsFailed => fl!("error-tls"),
         SessionEnd::Crashed => fl!("error-freerdp-crashed"),
         SessionEnd::Failed { code } => fl!("error-session-failed", code = code.to_string()),
-        SessionEnd::Closed | SessionEnd::Cancelled | SessionEnd::LogonFailed => String::new(),
+        SessionEnd::LogonFailed => fl!("error-sign-in-rejected"),
+        SessionEnd::Closed | SessionEnd::Cancelled => String::new(),
     }
 }
