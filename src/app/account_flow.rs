@@ -345,6 +345,7 @@ impl AppModel {
         }
         self.rebuild_nav(&Page::Account(id.clone()));
         let started = accounts::sign_out_count(&id);
+        accounts::signed_in(&signed_in, started);
         let save_id = id.clone();
         let save = cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || accounts::save(&signed_in, started))

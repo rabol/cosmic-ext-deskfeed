@@ -148,10 +148,52 @@ pub fn sign_out_count(id: &str) -> u64 {
         .map_or(0, |m| m.get(id).copied().unwrap_or(0))
 }
 
-fn note_sign_out(id: &str) {
+/// From now on, work that started earlier for this account saves nothing
+/// and its newest tokens are forgotten.
+pub fn note_sign_out(id: &str) {
     if let Ok(mut m) = SIGN_OUTS.lock() {
         *m.entry(id.to_owned()).or_insert(0) += 1;
     }
+    if let Ok(mut latest) = LATEST.lock() {
+        latest.remove(id);
+    }
+}
+
+/// The newest tokens per account (spec §6: a renewal must not reuse a
+/// refresh token another renewal already replaced). Connections and
+/// refreshes each hold their own copy; renewals look here first.
+static LATEST: LazyLock<Mutex<HashMap<String, Arc<SignedIn>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Records `account`'s tokens as the newest, unless newer ones are known
+/// or the account was signed out since `started`.
+fn note_tokens(account: &Arc<SignedIn>, started: u64) {
+    let id = account_id(&account.identity);
+    if sign_out_count(&id) != started {
+        return;
+    }
+    if let Ok(mut latest) = LATEST.lock() {
+        let newer = latest
+            .get(&id)
+            .is_none_or(|known| account.tokens.expires_at >= known.tokens.expires_at);
+        if newer {
+            latest.insert(id, account.clone());
+        }
+    }
+}
+
+/// The newest tokens known for the account, if newer than `account`'s.
+fn newest(account: &Arc<SignedIn>) -> Option<Arc<SignedIn>> {
+    let latest = LATEST.lock().ok()?;
+    latest
+        .get(&account_id(&account.identity))
+        .filter(|known| known.tokens.expires_at > account.tokens.expires_at)
+        .cloned()
+}
+
+/// An interactive sign-in finished: its tokens are the newest.
+pub fn signed_in(account: &Arc<SignedIn>, started: u64) {
+    note_tokens(account, started);
 }
 
 /// Where saved sign-ins live: the desktop keyring, or a fake in tests.
@@ -343,13 +385,14 @@ fn restore_in(http: &Http, env: &Env, stored: &Stored) -> Restore {
         "saved sign-in: renewed (refresh token {})",
         if rotated { "rotated" } else { "unchanged" }
     );
-    let account = SignedIn { identity, tokens };
+    let account = Arc::new(SignedIn { identity, tokens });
     let notice = if rotated {
         save_locked(env, &account, started).err()
     } else {
         None
     };
-    Restore::Ready(Arc::new(account), notice)
+    note_tokens(&account, started);
+    Restore::Ready(account, notice)
 }
 
 /// Why renewed tokens can't be used.
@@ -403,6 +446,13 @@ fn renew_in(http: &Http, env: &Env, account: Arc<SignedIn>) -> Result<Arc<Signed
     }
     let started = sign_out_count(&account_id(&account.identity));
     let _renewal = RENEWAL.lock();
+    // Another renewal may have finished while this one waited for the
+    // lock: use its result, or at least its (rotated) refresh token.
+    let account = match newest(&account) {
+        Some(known) if !known.tokens.needs_refresh(Instant::now()) => return Ok(known),
+        Some(known) => known,
+        None => account,
+    };
     let Some(refresh_token) = &account.tokens.refresh_token else {
         return Err(RenewError::SignInAgain(fl!("error-session-expired")));
     };
@@ -438,7 +488,9 @@ fn renew_in(http: &Http, env: &Env, account: Arc<SignedIn>) -> Result<Arc<Signed
         // Best effort: if this fails, the next start asks to sign in.
         let _ = save_locked(env, &renewed, started);
     }
-    Ok(Arc::new(renewed))
+    let renewed = Arc::new(renewed);
+    note_tokens(&renewed, started);
+    Ok(renewed)
 }
 
 #[cfg(test)]
@@ -720,6 +772,46 @@ mod tests {
             renew_in(&http(1), &env(1, &store), account).unwrap_err(),
             RenewError::SignInAgain(fl!("error-session-expired"))
         );
+    }
+
+    #[test]
+    fn a_second_renewal_reuses_the_first_ones_result() {
+        // Two connections start with the same expired copy. The first
+        // renews (and rotates the refresh token); the second must not send
+        // the old refresh token again. The test server answers only once.
+        let me = identity("00000000-0000-0000-0000-0000000000b5");
+        let (port, sent) = serve_once("200 OK", OK_ROTATED);
+        let store = FakeStore::with(&me, "rt-old");
+        let copy = signed_in(&me, Some("rt-old"), Duration::ZERO);
+        let first = renew_in(&http(port), &env(port, &store), copy.clone()).unwrap();
+        let second = renew_in(&http(port), &env(port, &store), copy).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            sent.lock()
+                .unwrap()
+                .matches("grant_type=refresh_token")
+                .count(),
+            1
+        );
+        assert_eq!(store.tokens(), ["rt-new"]);
+    }
+
+    #[test]
+    fn signing_out_forgets_the_newest_tokens() {
+        let me = identity("00000000-0000-0000-0000-0000000000b6");
+        let fresh = signed_in(&me, Some("rt"), Duration::from_secs(3600));
+        signed_in_now(&fresh);
+        let stale = signed_in(&me, Some("rt"), Duration::ZERO);
+        assert!(newest(&stale).is_some());
+        note_sign_out(&account_id(&me));
+        assert!(newest(&stale).is_none());
+        // Late work from before the sign-out records nothing.
+        note_tokens(&fresh, sign_out_count(&account_id(&me)) - 1);
+        assert!(newest(&stale).is_none());
+    }
+
+    fn signed_in_now(account: &Arc<SignedIn>) {
+        super::signed_in(account, sign_out_count(&account_id(&account.identity)));
     }
 
     #[test]
