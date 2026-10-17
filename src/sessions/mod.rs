@@ -3,4 +3,6 @@
 //! Backend abstraction, supervised `FreeRDP` processes and session lifecycle
 //! (spec §8, §10).
 
+pub mod launcher;
+pub mod rdpfile;
 pub mod username;

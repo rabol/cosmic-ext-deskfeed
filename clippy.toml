@@ -1,0 +1,2 @@
+# Product names used in prose, not code items.
+doc-valid-idents = ["FreeRDP", "WebKitGTK", "WebKit", "OAuth", "JWKS", "RemoteApp", "RemoteApps", "AzureAD", "..", "WinPR", "JavaScript"]

@@ -12,9 +12,6 @@
 //!   `COSMIC_EXT_AVD_SIGNIN_PROFILE`, which the app sets for FreeRDP, so the
 //!   account's sign-in cookies make these requests silent when possible.
 
-// "FreeRDP" is a product name in prose, not a code item.
-#![allow(clippy::doc_markdown)]
-
 mod freerdp;
 mod protocol;
 mod view;
