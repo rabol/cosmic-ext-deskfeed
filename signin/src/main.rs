@@ -14,6 +14,7 @@
 
 mod freerdp;
 mod protocol;
+mod session_jar;
 mod view;
 
 use std::cell::Cell;

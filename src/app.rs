@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -52,6 +52,9 @@ pub struct AppModel {
     /// Why the last attempt for a resource failed, shown at the top of the
     /// next password dialog.
     last_failure: HashMap<String, String>,
+    /// Resources where Entra sign-in failed in this run: the next Connect
+    /// asks for a password instead of trying it again.
+    entra_failed: HashSet<String>,
     logon_labels: Vec<String>,
 }
 
@@ -204,6 +207,7 @@ impl cosmic::Application for AppModel {
             pending_logon: HashMap::new(),
             dialog: None,
             last_failure: HashMap::new(),
+            entra_failed: HashSet::new(),
             logon_labels: vec![
                 fl!("logon-automatic"),
                 fl!("logon-empty-domain"),
@@ -561,13 +565,16 @@ impl AppModel {
         self.connections.clear();
         self.pending_logon.clear();
         self.last_failure.clear();
+        self.entra_failed.clear();
         self.dialog = None;
         let mut error = None;
-        if let Some(dir) = signin_profile_dir()
-            && dir.exists()
-            && std::fs::remove_dir_all(&dir).is_err()
+        for dir in [signin_profile_dir(), signin_session_dir()]
+            .into_iter()
+            .flatten()
         {
-            error = Some(fl!("error-sign-out-incomplete"));
+            if dir.exists() && std::fs::remove_dir_all(&dir).is_err() {
+                error = Some(fl!("error-sign-out-incomplete"));
+            }
         }
         self.session = Session::SignedOut { error };
     }
@@ -641,15 +648,19 @@ impl AppModel {
                 return Task::none();
             }
         };
-        let remembered = self
-            .config
-            .logon_settings
-            .get(&key)
-            .cloned()
-            .unwrap_or_default();
-        if connection.entra_sso() || remembered == LogonSetting::EntraSignIn {
+        let remembered = self.config.logon_settings.get(&key).cloned();
+        // Entra sign-in first: it needs no password, so trying it can't
+        // count toward an account lockout. Password logon only when the
+        // user chose it, or after Entra sign-in failed for this desktop.
+        let entra_first = connection.entra_sso()
+            || matches!(remembered, None | Some(LogonSetting::EntraSignIn));
+        if entra_first && !self.entra_failed.contains(&key) {
             return self.launch(&key, &connection, LogonSetting::EntraSignIn, None);
         }
+        let remembered = match remembered {
+            Some(LogonSetting::EntraSignIn) | None => LogonSetting::Automatic,
+            Some(other) => other,
+        };
         let title = self
             .find_resource(&key)
             .map(|r| r.title)
@@ -763,6 +774,7 @@ impl AppModel {
             SessionEvent::Connected => {
                 self.connections
                     .insert(key.to_owned(), Connection::Connected);
+                self.entra_failed.remove(key);
                 // Remember the logon setting that worked.
                 if let Some((logon, _)) = self.pending_logon.get(key).cloned() {
                     self.remember_logon(key, logon);
@@ -777,9 +789,22 @@ impl AppModel {
                         eprintln!("  {line}");
                     }
                 }
+                let was_entra = matches!(pending, Some((LogonSetting::EntraSignIn, _)));
                 match end {
                     SessionEnd::Closed | SessionEnd::Cancelled => {
                         self.connections.remove(key);
+                    }
+                    ref other if was_entra => {
+                        // Offer password logon next time, and say why.
+                        self.entra_failed.insert(key.to_owned());
+                        self.connections.insert(
+                            key.to_owned(),
+                            Connection::Failed(fl!("status-entra-failed")),
+                        );
+                        self.last_failure.insert(
+                            key.to_owned(),
+                            fl!("error-entra-failed", detail = describe_session_end(other)),
+                        );
                     }
                     SessionEnd::LogonFailed => {
                         // Stop and explain; the user decides whether to try
@@ -825,6 +850,15 @@ fn signin_profile_dir() -> Option<PathBuf> {
             .join("signin")
             .join("default"),
     )
+}
+
+/// The sign-in session cookies the helpers share (RAM-only; see
+/// `signin/src/session_jar.rs`).
+fn signin_session_dir() -> Option<PathBuf> {
+    let runtime = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
+    runtime
+        .is_absolute()
+        .then(|| runtime.join("cosmic-ext-avd-web"))
 }
 
 /// Opaque key for a resource: hash of account, tenant and resource ID.

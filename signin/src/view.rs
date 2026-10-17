@@ -9,19 +9,20 @@
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-use gtk::glib;
+use gtk::{gio, glib};
 use gtk::prelude::*;
 use webkit6::prelude::*;
 use webkit6::{
-    CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkSession, PolicyDecision,
+    CookieManager, CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkSession, PolicyDecision,
     PolicyDecisionType, ResponsePolicyDecision, Settings, WebView,
 };
 
 use crate::protocol::{self, BROKER_SCHEME, Navigation, RedirectTarget, Reply};
+use crate::session_jar::{self, StoredCookie};
 
 /// In silent mode: show the window if the sign-in hasn't finished this long
 /// after a page finished loading (the user has to act).
@@ -31,6 +32,9 @@ type OnResult = Box<dyn FnOnce(Reply)>;
 
 struct Inner {
     webview: WebView,
+    cookies: Option<CookieManager>,
+    /// Session cookies shared with other helper processes.
+    jar: Option<PathBuf>,
     window: gtk::Window,
     target: RefCell<RedirectTarget>,
     on_result: RefCell<Option<OnResult>>,
@@ -62,7 +66,8 @@ impl SignInView {
         let data_dir = profile.join("data");
         let cache_dir = profile.join("cache");
         let session = NetworkSession::new(data_dir.to_str(), cache_dir.to_str());
-        if let Some(cookies) = session.cookie_manager() {
+        let cookies = session.cookie_manager();
+        if let Some(cookies) = &cookies {
             let path = data_dir.join("cookies.sqlite");
             cookies
                 .set_persistent_storage(&path.to_string_lossy(), CookiePersistentStorage::Sqlite);
@@ -84,8 +89,11 @@ impl SignInView {
             .settings(&settings)
             .build();
         let window = build_window(&webview, title);
+        let jar = cookies.as_ref().and_then(|_| session_jar::jar_dir(profile));
         let view = Self(Rc::new(Inner {
             webview,
+            cookies,
+            jar,
             window,
             target: RefCell::new(RedirectTarget::NativeClient),
             on_result: RefCell::new(None),
@@ -219,8 +227,29 @@ impl SignInView {
         if !silent_first {
             inner.window.present();
         }
-        inner.webview.load_uri(url);
+        self.restore_then_load(url.to_owned());
         true
+    }
+
+    /// Loads the shared session cookies into this web view, then `url`.
+    fn restore_then_load(&self, url: String) {
+        let inner = &self.0;
+        let stored = inner.jar.as_deref().map(session_jar::load).unwrap_or_default();
+        let Some(manager) = inner.cookies.clone().filter(|_| !stored.is_empty()) else {
+            inner.webview.load_uri(&url);
+            return;
+        };
+        let pending = Rc::new(Cell::new(stored.len()));
+        for cookie in &stored {
+            let (view, pending, url) = (self.clone(), pending.clone(), url.clone());
+            manager.add_cookie(&cookie.to_soup(), None::<&gio::Cancellable>, move |_| {
+                pending.set(pending.get() - 1);
+                // Only if this sign-in is still running (not timed out).
+                if pending.get() == 0 && view.0.on_result.borrow().is_some() {
+                    view.0.webview.load_uri(&url);
+                }
+            });
+        }
     }
 
     /// Ends the running sign-in (if any) with `reply`.
@@ -237,7 +266,21 @@ impl SignInView {
         }
         inner.webview.stop_loading();
         inner.window.set_visible(false);
-        callback(reply);
+        // Save the session cookies before replying: the process may exit
+        // right after the reply.
+        match (inner.cookies.clone(), inner.jar.clone()) {
+            (Some(manager), Some(jar)) => {
+                manager.all_cookies(None::<&gio::Cancellable>, move |all| {
+                    if let Ok(all) = all {
+                        let session: Vec<StoredCookie> =
+                            all.iter().filter_map(StoredCookie::from_soup).collect();
+                        session_jar::save(&jar, &session);
+                    }
+                    callback(reply);
+                });
+            }
+            _ => callback(reply),
+        }
     }
 
     fn schedule_show(&self) {

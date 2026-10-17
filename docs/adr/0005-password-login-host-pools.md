@@ -1,6 +1,6 @@
 # 0005. Password login on host pools without Entra single sign-on
 
-- Status: Proposed (needs the owner's account test below; revised 2026-10-17 after reading `arm.c`)
+- Status: Accepted, revised 2026-10-17 15:30 (see *Revision: Entra sign-in first*)
 - Date: 2026-10-17
 
 ## Context
@@ -44,3 +44,11 @@ The terminal sign-in in `research/password-login-test.sh` is blocked by Microsof
 
 - The default user name format is based on evidence, not guessed.
 - If no format works, the problem is the host-pool policy or credentials, not the client; record that and compare with the official Windows or macOS client.
+
+## Revision: Entra sign-in first (2026-10-17)
+
+The owner's host pool rejected password logon with `0x52E` for every domain setting, also after a password change, but **connected with Entra sign-in (`/sec:aad`)** although its `.rdp` file has no `enablerdsaadauth`. The official Windows and macOS apps never ask the owner for a Windows password either. So the `.rdp` property is not a reliable signal, and "`/sec:aad` only with `enablerdsaadauth:i:1`" above is replaced:
+
+- **Every desktop tries Entra sign-in first**, unless the user picked a password setting for it. Entra sign-in sends no password, so trying it can't count toward an account lockout; the retry rule above (no automatic retries with credentials) still holds.
+- If Entra sign-in fails, the app does not retry by itself. The desktop row says it didn't work, and the next Connect opens the password dialog with the reason and the other logon settings.
+- The setting that connects is remembered per desktop, as before. The dropdown now labels Entra sign-in as recommended and the AzureAD-domain password logon as "Password (standard)".
