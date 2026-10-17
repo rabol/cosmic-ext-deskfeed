@@ -728,6 +728,8 @@ impl AppModel {
             helper,
             profile,
         };
+        // No secrets here: the setting and, for a custom domain, its name.
+        eprintln!("Starting FreeRDP with logon setting {logon:?}");
         let (tx, rx) = mpsc::unbounded();
         let started = launcher::launch(&spec, move |e| {
             let _ = tx.unbounded_send(e);
