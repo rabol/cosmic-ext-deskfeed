@@ -133,6 +133,7 @@ impl Attempt {
         })
     }
 
+    #[allow(dead_code)]
     pub fn config(&self) -> &ClientConfig {
         &self.config
     }
@@ -171,6 +172,7 @@ impl Attempt {
         same_endpoint(url, &self.config.redirect_uri)
     }
 
+    #[allow(dead_code)] // Used when the app cancels a pending attempt.
     pub fn cancel(&mut self) {
         if self.status == State::Pending {
             self.status = State::Cancelled;

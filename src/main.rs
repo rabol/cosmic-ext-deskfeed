@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: MIT
 
 mod app;
-// Not wired into the UI yet (ADR 0006 build order).
-#[allow(dead_code)]
 mod auth;
 mod config;
 mod i18n;
 // Not wired into the UI yet; the password dialog will use it (ADR 0005).
 #[allow(dead_code)]
 mod sessions;
-// Not wired into the UI yet (ADR 0006 build order).
-#[allow(dead_code)]
 mod service;
 
 fn main() -> cosmic::iced::Result {

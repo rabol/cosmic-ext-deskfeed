@@ -16,8 +16,10 @@ use crate::service::endpoint::Role;
 use crate::service::http::{BearerToken, Http, HttpError};
 
 /// Renew this long before the access token expires.
+#[allow(dead_code)] // Token renewal is wired up next.
 const EXPIRY_MARGIN: Duration = Duration::from_mins(5);
 
+#[allow(dead_code)] // `expires_at` is used by token renewal, next.
 pub struct TokenSet {
     pub access_token: BearerToken,
     pub refresh_token: Option<Secret>,
@@ -35,6 +37,7 @@ impl fmt::Debug for TokenSet {
     }
 }
 
+#[allow(dead_code)] // Token renewal is wired up next.
 impl TokenSet {
     pub fn needs_refresh(&self, now: Instant) -> bool {
         now + EXPIRY_MARGIN >= self.expires_at
@@ -45,6 +48,7 @@ impl TokenSet {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
 
+#[allow(dead_code)] // Token renewal is wired up next.
 impl Secret {
     pub fn new(s: String) -> Self {
         Self(s)
@@ -123,6 +127,7 @@ pub fn exchange_code(
     request(http, config, &form, None)
 }
 
+#[allow(dead_code)] // Token renewal is wired up next.
 /// Refreshes the tokens. Microsoft may rotate the refresh token; the caller
 /// must store the new one (if any) and only then forget the old one.
 pub fn refresh(
@@ -186,7 +191,9 @@ fn classify_error(status: u16, body: &[u8]) -> TokenError {
     // AADSTS codes from Microsoft's public error reference.
     let code_is = |codes: &[u32]| aadsts.is_some_and(|c| codes.contains(&c));
     match err.error.as_str() {
-        _ if code_is(&[53000, 53001, 53002, 53003, 53004, 530_003]) => TokenError::Denied { aadsts },
+        _ if code_is(&[53000, 53001, 53002, 53003, 53004, 530_003]) => {
+            TokenError::Denied { aadsts }
+        }
         _ if code_is(&[65001, 90094, 90095]) => TokenError::ConsentRequired { aadsts },
         "consent_required" => TokenError::ConsentRequired { aadsts },
         "interaction_required" | "login_required" => TokenError::InteractionRequired { aadsts },

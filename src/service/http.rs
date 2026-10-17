@@ -48,6 +48,7 @@ impl fmt::Debug for BearerToken {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)] // Status and type are for callers that need them (icons).
 pub struct Response {
     pub status: u16,
     pub content_type: Option<String>,

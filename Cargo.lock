@@ -957,6 +957,7 @@ name = "cosmic-ext-avd"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "dirs",
  "getrandom 0.3.4",
  "i18n-embed",
  "i18n-embed-fl",

@@ -12,6 +12,7 @@ members = ["signin"]
 [dependencies]
 # Already in the dependency tree through libcosmic (ADR 0003, ADR 0008).
 base64 = "0.22"
+dirs = "6"
 ring = "0.17"
 roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
