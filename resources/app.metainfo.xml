@@ -28,9 +28,7 @@
   <launchable type="desktop-id">io.github.rabol.cosmic-ext-deskfeed.desktop</launchable>
   <provides>
     <id>com.system76.CosmicApplication</id>
-    <binaries>
-      <binary>cosmic-ext-deskfeed</binary>
-    </binaries>
+    <binary>cosmic-ext-deskfeed</binary>
   </provides>
   <requires>
     <display_length compare="ge">360</display_length>

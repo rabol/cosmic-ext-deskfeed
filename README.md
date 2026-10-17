@@ -31,7 +31,7 @@ Native packages only; there is no Flatpak ([ADR 0010](./docs/adr/0010-native-onl
 | WebKitGTK 6 and GTK 4 | 2.52 | The Microsoft sign-in window | `webkitgtk-6.0` |
 | A Secret Service (oo7, GNOME Keyring, …) | — | Staying signed in (optional) | `oo7` or `gnome-keyring` |
 
-To build: Rust with edition 2024 (developed and tested with Rust 1.99) and [`just`](https://github.com/casey/just). Building the sign-in helper needs the GTK 4 and WebKitGTK 6 development files (on Arch Linux they come with the packages above).
+To build: Rust 1.93 or newer (the minimum libcosmic declares; developed and tested with Rust 1.99) and [`just`](https://github.com/casey/just). Building the sign-in helper needs the GTK 4 and WebKitGTK 6 development files (on Arch Linux they come with the packages above).
 
 See [Dependencies](#dependencies) for every library the app is built from.
 
@@ -122,7 +122,7 @@ Kept to a minimum on purpose; each one has a reason ([ADR 0003](./docs/adr/0003-
 
 **Runtime (system):** see [Requirements](#requirements): COSMIC, FreeRDP 3.32.2+ with `WITH_AAD=ON`, WebKitGTK 6 with GTK 4, and optionally a Secret Service.
 
-**Build tools:** Rust (edition 2024) with Cargo, and `just`.
+**Build tools:** Rust 1.93 or newer with Cargo, and `just`.
 
 **Rust crates used directly by the app** (`cosmic-ext-deskfeed`):
 
