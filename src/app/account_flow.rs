@@ -61,6 +61,19 @@ impl AppModel {
                     self.notice = Some(e);
                 }
             }
+            Message::SignOutFilesRemoved(id, result) => {
+                if result.is_err() {
+                    self.notice = Some(fl!("error-sign-out-incomplete"));
+                }
+                // A session still starting removes the files once more
+                // when it has been stopped (`launched`).
+                if !self.launching.values().any(|l| l.account == id) {
+                    self.signing_out.remove(&id);
+                }
+                if self.quit == Quit::Stopping {
+                    return self.continue_quit();
+                }
+            }
             // `update` routes only this handler's messages here.
             other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
         }
@@ -200,7 +213,7 @@ impl AppModel {
     /// its user name preselected.
     pub(super) fn start_account_sign_in(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
         let generation = self.next();
-        let (Some(helper), Some(profile)) = (signin::find_helper(), accounts::profile_dir(id))
+        let (Some(helper), Some(profile)) = (signin::find_helper(), accounts::prepared_profile(id))
         else {
             if let Some(a) = self.account_mut(id) {
                 a.state = AccountState::NeedsSignIn {
@@ -276,6 +289,8 @@ impl AppModel {
             Some(id) => self.account(id).is_some_and(|a| a.generation == generation),
         };
         if !current {
+            // Cancelled meanwhile: a new profile that won't be used.
+            accounts::remove_unused_profile(profile);
             return Task::none();
         }
         let signed_in = match result {
@@ -283,6 +298,7 @@ impl AppModel {
             Err(SignInFailure(error)) => {
                 match origin {
                     None => {
+                        accounts::remove_unused_profile(profile);
                         self.adding = error.map(|e| Adding {
                             generation,
                             cancel: None,
@@ -299,6 +315,10 @@ impl AppModel {
             }
         };
         let id = accounts::account_id(&signed_in.identity);
+        if self.signing_out.contains(&id) {
+            self.refuse_while_signing_out(origin, generation, profile);
+            return Task::none();
+        }
         match decide::after_sign_in(origin, &id) {
             decide::AfterSignIn::AdoptProfile => {
                 self.adding = None;
@@ -354,6 +374,27 @@ impl AppModel {
             Message::Saved(save_id, generation, result)
         });
         Task::batch([save, self.load_resources(&id)])
+    }
+
+    /// A sign-in finished for an account whose sign-out is still deleting
+    /// its files: adopting this profile now would lose it.
+    fn refuse_while_signing_out(&mut self, origin: Option<&str>, generation: u64, profile: &Path) {
+        accounts::remove_unused_profile(profile);
+        let error = Some(fl!("error-still-signing-out"));
+        match origin {
+            None => {
+                self.adding = Some(Adding {
+                    generation,
+                    cancel: None,
+                    error,
+                });
+            }
+            Some(other) => {
+                if let Some(a) = self.account_mut(other) {
+                    a.state = AccountState::NeedsSignIn { error };
+                }
+            }
+        }
     }
 
     pub(super) fn load_resources(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
@@ -478,9 +519,15 @@ impl AppModel {
             return Task::none();
         };
         let account = self.accounts.remove(pos);
-        if let AccountState::SigningIn { cancel } = &account.state {
-            cancel.cancel();
-        }
+        // From now on nothing started earlier saves its tokens.
+        accounts::note_sign_out(id);
+        let sign_in = match &account.state {
+            AccountState::SigningIn { cancel } => {
+                cancel.cancel();
+                Some(cancel.clone())
+            }
+            _ => None,
+        };
         // Its desktops by the sessions' owner, not only the current list: a
         // refresh may have removed a desktop that is still connected.
         let mut keys: HashSet<String> = account.resource_keys().into_iter().collect();
@@ -496,9 +543,10 @@ impl AppModel {
                 .filter(|(_, l)| l.account == id)
                 .map(|(k, _)| k.clone()),
         );
+        let mut sessions = Vec::new();
         for key in keys {
             if let Some(r) = self.running.remove(&key) {
-                r.session.disconnect();
+                sessions.push(r.session);
             }
             // Stopped as soon as it has started (`launched`).
             if let Some(l) = self.launching.get_mut(&key) {
@@ -516,18 +564,36 @@ impl AppModel {
         if self.dialog.as_ref().is_some_and(|d| d.account == id) {
             self.dialog = None;
         }
-        if accounts::remove_files(id).is_err() {
-            self.notice = Some(fl!("error-sign-out-incomplete"));
-        }
+        self.signing_out.insert(id.to_owned());
         self.select_first_account();
-        // The keyring may block (for example on an unlock prompt), so not on
-        // the UI thread.
+        // Its cookies go only after everything that could still write them
+        // has ended: the sign-in window and FreeRDP with its sign-in helper
+        // (spec §6). Blocking, so not on the UI thread.
+        let files = {
+            let id = id.to_owned();
+            cosmic::task::future(async move {
+                let owner = id.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    if let Some(cancel) = sign_in {
+                        cancel.cancel_and_wait(launcher::STOP_GRACE);
+                    }
+                    launcher::stop_all(&sessions, launcher::STOP_GRACE);
+                    accounts::remove_files(&owner)
+                })
+                .await
+                .unwrap_or(Err(()));
+                Message::SignOutFilesRemoved(id, result)
+            })
+        };
+        // The keyring may block (for example on an unlock prompt), so on its
+        // own.
         let identity = account.identity;
-        cosmic::task::future(async move {
+        let keyring = cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || accounts::delete(&identity))
                 .await
                 .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
             Message::SignOutFinished(result)
-        })
+        });
+        Task::batch([files, keyring])
     }
 }

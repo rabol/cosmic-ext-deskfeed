@@ -78,6 +78,11 @@ pub struct AppModel {
     running: HashMap<String, Running>,
     /// FreeRDP starting (in the background), per resource key.
     launching: HashMap<String, Launching>,
+    /// Accounts whose sign-out is still ending their processes and deleting
+    /// their files; they can't be signed in again until it's done.
+    signing_out: HashSet<String>,
+    /// Sessions stopped because connecting took too long.
+    timed_out: HashSet<String>,
     quit: Quit,
     /// Logon setting and connection file of sessions not yet connected, to
     /// remember the setting on success or ask again on logon failure.
@@ -174,6 +179,8 @@ impl cosmic::Application for AppModel {
             connections: HashMap::new(),
             running: HashMap::new(),
             launching: HashMap::new(),
+            signing_out: HashSet::new(),
+            timed_out: HashSet::new(),
             quit: Quit::No,
             pending_logon: HashMap::new(),
             dialog: None,
@@ -428,7 +435,8 @@ impl cosmic::Application for AppModel {
             | Message::Discovered(..)
             | Message::SignOut(..)
             | Message::SignOutSelected
-            | Message::SignOutFinished(..) => self.account_message(message),
+            | Message::SignOutFinished(..)
+            | Message::SignOutFilesRemoved(..) => self.account_message(message),
             Message::Connect(..)
             | Message::ConnectionFileReady(..)
             | Message::PasswordInput(..)
@@ -439,6 +447,7 @@ impl cosmic::Application for AppModel {
             | Message::DialogConnect
             | Message::Launched(..)
             | Message::Session(..)
+            | Message::ConnectDeadline(..)
             | Message::Disconnect(..)
             | Message::WorkspaceMoved(..)
             | Message::WindowRefitted(..)

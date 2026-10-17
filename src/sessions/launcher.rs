@@ -572,13 +572,21 @@ fn supervise(
     let stderr = child.stderr.take().expect("piped");
     let child = Arc::new(Mutex::new(child));
     let log = Arc::new(Mutex::new(Log::default()));
+    // Set before `Ended`: readers that are still going report nothing more.
+    let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let readers: Vec<_> = [Box::new(stdout) as Box<dyn Read + Send>, Box::new(stderr)]
         .into_iter()
         .map(|stream| {
             let log = log.clone();
             let events = events.clone();
+            let ended = ended.clone();
             std::thread::spawn(move || {
+                let report = |e| {
+                    if !ended.load(std::sync::atomic::Ordering::SeqCst) {
+                        events(e);
+                    }
+                };
                 for line in BufReader::new(stream).lines().map_while(Result::ok) {
                     // Our sign-in helper's status lines (FreeRDP passes its
                     // stderr through); they hold no codes or tokens.
@@ -586,10 +594,10 @@ fn supervise(
                         crate::app_log!("{line}");
                     }
                     if log.lock().expect("not poisoned").push(&line) {
-                        events(SessionEvent::Connected);
+                        report(SessionEvent::Connected);
                     }
                     if line.contains(DISPLAY_READY_MARKER) {
-                        events(SessionEvent::DisplayReady);
+                        report(SessionEvent::DisplayReady);
                     }
                 }
             })
@@ -616,6 +624,7 @@ fn supervise(
         drop(dir); // removes the connection file
         let log = std::mem::take(&mut *log.lock().expect("not poisoned"));
         let end = classify_exit(status.code(), log.logon_failure);
+        ended.store(true, std::sync::atomic::Ordering::SeqCst);
         events(SessionEvent::Ended {
             end,
             log: log.lines,

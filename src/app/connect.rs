@@ -54,32 +54,20 @@ impl AppModel {
                 }
             }
             Message::DialogConnect => return self.dialog_connect(),
-            Message::Launched(id, epoch, key, result) => {
-                return self.launched(&id, epoch, key, result);
+            Message::Launched(id, epoch, key, attempt, result) => {
+                return self.launched(&id, epoch, key, attempt, result);
             }
-            Message::QuitRequested => {
-                if self.quit == Quit::No {
-                    if self.running.is_empty() && self.launching.is_empty() {
-                        self.quit = Quit::Stopping;
-                        return self.continue_quit();
-                    }
-                    self.quit = Quit::Asking;
-                }
-            }
-            Message::QuitCancel => {
-                if self.quit == Quit::Asking {
-                    self.quit = Quit::No;
-                }
-            }
-            Message::QuitConfirm => {
-                if self.quit == Quit::Asking {
-                    self.quit = Quit::Stopping;
-                    return self.continue_quit();
-                }
-            }
-            Message::ReadyToQuit => return cosmic::iced::exit(),
-            Message::Session(id, epoch, key, event) => {
-                if self.account(&id).is_some_and(|a| a.epoch == epoch) {
+            Message::ConnectDeadline(key, attempt) => self.connect_deadline(key, attempt),
+            Message::QuitRequested
+            | Message::QuitConfirm
+            | Message::QuitCancel
+            | Message::ReadyToQuit => return self.quit_message(&message),
+            Message::Session(id, epoch, key, attempt, event) => {
+                // Only the current attempt's events: a reader may still
+                // report after its session ended.
+                if self.account(&id).is_some_and(|a| a.epoch == epoch)
+                    && self.running.get(&key).is_some_and(|r| r.attempt == attempt)
+                {
                     if event == SessionEvent::DisplayReady {
                         return self.refit(&key);
                     }
@@ -264,7 +252,8 @@ impl AppModel {
         else {
             return Task::none();
         };
-        let (Some(helper), Some(profile)) = (signin::find_helper(), accounts::profile_dir(account))
+        let (Some(helper), Some(profile)) =
+            (signin::find_helper(), accounts::prepared_profile(account))
         else {
             self.connections.insert(
                 key.to_owned(),
@@ -297,9 +286,17 @@ impl AppModel {
         self.pending_logon
             .insert(key.to_owned(), (logon, connection.clone()));
         let title = launcher::safe_title(&window_title);
+        let attempt = self.next();
+        // FreeRDP's own limits: `/timeout` for the session host, and 180 s
+        // for each sign-in page (`client/common/aad_helper.c`), of which a
+        // connection needs at most two; plus a minute for the network.
+        let deadline =
+            std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 2 * 180 + 60);
         self.launching.insert(
             key.to_owned(),
             Launching {
+                attempt,
+                deadline,
                 account: account.to_owned(),
                 stop: false,
                 refit: (!settings.fullscreen).then(|| title.clone()),
@@ -323,26 +320,37 @@ impl AppModel {
                 })
                 .await
                 .unwrap_or_else(|_| Err(fl!("error-generic")));
-                Message::Launched(account, epoch, key, result)
+                Message::Launched(account, epoch, key, attempt, result)
             })
         };
         let events = {
             let (account, key) = (account.to_owned(), key.to_owned());
             cosmic::task::stream(
-                rx.map(move |e| Message::Session(account.clone(), epoch, key.clone(), e)),
+                rx.map(move |e| Message::Session(account.clone(), epoch, key.clone(), attempt, e)),
             )
         };
         let session = started.chain(events);
         if !settings.new_workspace {
             return session;
         }
+        Task::batch([session, self.mover(key, title, &settings)])
+    }
+
+    /// "Open on a new workspace": waits for the session's window and moves
+    /// it.
+    fn mover(
+        &mut self,
+        key: &str,
+        title: String,
+        settings: &crate::settings::Effective,
+    ) -> Task<cosmic::Action<Message>> {
         let stop = Arc::new(AtomicBool::new(false));
         self.movers.insert(key.to_owned(), stop.clone());
         // The window appears after authentication: wait as long as the
         // connection may take, plus the sign-in page.
         let wait = std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 180);
         let key = key.to_owned();
-        let mover = cosmic::task::future(async move {
+        cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
                 crate::workspace::move_to_new_workspace(
                     <AppModel as cosmic::Application>::APP_ID,
@@ -358,8 +366,39 @@ impl AppModel {
                 Err(_) => Err("task".to_owned()),
             };
             Message::WorkspaceMoved(key, result)
-        });
-        Task::batch([session, mover])
+        })
+    }
+
+    /// Quitting: asked, confirmed, cancelled, done.
+    fn quit_message(&mut self, message: &Message) -> Task<cosmic::Action<Message>> {
+        match (message, self.quit) {
+            (Message::QuitRequested, Quit::No) => {
+                if self.running.is_empty() && self.launching.is_empty() {
+                    self.quit = Quit::Stopping;
+                    return self.continue_quit();
+                }
+                self.quit = Quit::Asking;
+            }
+            (Message::QuitCancel, Quit::Asking) => self.quit = Quit::No,
+            (Message::QuitConfirm, Quit::Asking) => {
+                self.quit = Quit::Stopping;
+                return self.continue_quit();
+            }
+            (Message::ReadyToQuit, _) => return cosmic::iced::exit(),
+            _ => {}
+        }
+        Task::none()
+    }
+
+    /// The time to connect is up: end the attempt if it hasn't connected.
+    fn connect_deadline(&mut self, key: String, attempt: u64) {
+        if let Some(r) = self.running.get(&key).filter(|r| r.attempt == attempt)
+            && !matches!(self.connections.get(&key), Some(Connection::Connected))
+        {
+            crate::app_log!("connecting took too long; ending FreeRDP");
+            r.session.disconnect();
+            self.timed_out.insert(key);
+        }
     }
 
     /// FreeRDP has started (or couldn't). A session nobody wants any more
@@ -369,33 +408,65 @@ impl AppModel {
         account: &str,
         epoch: u64,
         key: String,
+        attempt: u64,
         result: Result<launcher::Session, String>,
     ) -> Task<cosmic::Action<Message>> {
+        if self
+            .launching
+            .get(&key)
+            .is_none_or(|l| l.attempt != attempt)
+        {
+            // Nobody expects it any more.
+            if let Ok(session) = result {
+                session.disconnect();
+            }
+            return Task::none();
+        }
         let Launching {
+            deadline,
             account: owner,
             stop,
             refit,
-        } = self.launching.remove(&key).unwrap_or_else(|| Launching {
-            account: account.to_owned(),
-            stop: true,
-            refit: None,
-        });
+            ..
+        } = self.launching.remove(&key).expect("checked above");
         let current = self.account(account).is_some_and(|a| a.epoch == epoch);
         match result {
+            Ok(session) if self.quit != Quit::Stopping && self.signing_out.contains(&owner) => {
+                // Its account is being signed out: stop it, then delete the
+                // files once more in case its sign-in helper wrote any.
+                return cosmic::task::future(async move {
+                    let id = owner.clone();
+                    let result = tokio::task::spawn_blocking(move || {
+                        launcher::stop_all(&[session], launcher::STOP_GRACE);
+                        accounts::remove_files(&owner)
+                    })
+                    .await
+                    .unwrap_or(Err(()));
+                    Message::SignOutFilesRemoved(id, result)
+                });
+            }
             Ok(session) => {
+                let wanted = self.quit == Quit::No && !stop && current;
                 if self.quit == Quit::Stopping {
                     // `continue_quit` ends it with the others.
-                } else if stop || !current {
+                } else if !wanted {
                     session.disconnect();
                 }
                 self.running.insert(
-                    key,
+                    key.clone(),
                     Running {
+                        attempt,
                         account: owner,
                         session,
                         refit,
                     },
                 );
+                if wanted {
+                    return cosmic::task::future(async move {
+                        tokio::time::sleep(deadline).await;
+                        Message::ConnectDeadline(key, attempt)
+                    });
+                }
             }
             Err(text) => {
                 if let Some(stop) = self.movers.remove(&key) {
@@ -438,8 +509,9 @@ impl AppModel {
     /// Quitting: once nothing is starting any more, ends every session and
     /// sign-in, waits for FreeRDP to be gone, then exits.
     pub(super) fn continue_quit(&mut self) -> Task<cosmic::Action<Message>> {
-        if !self.launching.is_empty() {
-            return Task::none(); // `launched` calls this again
+        if !self.launching.is_empty() || !self.signing_out.is_empty() {
+            // `launched` or the end of the sign-out calls this again.
+            return Task::none();
         }
         for stop in self.movers.values() {
             stop.store(true, Ordering::SeqCst);
@@ -509,6 +581,14 @@ impl AppModel {
                     for line in &log {
                         crate::app_log!("  {line}");
                     }
+                }
+                if self.timed_out.remove(key) {
+                    // Ended by the app: not about how the user logged on.
+                    self.connections.insert(
+                        key.to_owned(),
+                        Connection::Failed(fl!("error-connect-too-long")),
+                    );
+                    return;
                 }
                 let was_connected =
                     matches!(self.connections.get(key), Some(Connection::Connected));

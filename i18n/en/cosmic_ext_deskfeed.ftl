@@ -59,6 +59,7 @@ error-forbidden = The desktop service refused access to this account.
 error-feed = Couldn't load your desktops: { $detail }
 error-generic = Something went wrong. Try again.
 error-sign-out-incomplete = Sign-out couldn't remove all sign-in data. Try signing out again.
+error-still-signing-out = This account is still being signed out. Try again in a moment.
 
 # Connecting
 disconnect = Disconnect
@@ -92,6 +93,7 @@ error-password-expired = Your Windows password has expired or must be changed. C
 error-account-disabled = Your account is disabled. Contact your IT department.
 error-auth-failed = Authentication failed. Try signing out and in again.
 error-freerdp-crashed = The remote desktop client stopped unexpectedly.
+error-connect-too-long = Connecting took too long, so it was stopped. Try again.
 error-session-failed = The connection ended with an error (code { $code }).
 
 # Dependencies

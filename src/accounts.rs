@@ -58,7 +58,16 @@ pub fn profile_dir(id: &str) -> Option<PathBuf> {
     Some(profiles_root()?.join(id))
 }
 
-/// A fresh profile for adding an account whose ID isn't known yet.
+/// The account's profile, with it and its RAM cookie folder created
+/// (private). Only the app creates these; the sign-in helper uses them
+/// and never recreates them after a sign-out deleted them.
+pub fn prepared_profile(id: &str) -> Option<PathBuf> {
+    let profile = profile_dir(id)?;
+    prepare(&profile).then_some(profile)
+}
+
+/// A fresh, prepared profile for adding an account whose ID isn't known
+/// yet.
 pub fn new_profile_dir() -> Option<PathBuf> {
     let mut bytes = [0u8; 9];
     getrandom::fill(&mut bytes).ok()?;
@@ -66,7 +75,40 @@ pub fn new_profile_dir() -> Option<PathBuf> {
         "new-{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
     );
-    Some(profiles_root()?.join(name))
+    let profile = profiles_root()?.join(name);
+    prepare(&profile).then_some(profile)
+}
+
+/// Creates `profile` and its RAM cookie folder, private to the user.
+fn prepare(profile: &Path) -> bool {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let private = |dir: &Path| {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .and_then(|()| fs::set_permissions(dir, fs::Permissions::from_mode(0o700)))
+            .is_ok()
+    };
+    let jar = profile
+        .file_name()
+        .and_then(|name| Some(jars_root()?.join(name)));
+    private(profile) && jar.is_none_or(|j| private(&j))
+}
+
+/// Removes the profile (and RAM cookie folder) of a sign-in that didn't
+/// add an account. Only after its sign-in window has closed.
+pub fn remove_unused_profile(profile: &Path) {
+    let Some(name) = profile.file_name() else {
+        return;
+    };
+    if !name.to_string_lossy().starts_with("new-") {
+        return;
+    }
+    let _ = fs::remove_dir_all(profile);
+    if let Some(jars) = jars_root() {
+        let _ = fs::remove_dir_all(jars.join(name));
+    }
 }
 
 /// Files the profile (and its RAM cookie folder) used for a sign-in under

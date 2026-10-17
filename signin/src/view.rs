@@ -8,7 +8,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::fs;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
@@ -61,11 +61,10 @@ struct Inner {
 pub struct SignInView(Rc<Inner>);
 
 /// Creates `dir` (and parents) and makes sure only we can use it.
+/// Uses a folder the app prepared, keeping it private (0700). Never creates
+/// one: after a sign-out the app deletes the account's folders, and a
+/// helper that is still finishing must not bring them back (spec §6).
 pub fn private_dir(dir: &Path) -> std::io::Result<()> {
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)?;
     if !fs::symlink_metadata(dir)?.is_dir() {
         return Err(std::io::Error::other("profile path is not a directory"));
     }

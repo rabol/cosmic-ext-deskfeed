@@ -176,6 +176,7 @@ mod tests {
     fn round_trip_with_private_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tmp().join("default");
+        fs::create_dir_all(&dir).unwrap();
         save(&dir, &[cookie("ESTSAUTH"), cookie("buid")]);
         assert_eq!(load(&dir), vec![cookie("ESTSAUTH"), cookie("buid")]);
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
@@ -185,10 +186,19 @@ mod tests {
     }
 
     #[test]
+    fn a_removed_jar_is_not_recreated() {
+        // Signed out while a helper was finishing: its save goes nowhere.
+        let dir = tmp().join("gone");
+        save(&dir, &[cookie("ESTSAUTH")]);
+        assert!(!dir.exists());
+        assert!(!dir.parent().unwrap().exists());
+    }
+
+    #[test]
     fn damaged_or_missing_jar_is_empty() {
         let dir = tmp();
         assert_eq!(load(&dir), Vec::new());
-        crate::view::private_dir(&dir).unwrap();
+        fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(FILE), "not json").unwrap();
         assert_eq!(load(&dir), Vec::new());
         fs::remove_dir_all(dir).unwrap();

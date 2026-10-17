@@ -10,8 +10,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use url::Url;
@@ -23,6 +23,11 @@ use crate::service::http::Http;
 
 const HELPER_NAME: &str = "cosmic-ext-deskfeed-signin";
 const MAX_REPLY_LEN: u64 = 16 * 1024;
+/// How long the sign-in window stays open; sent to the helper.
+const HELPER_TIMEOUT: Duration = Duration::from_mins(5);
+/// The helper's own timer should end it by then; if it hangs, the app
+/// ends it (spec §8: every attempt ends).
+const HELPER_DEADLINE: Duration = Duration::from_secs(HELPER_TIMEOUT.as_secs() + 30);
 
 pub struct SignedIn {
     pub identity: Identity,
@@ -57,24 +62,68 @@ pub enum SignInError {
 
 /// Cancels a running sign-in.
 #[derive(Clone, Default)]
-pub struct Cancel(Arc<Mutex<CancelState>>);
+pub struct Cancel(Arc<(Mutex<CancelState>, Condvar)>);
 
 #[derive(Default)]
 struct CancelState {
     cancelled: bool,
     stdin: Option<ChildStdin>,
+    /// The helper's process ID while it runs (not yet reaped).
+    helper: Option<u32>,
 }
 
 impl Cancel {
+    fn state(&self) -> std::sync::MutexGuard<'_, CancelState> {
+        self.0.0.lock().expect("not poisoned")
+    }
+
     pub fn cancel(&self) {
-        let mut state = self.0.lock().expect("not poisoned");
+        let mut state = self.state();
         state.cancelled = true;
         // Closing stdin makes the helper close its window and exit.
         state.stdin.take();
     }
 
+    /// Cancels, and waits up to `grace` for the helper to exit; then ends
+    /// it. Afterwards it writes no more cookies. Blocking.
+    pub fn cancel_and_wait(&self, grace: Duration) {
+        self.cancel();
+        if !self.wait_finished(grace) {
+            self.kill();
+            self.wait_finished(Duration::from_secs(2));
+        }
+    }
+
     fn is_cancelled(&self) -> bool {
-        self.0.lock().expect("not poisoned").cancelled
+        self.state().cancelled
+    }
+
+    /// `true` once no helper runs (or none was started).
+    fn wait_finished(&self, timeout: Duration) -> bool {
+        let guard = self.state();
+        let (guard, _) = self
+            .0
+            .1
+            .wait_timeout_while(guard, timeout, |s| s.helper.is_some())
+            .expect("not poisoned");
+        guard.helper.is_none()
+    }
+
+    fn kill(&self) {
+        if let Some(pid) = self.state().helper.and_then(|p| i32::try_from(p).ok()) {
+            // SAFETY: plain syscall. The ID is our unreaped child's: it is
+            // cleared (under this lock) only after `wait` reaped it.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+
+    fn started(&self, pid: u32) {
+        self.state().helper = Some(pid);
+    }
+
+    fn finished(&self) {
+        self.state().helper = None;
+        self.0.1.notify_all();
     }
 }
 
@@ -170,17 +219,30 @@ fn run_helper(
     crate::sessions::launcher::pass_environment(&mut cmd, &["GTK_THEME"]);
     let mut child = crate::sessions::launcher::spawn_retrying(&mut cmd)
         .map_err(|e| SignInError::HelperFailed(e.kind().to_string()))?;
+    cancel.started(child.id());
     let mut stdin = child.stdin.take().expect("piped");
     let stdout = child.stdout.take().expect("piped");
+    // Ends a helper that outlives its own timer (for example a hung web
+    // view); the reply read below then ends too.
+    {
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            if !cancel.wait_finished(HELPER_DEADLINE) {
+                crate::app_log!("sign-in window: no answer in time, ending it");
+                cancel.cancel_and_wait(Duration::ZERO);
+            }
+        });
+    }
 
     let request = serde_json::json!({
         "url": url.as_str(),
         "title": crate::fl!("sign-in-window-title"),
+        "timeout_ms": u64::try_from(HELPER_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
     });
     let wrote = writeln!(stdin, "{request}").and_then(|()| stdin.flush());
     {
         // Hand stdin to the canceller; if already cancelled, drop it now.
-        let mut state = cancel.0.lock().expect("not poisoned");
+        let mut state = cancel.state();
         if !state.cancelled {
             state.stdin = Some(stdin);
         }
@@ -188,9 +250,16 @@ fn run_helper(
 
     let mut line = String::new();
     let read = BufReader::new(std::io::Read::take(stdout, MAX_REPLY_LEN)).read_line(&mut line);
-    cancel.0.lock().expect("not poisoned").stdin.take();
-    // The helper exits after replying; reap it so it never lingers.
-    let _ = child.wait();
+    cancel.state().stdin.take();
+    // The helper exits after replying. Wait for that without reaping, then
+    // reap it under the lock, so `kill` never targets a reaped (possibly
+    // reused) process ID.
+    wait_without_reaping(child.id());
+    {
+        let _state = cancel.state();
+        let _ = child.wait();
+    }
+    cancel.finished();
 
     if cancel.is_cancelled() {
         return Err(SignInError::Cancelled);
@@ -199,6 +268,25 @@ fn run_helper(
         return Err(SignInError::HelperFailed("no reply".into()));
     }
     serde_json::from_str(line.trim_end()).map_err(|_| SignInError::HelperFailed("bad reply".into()))
+}
+
+/// Blocks until the child `pid` has exited, leaving it unreaped.
+fn wait_without_reaping(pid: libc::id_t) {
+    loop {
+        // SAFETY: plain syscall with a zeroed, writable siginfo.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid,
+                &raw mut info,
+                libc::WEXITED | libc::WNOWAIT,
+            )
+        };
+        if rc == 0 || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return;
+        }
+    }
 }
 
 /// Rebuilds the redirect URL from the helper's reply so the attempt can
@@ -373,6 +461,41 @@ mod tests {
             &cancel,
         );
         assert_eq!(r.unwrap_err(), SignInError::Cancelled);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_helper_that_ignores_cancel_is_ended() {
+        // Sign-out waits for the sign-in window before deleting cookies; a
+        // window that doesn't close is ended after the grace period.
+        let dir = tmp();
+        let helper = fake_helper(&dir, "read line; exec sleep 300");
+        let cancel = Cancel::default();
+        let c2 = cancel.clone();
+        let (dir2, helper2) = (dir.clone(), helper.clone());
+        let signing_in = std::thread::spawn(move || {
+            let http = Http::new(EndpointPolicy::local_test(1));
+            sign_in(
+                &http,
+                &ClientConfig::public_remote_desktop(),
+                &helper2,
+                &dir2,
+                None,
+                &c2,
+            )
+        });
+        // Until the helper runs.
+        while cancel.state().helper.is_none() {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let started = std::time::Instant::now();
+        cancel.cancel_and_wait(Duration::from_millis(300));
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert!(cancel.wait_finished(Duration::ZERO));
+        assert_eq!(
+            signing_in.join().unwrap().unwrap_err(),
+            SignInError::Cancelled
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

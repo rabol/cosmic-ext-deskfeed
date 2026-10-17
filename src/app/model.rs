@@ -103,6 +103,8 @@ pub struct ResourceView {
 /// A FreeRDP session and the account it belongs to (sign-out ends it even
 /// if its desktop has left the list).
 pub(super) struct Running {
+    /// Its connection attempt; events of other attempts are ignored.
+    pub(super) attempt: u64,
     pub(super) account: String,
     pub(super) session: launcher::Session,
     /// Window title for [`crate::workspace::refit_window`]; `None` in full
@@ -112,6 +114,9 @@ pub(super) struct Running {
 
 /// A FreeRDP start in progress.
 pub(super) struct Launching {
+    pub(super) attempt: u64,
+    /// How long it may take to connect (spec §8: every attempt ends).
+    pub(super) deadline: std::time::Duration,
     pub(super) account: String,
     /// Stop it as soon as it has started (disconnected or signed out
     /// meanwhile).
@@ -198,7 +203,11 @@ pub enum Message {
     ),
     SignOut(String),
     SignOutSelected,
+    /// The keyring item of a signed-out account is gone (or not).
     SignOutFinished(Result<(), String>),
+    /// Account ID: its sign-in window and sessions have ended and its
+    /// files are deleted (`Err`: some couldn't be).
+    SignOutFilesRemoved(String, Result<(), ()>),
     Connect(String),
     /// Account ID, epoch, resource key, and the connection file with the
     /// account (tokens renewed first if needed).
@@ -214,10 +223,13 @@ pub enum Message {
     CustomDomainInput(String),
     DialogConnect,
     DialogCancel,
-    /// Account ID, epoch, resource key; FreeRDP started, or why not.
-    Launched(String, u64, String, Result<launcher::Session, String>),
-    /// Account ID, epoch, resource key, event.
-    Session(String, u64, String, SessionEvent),
+    /// Account ID, epoch, resource key, attempt; FreeRDP started, or why
+    /// not.
+    Launched(String, u64, String, u64, Result<launcher::Session, String>),
+    /// Account ID, epoch, resource key, attempt, event.
+    Session(String, u64, String, u64, SessionEvent),
+    /// Resource key, attempt: the time to connect is up.
+    ConnectDeadline(String, u64),
     Disconnect(String),
     CheckDependencies,
     DependenciesChecked(Vec<Check>),

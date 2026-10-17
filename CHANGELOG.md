@@ -27,6 +27,9 @@ First version (0.1.0), not yet released.
 - Signing out ends all of the account's sessions, including desktops that a refresh removed from the list.
 - FreeRDP is started in the background, so the window never waits for it.
 - Remote desktops in a window take the window's size under COSMIC auto-tiling: once connected, the app maximizes and restores the window once, which makes FreeRDP send its size.
+- Signing out waits for the account's sign-in window and FreeRDP (with its sign-in helper) to end before deleting its cookies, so nothing can write them back; the helper never recreates deleted folders. Signing the same account in again waits until that is done.
+- Every connection attempt ends: the app stops a sign-in window that outlives its time, and a connection that hasn't connected within the time to wait plus the sign-in pages. Events from an earlier attempt are ignored.
+- Sign-in folders of cancelled "Add account" sign-ins are removed.
 - Installation with `just install`: desktop entry, icons, AppStream metadata.
 
 ### Known limitations
