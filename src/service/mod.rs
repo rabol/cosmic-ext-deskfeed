@@ -4,4 +4,5 @@
 //! files (spec §7, §10).
 
 pub mod endpoint;
+pub mod feed;
 pub mod http;

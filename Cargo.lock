@@ -929,6 +929,7 @@ dependencies = [
  "i18n-embed-fl",
  "libcosmic",
  "open",
+ "roxmltree",
  "rust-embed",
  "rustls",
  "sha2",
