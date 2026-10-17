@@ -85,6 +85,10 @@ uninstall:
     rm -f {{icons-dst}}/scalable/apps/{{appid}}.svg
     rmdir --ignore-fail-on-non-empty {{signin-dir}} 2>/dev/null || true
 
+# Regenerates THIRD-PARTY-LICENSES.md from Cargo.lock
+licenses:
+    python3 -I scripts/third-party-licenses.py
+
 # Vendor dependencies locally
 vendor:
     mkdir -p .cargo
