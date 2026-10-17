@@ -36,6 +36,7 @@ use crate::settings::{self, ConnectionSettings, Toggle};
 
 mod account_flow;
 mod connect;
+mod decide;
 mod errors;
 mod model;
 mod settings_ui;

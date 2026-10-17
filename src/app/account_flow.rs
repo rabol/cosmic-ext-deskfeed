@@ -239,19 +239,17 @@ impl AppModel {
             }
         };
         let id = accounts::account_id(&signed_in.identity);
-        match &origin {
-            None => {
+        match decide::after_sign_in(origin.as_deref(), &id) {
+            decide::AfterSignIn::AdoptProfile => {
                 self.adding = None;
                 accounts::adopt_profile(&profile, &id);
             }
-            // Signed in to a different account in that account's window:
-            // the original stays signed out, the new one is added.
-            Some(old) if *old != id => {
-                if let Some(a) = self.account_mut(old) {
+            decide::AfterSignIn::ResetOther(old) => {
+                if let Some(a) = self.account_mut(&old) {
                     a.state = AccountState::NeedsSignIn { error: None };
                 }
             }
-            Some(_) => {}
+            decide::AfterSignIn::Nothing => {}
         }
         let generation = self.next();
         let epoch = self.next();

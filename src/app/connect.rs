@@ -72,18 +72,15 @@ impl AppModel {
                 return Task::none();
             }
         };
-        let remembered = self.config.logon_settings.get(&key).cloned();
-        // Entra sign-in first: it needs no password, so trying it can't
-        // count toward an account lockout. Password logon only when the
-        // user chose it, or after Entra sign-in failed for this desktop.
-        let entra_first =
-            connection.entra_sso() || matches!(remembered, None | Some(LogonSetting::EntraSignIn));
-        if entra_first && !self.entra_failed.contains(&key) {
-            return self.launch(account, &key, &connection, LogonSetting::EntraSignIn, None);
-        }
-        let remembered = match remembered {
-            Some(LogonSetting::EntraSignIn) | None => LogonSetting::Automatic,
-            Some(other) => other,
+        let remembered = match decide::first_step(
+            connection.entra_sso(),
+            self.config.logon_settings.get(&key),
+            self.entra_failed.contains(&key),
+        ) {
+            decide::FirstStep::Entra => {
+                return self.launch(account, &key, &connection, LogonSetting::EntraSignIn, None);
+            }
+            decide::FirstStep::AskPassword(setting) => setting,
         };
         let title = self
             .account(account)
@@ -265,22 +262,17 @@ impl AppModel {
                         crate::app_log!("  {line}");
                     }
                 }
-                // Only a session that never got connected says anything
-                // about the logon method; later errors are ordinary ones.
-                let was_connected =
-                    matches!(self.connections.get(key), Some(Connection::Connected));
-                // Once Entra sign-in has worked for a desktop, a failure is
-                // more likely temporary; keep using it.
-                let worked_before =
-                    self.config.logon_settings.get(key) == Some(&LogonSetting::EntraSignIn);
-                let was_entra = !was_connected
-                    && !worked_before
-                    && matches!(pending, Some((LogonSetting::EntraSignIn, _)));
-                match end {
-                    SessionEnd::Closed | SessionEnd::Cancelled => {
+                let outcome = decide::end_outcome(
+                    &end,
+                    matches!(self.connections.get(key), Some(Connection::Connected)),
+                    self.config.logon_settings.get(key) == Some(&LogonSetting::EntraSignIn),
+                    pending.as_ref().map(|(logon, _)| logon),
+                );
+                match outcome {
+                    decide::EndOutcome::Clear => {
                         self.connections.remove(key);
                     }
-                    ref other if was_entra => {
+                    decide::EndOutcome::OfferPassword => {
                         // Offer password logon next time, and say why.
                         self.entra_failed.insert(key.to_owned());
                         self.connections.insert(
@@ -289,10 +281,10 @@ impl AppModel {
                         );
                         self.last_failure.insert(
                             key.to_owned(),
-                            fl!("error-entra-failed", detail = describe_session_end(other)),
+                            fl!("error-entra-failed", detail = describe_session_end(&end)),
                         );
                     }
-                    SessionEnd::LogonFailed => {
+                    decide::EndOutcome::WrongPassword => {
                         // Stop and explain; the user decides whether to try
                         // again (ADR 0005). No automatic retry or re-prompt.
                         let tried = pending
@@ -305,10 +297,10 @@ impl AppModel {
                         );
                         self.last_failure.insert(key.to_owned(), message);
                     }
-                    other => {
+                    decide::EndOutcome::Failed => {
                         self.connections.insert(
                             key.to_owned(),
-                            Connection::Failed(describe_session_end(&other)),
+                            Connection::Failed(describe_session_end(&end)),
                         );
                     }
                 }
