@@ -9,9 +9,8 @@
 //! session host's proof-of-possession key). `shutdown`/`exit` end the
 //! process, as does FreeRDP closing the pipe.
 
-use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufReader, Write};
 use std::os::fd::{FromRawFd, RawFd};
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
@@ -25,6 +24,8 @@ use crate::view::{self, Show, SignInView};
 
 const PROFILE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_PROFILE";
 const MAX_LINE: usize = 64 * 1024;
+/// Messages waiting for the main loop; FreeRDP sends one at a time.
+const MAX_QUEUED: usize = 16;
 const DEFAULT_TIMEOUT_MS: u64 = 180_000;
 const MAX_TIMEOUT_MS: u64 = 15 * 60 * 1000;
 /// How long the hidden `prompt=none` attempt may take before the normal
@@ -190,18 +191,18 @@ pub fn run(args: &[String]) -> ExitCode {
     }
     let profile = profile.expect("checked above");
 
-    // A reader thread queues lines; the main loop handles them.
-    let queue = Arc::new(Mutex::new(VecDeque::<Option<String>>::new()));
-    {
-        let queue = queue.clone();
-        std::thread::spawn(move || {
-            for line in BufReader::new(cmd_in).lines() {
-                let Ok(line) = line else { break };
-                queue.lock().expect("not poisoned").push_back(Some(line));
+    // A reader thread queues lines; the main loop handles them. Lines and
+    // queue are bounded: the reader waits while the queue is full.
+    let (queue_in, queue) = std::sync::mpsc::sync_channel::<Option<String>>(MAX_QUEUED);
+    std::thread::spawn(move || {
+        for line in crate::bounded_lines::lines(BufReader::new(cmd_in), MAX_LINE) {
+            // An oversized message can't be a valid request: dropped.
+            if !line.too_long && queue_in.send(Some(line.text)).is_err() {
+                return;
             }
-            queue.lock().expect("not poisoned").push_back(None);
-        });
-    }
+        }
+        let _ = queue_in.send(None);
+    });
 
     let main_loop = glib::MainLoop::new(None, false);
     let view = SignInView::new(&profile, "Sign in");
@@ -210,8 +211,8 @@ pub fn run(args: &[String]) -> ExitCode {
         let main_loop = main_loop.clone();
         glib::timeout_add_local(Duration::from_millis(50), move || {
             loop {
-                let next = queue.lock().expect("not poisoned").pop_front();
-                match next {
+                let next = queue.try_recv();
+                match next.ok() {
                     None => return glib::ControlFlow::Continue,
                     // FreeRDP closed the pipe: stop.
                     Some(None) => {
@@ -309,9 +310,11 @@ fn handle(msg: &Incoming, view: &SignInView, send: &Arc<impl Fn(String) + 'stati
 /// Without a usable profile or display: answer every request with an error
 /// until FreeRDP gives up.
 fn serve_errors(cmd_in: File, send: &impl Fn(String)) {
-    for line in BufReader::new(cmd_in).lines() {
-        let Ok(line) = line else { break };
-        match parse_incoming(&line) {
+    for line in crate::bounded_lines::lines(BufReader::new(cmd_in), MAX_LINE) {
+        if line.too_long {
+            continue;
+        }
+        match parse_incoming(&line.text) {
             Incoming::Exit => break,
             Incoming::Hello { id }
             | Incoming::Navigate { id, .. }

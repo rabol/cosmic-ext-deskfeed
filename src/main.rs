@@ -3,6 +3,7 @@
 mod accounts;
 mod app;
 mod auth;
+mod bounded_lines;
 mod config;
 mod deps;
 mod i18n;

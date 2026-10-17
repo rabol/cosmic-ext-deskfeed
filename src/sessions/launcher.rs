@@ -14,7 +14,7 @@
 
 use std::fmt::Write as _;
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufReader, Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::os::unix::process::CommandExt;
@@ -38,6 +38,8 @@ const STATE_LOGGER: &str = "com.freerdp.core.rdp";
 /// FreeRDP's SDL3 display channel logger; at DEBUG it reports when the
 /// channel is ready (`client/SDL/SDL3/sdl_disp.cpp`, `DisplayControlCaps`).
 /// Its lines hold only monitor counts and area factors.
+/// Longest FreeRDP output line looked at; the rest of a line is skipped.
+const MAX_OUTPUT_LINE: usize = 4096;
 const DISPLAY_LOGGER: &str = "com.freerdp.client.sdl.disp";
 /// Logged by that channel, in a windowed session only, once it is ready.
 const DISPLAY_READY_MARKER: &str = "DisplayControlCapsPdu: setting the window as resizable";
@@ -587,7 +589,10 @@ fn supervise(
                         events(e);
                     }
                 };
-                for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                // Bounded: FreeRDP's output is not trusted to be sane.
+                for line in crate::bounded_lines::lines(BufReader::new(stream), MAX_OUTPUT_LINE)
+                    .map(|l| l.text)
+                {
                     // Our sign-in helper's status lines (FreeRDP passes its
                     // stderr through); they hold no codes or tokens.
                     if line.starts_with("cosmic-ext-deskfeed-signin: ") || is_state_change(&line) {
