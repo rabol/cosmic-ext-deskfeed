@@ -789,7 +789,17 @@ impl AppModel {
                         eprintln!("  {line}");
                     }
                 }
-                let was_entra = matches!(pending, Some((LogonSetting::EntraSignIn, _)));
+                // Only a session that never got connected says anything
+                // about the logon method; later errors are ordinary ones.
+                let was_connected =
+                    matches!(self.connections.get(key), Some(Connection::Connected));
+                // Once Entra sign-in has worked for a desktop, a failure is
+                // more likely temporary; keep using it.
+                let worked_before = self.config.logon_settings.get(key)
+                    == Some(&LogonSetting::EntraSignIn);
+                let was_entra = !was_connected
+                    && !worked_before
+                    && matches!(pending, Some((LogonSetting::EntraSignIn, _)));
                 match end {
                     SessionEnd::Closed | SessionEnd::Cancelled => {
                         self.connections.remove(key);
