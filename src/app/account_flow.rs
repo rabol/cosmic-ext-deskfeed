@@ -38,16 +38,17 @@ impl AppModel {
             Message::SignInFinished(origin, generation, profile, result) => {
                 return self.sign_in_finished(origin.as_deref(), generation, &profile, result);
             }
-            Message::Saved(id, generation, result) => {
+            Message::Saved(id, sign_in, result) => {
                 if let Some(a) = self.account_mut(&id)
-                    && a.generation == generation
+                    && a.sign_in == sign_in
                 {
                     a.notice = result.err();
                 }
             }
             Message::Refresh(id) => return self.load_resources(&id),
-            Message::Discovered(id, generation, result) => {
-                self.discovered(&id, generation, result);
+            Message::RefreshDue => return self.refresh_due(),
+            Message::Discovered(id, epoch, generation, result) => {
+                self.discovered(&id, epoch, generation, result);
             }
             Message::SignOut(id) => return self.sign_out(&id),
             Message::SignOutSelected => {
@@ -95,6 +96,8 @@ impl AppModel {
                 notice: None,
                 can_retry: false,
                 generation: 0,
+                sign_in: 0,
+                last_load: None,
                 epoch,
             });
             tasks.push(self.start_restore(&id));
@@ -325,6 +328,7 @@ impl AppModel {
                 a.notice = None;
                 a.can_retry = false;
                 a.generation = generation;
+                a.sign_in = generation;
             }
             None => self.accounts.push(Account {
                 id: id.clone(),
@@ -334,6 +338,8 @@ impl AppModel {
                 notice: None,
                 can_retry: false,
                 generation,
+                sign_in: generation,
+                last_load: None,
                 epoch,
             }),
         }
@@ -362,35 +368,65 @@ impl AppModel {
         };
         *loading = true;
         account.generation = generation;
+        account.last_load = Some(SystemTime::now());
         let signed_in = signed_in.clone();
+        let epoch = account.epoch;
         let http = self.http.clone();
         let id = id.to_owned();
         cosmic::task::future(async move {
-            let acc = signed_in.clone();
             let result = tokio::task::spawn_blocking(move || {
-                discovery::discover(&http, &acc.tokens.access_token)
-            })
-            .await;
-            let result = match result {
-                Ok(Ok(feeds)) => Ok(feeds
+                // An expired access token would only get "session expired".
+                let signed_in = accounts::renew_if_needed(&http, signed_in)?;
+                let feeds = discovery::discover(&http, &signed_in.tokens.access_token)
+                    .map_err(|e| StepError::Show(describe_fetch_error(&e)))?;
+                let list = feeds
                     .into_iter()
                     .map(|f| workspace_view(&signed_in, f))
-                    .collect()),
-                Ok(Err(e)) => Err(describe_fetch_error(&e)),
-                Err(_) => Err(fl!("error-generic")),
-            };
-            Message::Discovered(id, generation, result)
+                    .collect();
+                Ok((list, signed_in))
+            })
+            .await
+            .unwrap_or_else(|_| Err(StepError::Show(fl!("error-generic"))));
+            Message::Discovered(id, epoch, generation, result)
         })
+    }
+
+    /// Refreshes the desktop lists not refreshed for [`REFRESH_EVERY`].
+    pub(super) fn refresh_due(&mut self) -> Task<cosmic::Action<Message>> {
+        let due: Vec<String> = self
+            .accounts
+            .iter()
+            .filter(|a| {
+                matches!(a.state, AccountState::Ready { loading: false, .. })
+                    && a.last_load
+                        .is_none_or(|t| t.elapsed().map_or(true, |d| d >= REFRESH_EVERY))
+            })
+            .map(|a| a.id.clone())
+            .collect();
+        Task::batch(due.iter().map(|id| self.load_resources(id)))
     }
 
     pub(super) fn discovered(
         &mut self,
         id: &str,
+        epoch: u64,
         generation: u64,
-        result: Result<Vec<WorkspaceView>, String>,
+        result: Result<(Vec<WorkspaceView>, Arc<SignedIn>), StepError>,
     ) {
+        // Renewed tokens are kept even if a newer refresh started meanwhile.
+        if let Ok((_, renewed)) = &result {
+            self.adopt_tokens(id, epoch, renewed);
+        }
         let Some(account) = self.account_mut(id).filter(|a| a.generation == generation) else {
             return;
+        };
+        let result = match result {
+            Ok((list, _)) => Ok(list),
+            Err(StepError::Show(e)) => Err(e),
+            Err(StepError::SignInAgain(e)) => {
+                self.needs_sign_in(id, e);
+                return;
+            }
         };
         if let AccountState::Ready {
             loading,
@@ -407,6 +443,30 @@ impl AppModel {
                 }
                 Err(e) => *error = Some(e),
             }
+        }
+    }
+
+    /// Takes renewed tokens for the account entry `epoch`, when they are
+    /// newer than the ones it has.
+    pub(super) fn adopt_tokens(&mut self, id: &str, epoch: u64, renewed: &Arc<SignedIn>) {
+        if let Some(account) = self.account_mut(id).filter(|a| a.epoch == epoch)
+            && let AccountState::Ready { signed_in, .. } = &mut account.state
+            && signed_in.identity == renewed.identity
+            && renewed.tokens.expires_at > signed_in.tokens.expires_at
+        {
+            *signed_in = renewed.clone();
+        }
+    }
+
+    /// The account's sign-in can't be renewed: it asks for an interactive
+    /// sign-in, with the reason. Its sessions keep running.
+    pub(super) fn needs_sign_in(&mut self, id: &str, error: String) {
+        let generation = self.next();
+        if let Some(account) = self.account_mut(id)
+            && matches!(account.state, AccountState::Ready { .. })
+        {
+            account.generation = generation;
+            account.state = AccountState::NeedsSignIn { error: Some(error) };
         }
     }
 

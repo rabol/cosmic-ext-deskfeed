@@ -233,7 +233,10 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
         _ => "/gateway:type:arm".to_owned(),
     };
     let mut args = vec![rdp_path.to_string_lossy().into_owned(), gateway];
-    let entra = spec.connection.entra_sso() || spec.logon == LogonSetting::EntraSignIn;
+    // The chosen logon decides, not the file's `enablerdsaadauth`: FreeRDP
+    // applies the file first and then the arguments, and a lone `/sec:nla`
+    // switches Entra (AAD) security off (3.32.2 `client/common/cmdline.c`).
+    let entra = spec.logon == LogonSetting::EntraSignIn;
     args.push(if entra { "/sec:aad" } else { "/sec:nla" }.to_owned());
     args.push(format!("/azure:auth-helper:{}", spec.helper.display()));
     if let Some(user) = &spec.username {
@@ -684,17 +687,26 @@ mod tests {
 
     #[test]
     fn entra_sign_in_sends_no_password() {
-        for s in [
-            spec(LogonSetting::EntraSignIn, Some("pw"), false),
-            spec(LogonSetting::Automatic, Some("pw"), true),
-        ] {
-            let a = args(&s);
+        for entra_file in [false, true] {
+            let a = args(&spec(LogonSetting::EntraSignIn, Some("pw"), entra_file));
             assert!(a.contains(&"/sec:aad".into()));
             assert!(
                 !a.iter()
                     .any(|x| x.starts_with("/p:") || x.starts_with("/d:"))
             );
         }
+    }
+
+    #[test]
+    fn a_chosen_password_logon_wins_over_the_files_entra_hint() {
+        let a = args(&spec(LogonSetting::EmptyDomain, Some("pw"), true));
+        assert!(a.contains(&"/sec:nla".into()));
+        assert!(!a.contains(&"/sec:aad".into()));
+        assert!(a.contains(&"/p:pw".into()));
+        assert!(a.contains(&"/d:".into()));
+        let a = args(&spec(LogonSetting::Automatic, Some("pw"), true));
+        assert!(a.contains(&"/sec:nla".into()));
+        assert!(a.contains(&"/p:pw".into()));
     }
 
     #[test]

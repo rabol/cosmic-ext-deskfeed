@@ -10,17 +10,21 @@ impl AppModel {
         match message {
             Message::Connect(key) => return self.prepare_connection(&key),
             Message::ConnectionFileReady(id, epoch, key, result) => {
-                let Some(account) = self.account_mut(&id).filter(|a| a.epoch == epoch) else {
+                if self.account(&id).is_none_or(|a| a.epoch != epoch) {
                     return Task::none();
-                };
-                let result = result.map(|(connection, renewed)| {
-                    if let AccountState::Ready { signed_in, .. } = &mut account.state
-                        && !Arc::ptr_eq(signed_in, &renewed)
-                    {
-                        *signed_in = renewed;
+                }
+                let result = match result {
+                    Ok((connection, renewed)) => {
+                        self.adopt_tokens(&id, epoch, &renewed);
+                        Ok(connection)
                     }
-                    connection
-                });
+                    Err(StepError::Show(e)) => Err(e),
+                    Err(StepError::SignInAgain(e)) => {
+                        self.connections.remove(&key);
+                        self.needs_sign_in(&id, e);
+                        return Task::none();
+                    }
+                };
                 return self.connection_file_ready(&id, key, result);
             }
             Message::PasswordInput(PasswordText(s)) => {
@@ -115,16 +119,18 @@ impl AppModel {
                         Role::ConnectionFile,
                         Some(&signed_in.tokens.access_token),
                     )
-                    .map_err(|e| describe_fetch_error(&FetchError::Http(e)))?;
+                    .map_err(|e| StepError::Show(describe_fetch_error(&FetchError::Http(e))))?;
                 ConnectionFile::parse(&resp.body)
                     .map(|c| (Arc::new(c), signed_in))
-                    .map_err(|e| match e {
-                        RdpError::GatewayNotAllowed => fl!("error-gateway-not-allowed"),
-                        e => fl!("error-bad-connection-file", detail = format!("{e:?}")),
+                    .map_err(|e| {
+                        StepError::Show(match e {
+                            RdpError::GatewayNotAllowed => fl!("error-gateway-not-allowed"),
+                            e => fl!("error-bad-connection-file", detail = format!("{e:?}")),
+                        })
                     })
             })
             .await
-            .unwrap_or_else(|_| Err(fl!("error-generic")));
+            .unwrap_or_else(|_| Err(StepError::Show(fl!("error-generic"))));
             Message::ConnectionFileReady(id, epoch, key, result)
         })
     }

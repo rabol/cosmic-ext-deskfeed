@@ -18,6 +18,12 @@ pub(super) struct Account {
     pub(super) can_retry: bool,
     /// Changes on every sign-in attempt and refresh of this account.
     pub(super) generation: u64,
+    /// The generation of the latest interactive sign-in; the keyring's
+    /// answer for that sign-in carries it.
+    pub(super) sign_in: u64,
+    /// When the desktop list was last requested (wall clock, so the time
+    /// spent suspended counts).
+    pub(super) last_load: Option<SystemTime>,
     /// Fixed for the life of this entry; session and connection events
     /// carry it, so events from before a sign-out are ignored.
     pub(super) epoch: u64,
@@ -147,10 +153,20 @@ pub enum Message {
         PathBuf,
         Result<Arc<SignedIn>, SignInFailure>,
     ),
-    /// The keyring saved (or failed to save) the sign-in.
+    /// The keyring saved (or failed to save) the sign-in: account ID, the
+    /// sign-in's generation, result.
     Saved(String, u64, Result<(), String>),
     Refresh(String),
-    Discovered(String, u64, Result<Vec<WorkspaceView>, String>),
+    /// Periodic check: refresh the desktop lists that are due.
+    RefreshDue,
+    /// Account ID, epoch, generation; the desktops with the account's
+    /// tokens (renewed first if needed).
+    Discovered(
+        String,
+        u64,
+        u64,
+        Result<(Vec<WorkspaceView>, Arc<SignedIn>), StepError>,
+    ),
     SignOut(String),
     SignOutSelected,
     SignOutFinished(Result<(), String>),
@@ -161,7 +177,7 @@ pub enum Message {
         String,
         u64,
         String,
-        Result<(Arc<ConnectionFile>, Arc<SignedIn>), String>,
+        Result<(Arc<ConnectionFile>, Arc<SignedIn>), StepError>,
     ),
     PasswordInput(PasswordText),
     TogglePasswordVisible,
@@ -185,6 +201,25 @@ pub enum Message {
     DesktopTimeout(String, Option<u32>),
     /// Resource key; outcome of "open on a new workspace" (log text).
     WorkspaceMoved(String, Result<(), String>),
+}
+
+/// Why a background step for an account failed.
+#[derive(Debug, Clone)]
+pub enum StepError {
+    /// Shown where the step was started (the desktop list or row).
+    Show(String),
+    /// The sign-in can't be renewed any more: the account needs an
+    /// interactive sign-in.
+    SignInAgain(String),
+}
+
+impl From<accounts::RenewError> for StepError {
+    fn from(e: accounts::RenewError) -> Self {
+        match e {
+            accounts::RenewError::Retry(t) => Self::Show(t),
+            accounts::RenewError::SignInAgain(t) => Self::SignInAgain(t),
+        }
+    }
 }
 
 /// Sign-in failures, cheap to clone for messages.

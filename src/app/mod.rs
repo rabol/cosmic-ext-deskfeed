@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime};
 
 use base64::Engine as _;
 use cosmic::app::context_drawer;
@@ -99,6 +99,11 @@ pub struct AppModel {
     /// "Open on a new workspace" waits per running session; set to stop.
     movers: HashMap<String, Arc<AtomicBool>>,
 }
+
+/// Desktop lists are refreshed this often (spec §7: hourly)...
+const REFRESH_EVERY: Duration = Duration::from_hours(1);
+/// ...checked this often.
+const REFRESH_CHECK: Duration = Duration::from_mins(5);
 
 /// A page in the sidebar.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -381,9 +386,15 @@ impl cosmic::Application for AppModel {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        self.core()
-            .watch_config::<Config>(Self::APP_ID)
-            .map(|update| Message::UpdateConfig(update.config))
+        Subscription::batch([
+            self.core()
+                .watch_config::<Config>(Self::APP_ID)
+                .map(|update| Message::UpdateConfig(update.config)),
+            // Checks the wall clock, so lists are also refreshed soon after
+            // a resume from suspend (the timer itself stops while
+            // suspended).
+            cosmic::iced::time::every(REFRESH_CHECK).map(|_| Message::RefreshDue),
+        ])
     }
 
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
@@ -397,6 +408,7 @@ impl cosmic::Application for AppModel {
             | Message::SignInFinished(..)
             | Message::Saved(..)
             | Message::Refresh(..)
+            | Message::RefreshDue
             | Message::Discovered(..)
             | Message::SignOut(..)
             | Message::SignOutSelected

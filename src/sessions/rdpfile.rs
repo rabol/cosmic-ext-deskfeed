@@ -142,19 +142,6 @@ impl ConnectionFile {
         Ok(Self { props, dropped })
     }
 
-    fn int(&self, key: &str) -> Option<i64> {
-        match self.props.get(key) {
-            Some(Value::Int(v)) => Some(*v),
-            _ => None,
-        }
-    }
-
-    /// The host pool signs in to the session host with Entra (single
-    /// sign-on); otherwise a Windows password is needed.
-    pub fn entra_sso(&self) -> bool {
-        self.int("enablerdsaadauth") == Some(1)
-    }
-
     /// Serialized for FreeRDP: kept properties, then device defaults.
     pub fn to_freerdp_text(&self) -> String {
         let mut out = String::new();
@@ -248,7 +235,6 @@ mod tests {
         assert!(text.contains("redirectprinters:i:0"));
         assert!(!text.contains("redirectclipboard:i:1"));
         assert_eq!(f.dropped, 9);
-        assert!(!f.entra_sso());
     }
 
     #[test]
@@ -258,7 +244,7 @@ mod tests {
             bytes.extend_from_slice(&u.to_le_bytes());
         }
         let f = ConnectionFile::parse(&bytes).unwrap();
-        assert!(f.entra_sso());
+        assert!(f.to_freerdp_text().contains("enablerdsaadauth:i:1"));
     }
 
     #[test]
@@ -302,7 +288,7 @@ mod tests {
             format!("full address:s:h\r\n{GW}enablerdsaadauth:i:yes\r\n").as_bytes(),
         )
         .unwrap();
-        assert!(!f.entra_sso());
+        assert!(!f.to_freerdp_text().contains("enablerdsaadauth"));
         assert_eq!(f.dropped, 1);
     }
 
@@ -339,11 +325,6 @@ mod tests {
     fn real_connection_file() {
         let bytes = std::fs::read(std::env::var("AVD_RDP_FILE").unwrap()).unwrap();
         let f = ConnectionFile::parse(&bytes).unwrap();
-        println!(
-            "kept {} properties, dropped {}, entra_sso={}",
-            f.props.len(),
-            f.dropped,
-            f.entra_sso()
-        );
+        println!("kept {} properties, dropped {}", f.props.len(), f.dropped);
     }
 }

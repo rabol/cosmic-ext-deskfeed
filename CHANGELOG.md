@@ -19,6 +19,10 @@ First version (0.1.0), not yet released.
 - Dependency check at startup and under View → Dependencies.
 - Log file under `~/.local/state/cosmic-ext-deskfeed/` with View → Open log folder.
 - Connection files from the feed are refused unless their gateway is an Azure Virtual Desktop service host (the access token goes there), and their certificate policy is ignored, so the session host's certificate is always checked.
+- Desktop lists refresh by themselves every hour, and soon after a resume from suspend. Refresh renews the sign-in first; when it can't be renewed, the account asks for a new sign-in.
+- A password logon chosen for a desktop is used even when the connection file asks for Entra sign-in.
+- Renewed sign-ins are checked like restored ones: a renewed ID token must be valid and name the same account.
+- The "sign-in not saved" notice after a sign-in now appears when the keyring fails.
 - Installation with `just install`: desktop entry, icons, AppStream metadata.
 
 ### Known limitations

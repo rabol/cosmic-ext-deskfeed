@@ -17,7 +17,7 @@ use sha2::Digest;
 use crate::auth::attempt::ClientConfig;
 use crate::auth::id_token::{self, Identity};
 use crate::auth::signin::SignedIn;
-use crate::auth::token::{self, Secret, TokenError};
+use crate::auth::token::{self, Secret, TokenError, TokenSet};
 use crate::fl;
 use crate::secrets::{self, SecretsError, Stored};
 use crate::service::http::Http;
@@ -328,21 +328,11 @@ fn restore_in(http: &Http, env: &Env, stored: &Stored) -> Restore {
         // Policy or interaction needed: an interactive sign-in replaces it.
         Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
     };
-    // A renewed ID token must name the same account (and is checked like
-    // any other); without one, the saved identity stands.
-    let identity = match tokens.id_token.as_deref() {
-        None => stored.identity.clone(),
-        Some(raw) => {
-            let Ok(keys) = id_token::fetch_keys(http) else {
-                return Restore::Retry(fl!("error-restore-network"));
-            };
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs());
-            match id_token::validate_renewed(raw, &keys, &config.client_id, now, &stored.identity) {
-                Ok(identity) => identity,
-                Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
-            }
+    let identity = match renewed_identity(http, config, &tokens, &stored.identity) {
+        Ok(identity) => identity,
+        Err(IdentityCheck::KeysUnavailable) => return Restore::Retry(fl!("error-restore-network")),
+        Err(IdentityCheck::Invalid) => {
+            return Restore::SignInAgain(fl!("error-saved-sign-in-expired"));
         }
     };
     let rotated = tokens
@@ -362,47 +352,98 @@ fn restore_in(http: &Http, env: &Env, stored: &Stored) -> Restore {
     Restore::Ready(Arc::new(account), notice)
 }
 
+/// Why renewed tokens can't be used.
+enum IdentityCheck {
+    /// Microsoft's signing keys couldn't be fetched: try again later.
+    KeysUnavailable,
+    /// The renewed ID token is invalid or names another account.
+    Invalid,
+}
+
+/// The identity for renewed tokens. A renewed ID token must name the same
+/// account and is checked like any other (signature, issuer, audience,
+/// lifetime); without one, the known identity stands.
+fn renewed_identity(
+    http: &Http,
+    config: &ClientConfig,
+    tokens: &TokenSet,
+    expected: &Identity,
+) -> Result<Identity, IdentityCheck> {
+    let Some(raw) = tokens.id_token.as_deref() else {
+        return Ok(expected.clone());
+    };
+    let keys = id_token::fetch_keys(http).map_err(|_| IdentityCheck::KeysUnavailable)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    id_token::validate_renewed(raw, &keys, &config.client_id, now, expected).map_err(|e| {
+        crate::app_log!("renewed ID token refused: {e:?}");
+        IdentityCheck::Invalid
+    })
+}
+
+/// Why the tokens couldn't be renewed; the text is for the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenewError {
+    /// Temporary (network): the sign-in stays, try again later.
+    Retry(String),
+    /// The sign-in can't be renewed any more: sign in again.
+    SignInAgain(String),
+}
+
 /// Renews the tokens when the access token expires within the margin, and
 /// saves a rotated refresh token.
-pub fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, String> {
+pub fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, RenewError> {
     renew_in(http, &system(), account)
 }
 
-fn renew_in(http: &Http, env: &Env, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, String> {
+fn renew_in(http: &Http, env: &Env, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, RenewError> {
     if !account.tokens.needs_refresh(Instant::now()) {
         return Ok(account);
     }
     let started = sign_out_count(&account_id(&account.identity));
     let _renewal = RENEWAL.lock();
     let Some(refresh_token) = &account.tokens.refresh_token else {
-        return Err(fl!("error-session-expired"));
+        return Err(RenewError::SignInAgain(fl!("error-session-expired")));
     };
-    match token::refresh(http, &env.config, refresh_token) {
-        Ok(tokens) => {
-            let renewed = SignedIn {
-                identity: account.identity.clone(),
-                tokens,
-            };
-            let rotated = renewed
-                .tokens
-                .refresh_token
-                .as_ref()
-                .is_some_and(|t| t.expose() != refresh_token.expose());
-            if rotated {
-                // Best effort: if this fails, the next start asks to sign in.
-                let _ = save_locked(env, &renewed, started);
-            }
-            Ok(Arc::new(renewed))
+    let tokens = match token::refresh(http, &env.config, refresh_token) {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            crate::app_log!("renewal failed ({})", token_error_kind(&e));
+            return Err(match e {
+                TokenError::Transient(_) => RenewError::Retry(fl!("error-generic")),
+                TokenError::InvalidGrant {
+                    aadsts: Some(70043),
+                } => RenewError::SignInAgain(fl!("error-sign-in-frequency")),
+                _ => RenewError::SignInAgain(fl!("error-session-expired")),
+            });
         }
-        Err(TokenError::Transient(_)) => Err(fl!("error-generic")),
-        Err(_) => Err(fl!("error-session-expired")),
+    };
+    let identity = match renewed_identity(http, &env.config, &tokens, &account.identity) {
+        Ok(identity) => identity,
+        Err(IdentityCheck::KeysUnavailable) => {
+            return Err(RenewError::Retry(fl!("error-generic")));
+        }
+        Err(IdentityCheck::Invalid) => {
+            return Err(RenewError::SignInAgain(fl!("error-session-expired")));
+        }
+    };
+    let renewed = SignedIn { identity, tokens };
+    let rotated = renewed
+        .tokens
+        .refresh_token
+        .as_ref()
+        .is_some_and(|t| t.expose() != refresh_token.expose());
+    if rotated {
+        // Best effort: if this fails, the next start asks to sign in.
+        let _ = save_locked(env, &renewed, started);
     }
+    Ok(Arc::new(renewed))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::token::TokenSet;
     use crate::service::endpoint::EndpointPolicy;
     use crate::service::http::BearerToken;
     use crate::test_util::serve_once;
@@ -659,20 +700,46 @@ mod tests {
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
             renew_in(&http(port), &env(port, &store), account).unwrap_err(),
-            fl!("error-generic")
+            RenewError::Retry(fl!("error-generic"))
         );
         let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
             renew_in(&http(port), &env(port, &store), account).unwrap_err(),
-            fl!("error-session-expired")
+            RenewError::SignInAgain(fl!("error-session-expired"))
+        );
+        let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
+        let account = signed_in(&me, Some("rt"), Duration::ZERO);
+        assert_eq!(
+            renew_in(&http(port), &env(port, &store), account).unwrap_err(),
+            RenewError::SignInAgain(fl!("error-sign-in-frequency"))
         );
         // No refresh token: nothing to renew with, no request.
         let account = signed_in(&me, None, Duration::ZERO);
         assert_eq!(
             renew_in(&http(1), &env(1, &store), account).unwrap_err(),
-            fl!("error-session-expired")
+            RenewError::SignInAgain(fl!("error-session-expired"))
         );
+    }
+
+    #[test]
+    fn renewal_checks_a_renewed_id_token_too() {
+        // Same rule as restoring: the ID token's signature is checked
+        // against Microsoft's keys. Here they can't be fetched (not an
+        // allowed address), so the renewal is retried later and nothing is
+        // saved.
+        let me = identity("00000000-0000-0000-0000-0000000000b4");
+        let (port, _) = serve_once(
+            "200 OK",
+            r#"{"access_token":"a","token_type":"Bearer","refresh_token":"rt-new","id_token":"x.y.z"}"#,
+        );
+        let store = FakeStore::with(&me, "rt-old");
+        let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
+        assert!(matches!(
+            renew_in(&http(port), &env(port, &store), account),
+            Err(RenewError::Retry(_))
+        ));
+        assert_eq!(store.tokens(), ["rt-old"]);
     }
 
     #[test]
