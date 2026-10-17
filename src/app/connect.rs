@@ -322,6 +322,9 @@ impl AppModel {
                     })
                     .map_err(|e| match e {
                         launcher::LaunchError::FreeRdpMissing => fl!("error-freerdp-missing"),
+                        launcher::LaunchError::UnsupportedProxy(scheme) => {
+                            fl!("error-proxy-unsupported", scheme = scheme)
+                        }
                         launcher::LaunchError::BadPassword => fl!("error-password-chars"),
                         other => fl!("error-launch", detail = format!("{other:?}")),
                     })

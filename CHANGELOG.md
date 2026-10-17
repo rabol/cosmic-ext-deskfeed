@@ -34,6 +34,7 @@ First version (0.1.0), not yet released.
 - Output from FreeRDP and messages to the sign-in helper are read with a size limit.
 - An unanswered keyring unlock prompt is dismissed after 2 minutes, with a notice; one account waiting for the keyring no longer holds up another account's renewal.
 - Desktops are told apart by workspace too, so the same desktop ID in two workspaces no longer shares settings; saved settings move to the new keys by themselves.
+- FreeRDP gets exactly the proxy the app uses (same choice among the variables, and the same no-proxy list); a proxy type FreeRDP can't use is reported instead of connecting directly.
 - Installation with `just install`: desktop entry, icons, AppStream metadata.
 
 ### Known limitations

@@ -88,6 +88,7 @@ error-no-connection-file = The service didn't provide connection details for thi
 error-bad-connection-file = The connection details for this desktop couldn't be read ({ $detail }).
 error-gateway-not-allowed = This desktop's connection details name a gateway outside Azure Virtual Desktop, so Deskfeed didn't connect.
 error-freerdp-missing = FreeRDP (sdl-freerdp3) is not installed. Install the freerdp package.
+error-proxy-unsupported = Your proxy setting uses { $scheme }://, which FreeRDP can't use, so Deskfeed didn't connect. Set an http:// or socks5:// proxy.
 error-launch = The remote desktop client couldn't start ({ $detail }).
 error-account-locked = Your account is locked. Contact your IT department.
 error-password-expired = Your Windows password has expired or must be changed. Change it, then try again.
