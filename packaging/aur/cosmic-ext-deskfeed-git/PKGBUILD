@@ -1,0 +1,77 @@
+# Maintainer: Steen Rabol <cosmic-ext-avd@rabol.dev>
+
+pkgname=cosmic-ext-deskfeed-git
+_pkgname=cosmic-ext-deskfeed
+pkgver=0.1.0.r53.gdc6b195
+pkgrel=1
+pkgdesc='Your work desktops on COSMIC, working with Azure Virtual Desktop and Windows 365 (unofficial; development version)'
+arch=('x86_64')
+url='https://github.com/rabol/cosmic-ext-deskfeed'
+# See the release package for how this list is made.
+license=('MIT' 'Apache-2.0' 'MPL-2.0' 'Unicode-3.0' 'Zlib' 'ISC' 'BSD-3-Clause'
+         'BSD-2-Clause' 'Unlicense' 'CC0-1.0')
+depends=(
+  'cosmic-icon-theme'
+  'freerdp>=2:3.32.2'
+  'glib2'
+  'glibc'
+  'gtk4'
+  'libgcc'
+  'libsoup3'
+  'libxkbcommon'
+  'wayland'
+  'webkitgtk-6.0'
+  'xdg-utils'
+)
+makedepends=('cargo' 'git' 'just')
+# makepkg's LTO compiles ring's C code to GCC LTO objects, which the Rust
+# linker (lld) can't read: "undefined symbol: ring_core_*". Rust's own
+# release optimisation is unaffected.
+options=('!lto')
+optdepends=(
+  'oo7: Secret Service, to stay signed in between starts'
+  'gnome-keyring: Secret Service, to stay signed in between starts'
+)
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+source=("$_pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$_pkgname"
+  # v0.1.0-3-gabc1234 -> 0.1.0.r3.gabc1234; before the first tag: 0.1.0.rN.gHASH
+  if git describe --long --tags --abbrev=7 >/dev/null 2>&1; then
+    git describe --long --tags --abbrev=7 | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g'
+  else
+    printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
+  fi
+}
+
+prepare() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release --workspace
+}
+
+check() {
+  cd "$_pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen --workspace
+}
+
+package() {
+  cd "$_pkgname"
+  export CARGO_TARGET_DIR=target
+  just rootdir="$pkgdir" prefix=/usr install
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 THIRD-PARTY-LICENSES.md \
+    "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES.md"
+}
