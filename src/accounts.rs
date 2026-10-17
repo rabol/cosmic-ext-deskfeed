@@ -257,11 +257,18 @@ pub fn restore(http: &Http, stored: &Stored) -> Restore {
     let tokens = match renewed {
         Ok(tokens) => tokens,
         Err(TokenError::Transient(_)) => return Restore::Retry(fl!("error-restore-network")),
-        Err(TokenError::InvalidGrant { .. }) => {
+        Err(TokenError::InvalidGrant { aadsts }) => {
             // Revoked or expired for good: forget it.
             let deleted = secrets::delete(&config, &stored.identity);
             eprintln!("saved sign-in: deleted (invalid_grant): {deleted:?}");
-            return Restore::SignInAgain(fl!("error-saved-sign-in-expired"));
+            // AADSTS70043 "BadTokenDueToSignInFrequency": the organization's
+            // Conditional Access asks for a new sign-in after a set time
+            // (Microsoft Entra error code reference).
+            return Restore::SignInAgain(if aadsts == Some(70043) {
+                fl!("error-sign-in-frequency")
+            } else {
+                fl!("error-saved-sign-in-expired")
+            });
         }
         // Policy or interaction needed: an interactive sign-in replaces it.
         Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),

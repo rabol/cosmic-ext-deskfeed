@@ -16,8 +16,10 @@ const MAX_LINES: usize = 1_000;
 const MAX_VALUE_LEN: usize = 4_096;
 
 /// Properties copied from the feed's file, lower-case. Display behaviour
-/// (`smart sizing`, which conflicts with `/dynamic-resolution`) is left out:
-/// the app decides it.
+/// (`smart sizing`, which conflicts with `/dynamic-resolution`; full screen
+/// and monitors) is left out: the app's settings decide it (settings.rs).
+/// FreeRDP can't switch full screen off from the command line, so a
+/// `screen mode id:i:2` here would override "windowed".
 const ALLOWED: &[&str] = &[
     "full address",
     "alternate full address",
@@ -47,8 +49,6 @@ const ALLOWED: &[&str] = &[
     "use redirection server name",
     "audiomode",
     "videoplaybackmode",
-    "use multimon",
-    "screen mode id",
     "dynamic resolution",
     "autoreconnection enabled",
 ];

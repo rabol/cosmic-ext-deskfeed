@@ -149,3 +149,4 @@ on = On
 off = Off
 dep-cosmic-windows = COSMIC window management
 dep-cosmic-windows-hint = Needed for "Open on a new workspace". Provided by the COSMIC desktop (cosmic-comp 1.0 or newer).
+error-sign-in-frequency = Your organization asks you to sign in again after a set time. Sign in to continue.

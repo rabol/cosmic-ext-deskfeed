@@ -3,10 +3,11 @@
 //! Connection settings (spec §Settings): built-in defaults, overridden per
 //! account, overridden per desktop. `None` means "inherit".
 //!
-//! The FreeRDP arguments are always passed explicitly, because the
-//! feed's connection file may ask for full screen (`screen mode id`) or
-//! several monitors (`use multimon`) by itself (`sessions/rdpfile.rs`).
-//! Every option here was checked against `sdl-freerdp3` 3.32.2 `/help`.
+//! The app alone decides display: `sessions/rdpfile.rs` drops the feed's
+//! `screen mode id` and `use multimon`. Every option here was checked
+//! against `sdl-freerdp3` 3.32.2 `/help` and WinPR's parser: `f` is a flag
+//! (only "on" exists), `multimon` and `clipboard` are booleans (`-` turns
+//! them off).
 
 use serde::{Deserialize, Serialize};
 
@@ -144,7 +145,13 @@ impl Effective {
     /// done by the app, not FreeRDP.
     pub fn freerdp_args(&self) -> Vec<String> {
         let mut args = vec![format!("/timeout:{}", self.timeout_secs * 1000)];
-        args.push(if self.fullscreen { "+f" } else { "-f" }.to_owned());
+        // `f` is a FreeRDP *flag*: any prefix, `-f` included, turns it on
+        // (WinPR `cmdline.c`, COMMAND_LINE_VALUE_FLAG). So windowed means
+        // leaving it out; `rdpfile.rs` drops `screen mode id` so the feed
+        // can't switch it on either.
+        if self.fullscreen {
+            args.push("+f".to_owned());
+        }
         // `/multimon` only takes effect in full screen.
         args.push(
             if self.fullscreen && self.all_monitors {
@@ -225,7 +232,7 @@ mod tests {
     fn defaults_keep_devices_private() {
         let a = DEFAULTS.freerdp_args();
         assert!(a.contains(&"/timeout:120000".into()));
-        assert!(a.contains(&"-f".into()));
+        assert!(!a.iter().any(|x| x.ends_with('f') && x.len() == 2));
         assert!(a.contains(&"-multimon".into()));
         assert!(a.contains(&"-clipboard".into()));
         assert!(!a.iter().any(|x| x.starts_with("/microphone")));
