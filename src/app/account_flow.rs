@@ -99,11 +99,7 @@ impl AppModel {
             });
             tasks.push(self.start_restore(&id));
         }
-        let select = self
-            .accounts
-            .first()
-            .map_or(Page::Add, |a| Page::Account(a.id.clone()));
-        self.rebuild_nav(&select);
+        self.select_first_account();
         Task::batch(tasks)
     }
 
@@ -440,11 +436,7 @@ impl AppModel {
         if accounts::remove_files(id).is_err() {
             self.notice = Some(fl!("error-sign-out-incomplete"));
         }
-        let select = self
-            .accounts
-            .first()
-            .map_or(Page::Add, |a| Page::Account(a.id.clone()));
-        self.rebuild_nav(&select);
+        self.select_first_account();
         // The keyring may block (for example on an unlock prompt), so not on
         // the UI thread.
         let identity = account.identity;

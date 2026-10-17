@@ -503,6 +503,15 @@ impl AppModel {
         self.accounts.iter().find(|a| a.resource(key).is_some())
     }
 
+    /// Shows the first account, or "Add account" when there is none.
+    fn select_first_account(&mut self) {
+        let select = self
+            .accounts
+            .first()
+            .map_or(Page::Add, |a| Page::Account(a.id.clone()));
+        self.rebuild_nav(&select);
+    }
+
     /// Rebuilds the sidebar: accounts in order, then "Add account".
     fn rebuild_nav(&mut self, select: &Page) {
         self.nav.clear();

@@ -102,15 +102,9 @@ impl AppModel {
             .add(
                 widget::settings::item::builder(fl!("setting-timeout"))
                     .description(fl!("setting-timeout-desc"))
-                    .control(widget::spin_button(
-                        fl!("seconds", value = current.timeout_secs),
-                        fl!("setting-timeout"),
-                        current.timeout_secs,
-                        10,
-                        settings::TIMEOUT_MIN_SECS,
-                        settings::TIMEOUT_MAX_SECS,
-                        move |v| Message::AccountTimeout(timeout_id.clone(), v),
-                    )),
+                    .control(timeout_spin(current.timeout_secs, move |v| {
+                        Message::AccountTimeout(timeout_id.clone(), v)
+                    })),
             );
         let display = widget::settings::section()
             .title(fl!("settings-display"))
@@ -166,15 +160,9 @@ impl AppModel {
         let mut timeout_row = widget::row::with_capacity(2)
             .spacing(cosmic::theme::spacing().space_xs)
             .align_y(Alignment::Center)
-            .push(widget::spin_button(
-                fl!("seconds", value = current.timeout_secs),
-                fl!("setting-timeout"),
-                current.timeout_secs,
-                10,
-                settings::TIMEOUT_MIN_SECS,
-                settings::TIMEOUT_MAX_SECS,
-                move |v| Message::DesktopTimeout(timeout_key.clone(), Some(v)),
-            ));
+            .push(timeout_spin(current.timeout_secs, move |v| {
+                Message::DesktopTimeout(timeout_key.clone(), Some(v))
+            }));
         if own.timeout_secs.is_some() {
             timeout_row = timeout_row.push(
                 widget::button::text(fl!("use-account-setting"))
@@ -209,6 +197,23 @@ impl AppModel {
         ])
         .into()
     }
+}
+
+/// The "time to wait" spin button: seconds, in steps of 10, within the
+/// allowed range.
+fn timeout_spin<'a>(
+    secs: u32,
+    on_change: impl Fn(u32) -> Message + 'static,
+) -> widget::SpinButton<'a, u32, Message> {
+    widget::spin_button(
+        fl!("seconds", value = secs),
+        fl!("setting-timeout"),
+        secs,
+        10,
+        settings::TIMEOUT_MIN_SECS,
+        settings::TIMEOUT_MAX_SECS,
+        on_change,
+    )
 }
 
 /// Name and description of an on/off setting.

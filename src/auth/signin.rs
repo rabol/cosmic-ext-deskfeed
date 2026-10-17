@@ -24,31 +24,6 @@ use crate::service::http::Http;
 const HELPER_NAME: &str = "cosmic-ext-deskfeed-signin";
 const MAX_REPLY_LEN: u64 = 16 * 1024;
 
-/// Environment passed to the helper; everything else is dropped.
-const ENV_ALLOWLIST: &[&str] = &[
-    "WAYLAND_DISPLAY",
-    "DISPLAY",
-    "XDG_RUNTIME_DIR",
-    "XDG_SESSION_TYPE",
-    "XDG_CURRENT_DESKTOP",
-    "XDG_DATA_DIRS",
-    "XDG_CONFIG_DIRS",
-    "DBUS_SESSION_BUS_ADDRESS",
-    "HOME",
-    "LANG",
-    "LANGUAGE",
-    "LC_ALL",
-    "LC_MESSAGES",
-    "PATH",
-    "GTK_THEME",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-];
-
 pub struct SignedIn {
     pub identity: Identity,
     pub tokens: TokenSet,
@@ -192,11 +167,7 @@ fn run_helper(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    for key in ENV_ALLOWLIST {
-        if let Some(v) = std::env::var_os(key) {
-            cmd.env(key, v);
-        }
-    }
+    crate::sessions::launcher::pass_environment(&mut cmd, &["GTK_THEME"]);
     let mut child = crate::sessions::launcher::spawn_retrying(&mut cmd)
         .map_err(|e| SignInError::HelperFailed(e.kind().to_string()))?;
     let mut stdin = child.stdin.take().expect("piped");

@@ -36,7 +36,9 @@ const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
 
-const ENV_ALLOWLIST: &[&str] = &[
+/// Environment every child process (FreeRDP, the sign-in helper) gets;
+/// everything else is dropped. See [`pass_environment`].
+const BASE_ENV: &[&str] = &[
     "WAYLAND_DISPLAY",
     "DISPLAY",
     "XDG_RUNTIME_DIR",
@@ -45,7 +47,6 @@ const ENV_ALLOWLIST: &[&str] = &[
     "XDG_DATA_DIRS",
     "XDG_CONFIG_DIRS",
     "DBUS_SESSION_BUS_ADDRESS",
-    "PULSE_SERVER",
     "HOME",
     "LANG",
     "LANGUAGE",
@@ -59,6 +60,16 @@ const ENV_ALLOWLIST: &[&str] = &[
     "HTTPS_PROXY",
     "NO_PROXY",
 ];
+
+/// Copies the allowed variables ([`BASE_ENV`] plus `extra`) from the app's
+/// environment into `cmd`, which should start with `env_clear()`.
+pub fn pass_environment(cmd: &mut Command, extra: &[&str]) {
+    for key in BASE_ENV.iter().chain(extra) {
+        if let Some(v) = std::env::var_os(key) {
+            cmd.env(key, v);
+        }
+    }
+}
 
 /// How to log on to a host pool without Entra single sign-on
 /// (ADR 0005). Deployments differ, so this is a per-resource choice.
@@ -392,11 +403,7 @@ fn spawn_freerdp(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    for key in ENV_ALLOWLIST {
-        if let Some(v) = std::env::var_os(key) {
-            cmd.env(key, v);
-        }
-    }
+    pass_environment(&mut cmd, &["PULSE_SERVER"]);
     cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_PROFILE", profile);
     // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it
     // stopped. This logger prints no names, passwords or tokens (FreeRDP
