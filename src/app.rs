@@ -35,7 +35,7 @@ use crate::sessions::rdpfile::ConnectionFile;
 use crate::settings::{self, ConnectionSettings, Toggle};
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
-const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/scalable/apps/icon.svg");
+const APP_ICON: &[u8] = include_bytes!("../resources/icons/hicolor/256x256/apps/icon.png");
 
 pub struct AppModel {
     core: cosmic::Core,
@@ -320,7 +320,7 @@ impl cosmic::Application for AppModel {
         accounts::clean_unfinished_profiles();
         let about = About::default()
             .name(fl!("app-title"))
-            .icon(widget::icon::from_svg_bytes(APP_ICON))
+            .icon(widget::icon::from_raster_bytes(APP_ICON))
             .version(env!("CARGO_PKG_VERSION"))
             .links([(fl!("repository"), REPOSITORY)])
             .license(env!("CARGO_PKG_LICENSE"));

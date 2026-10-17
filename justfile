@@ -16,8 +16,9 @@ cargo-target-dir := env('CARGO_TARGET_DIR', 'target')
 appdata := appid + '.metainfo.xml'
 # Application's desktop entry
 desktop := appid + '.desktop'
-# Application's icon.
-icon-svg := appid + '.svg'
+# Application's icon: PNGs made from assets/cosmic-ext-avd-logo.png.
+icon-png := appid + '.png'
+icon-sizes := '16 24 32 48 64 128 256 512'
 
 # Install destinations
 base-dir := absolute_path(clean(rootdir / prefix))
@@ -28,7 +29,6 @@ signin-dir := base-dir / 'libexec' / name
 signin-dst := signin-dir / signin-name
 desktop-dst := base-dir / 'share' / 'applications' / desktop
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
-icon-svg-dst := icons-dst / 'scalable' / 'apps' / icon-svg
 
 # Default recipe which runs `just build-release`
 default: build-release
@@ -75,11 +75,14 @@ install:
     install -Dm0755 {{ cargo-target-dir / 'release' / signin-name }} {{signin-dst}}
     install -Dm0644 {{ 'target' / 'xdgen' / 'app.desktop' }} {{desktop-dst}}
     install -Dm0644 {{ 'target' / 'xdgen' / 'app.metainfo.xml' }} {{appdata-dst}}
-    install -Dm0644 {{ 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'icon.svg' }} {{icon-svg-dst}}
+    for s in {{icon-sizes}}; do install -Dm0644 resources/icons/hicolor/${s}x${s}/apps/icon.png {{icons-dst}}/${s}x${s}/apps/{{icon-png}}; done
+    if [ -z "{{rootdir}}" ] && command -v gtk-update-icon-cache >/dev/null; then gtk-update-icon-cache -q -t -f {{icons-dst}}; fi
 
 # Uninstalls installed files
 uninstall:
-    rm -f {{bin-dst}} {{signin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-svg-dst}}
+    rm -f {{bin-dst}} {{signin-dst}} {{desktop-dst}} {{appdata-dst}}
+    for s in {{icon-sizes}}; do rm -f {{icons-dst}}/${s}x${s}/apps/{{icon-png}}; done
+    rm -f {{icons-dst}}/scalable/apps/{{appid}}.svg
     rmdir --ignore-fail-on-non-empty {{signin-dir}} 2>/dev/null || true
 
 # Vendor dependencies locally
