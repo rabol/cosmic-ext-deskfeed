@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=AVD Client
+Comment=Azure Virtual Desktop and Windows 365 client for the COSMIC™ desktop
+Type=Application
+Icon=io.github.rabol.cosmic-ext-avd
+Exec=cosmic-ext-avd %F
+Terminal=false
+StartupNotify=true
+Categories=Network;RemoteAccess;
+Keywords=AVD;Azure;Virtual Desktop;Windows 365;Remote Desktop;RDP;
+MimeType=
