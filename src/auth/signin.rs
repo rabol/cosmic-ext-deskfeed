@@ -197,8 +197,7 @@ fn run_helper(
             cmd.env(key, v);
         }
     }
-    let mut child = cmd
-        .spawn()
+    let mut child = crate::sessions::launcher::spawn_retrying(&mut cmd)
         .map_err(|e| SignInError::HelperFailed(e.kind().to_string()))?;
     let mut stdin = child.stdin.take().expect("piped");
     let stdout = child.stdout.take().expect("piped");

@@ -15,7 +15,9 @@ use std::fmt::Write as _;
 const MAX_LINES: usize = 1_000;
 const MAX_VALUE_LEN: usize = 4_096;
 
-/// Properties copied from the feed's file, lower-case.
+/// Properties copied from the feed's file, lower-case. Display behaviour
+/// (`smart sizing`, which conflicts with `/dynamic-resolution`) is left out:
+/// the app decides it.
 const ALLOWED: &[&str] = &[
     "full address",
     "alternate full address",
@@ -47,7 +49,6 @@ const ALLOWED: &[&str] = &[
     "videoplaybackmode",
     "use multimon",
     "screen mode id",
-    "smart sizing",
     "dynamic resolution",
     "autoreconnection enabled",
 ];

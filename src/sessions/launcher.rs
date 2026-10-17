@@ -361,7 +361,23 @@ fn spawn_freerdp(
             Ok(())
         });
     }
-    cmd.spawn().map_err(|e| io_err(&e))
+    spawn_retrying(&mut cmd).map_err(|e| io_err(&e))
+}
+
+/// `spawn`, retried briefly on "text file busy": the executable may still
+/// be open for writing in a process another thread just forked (seen with
+/// freshly written test scripts).
+pub fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
+    let mut attempts = 0;
+    loop {
+        match cmd.spawn() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 20 => {
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            other => return other,
+        }
+    }
 }
 
 /// Writes the argument lines and closes the pipe (an empty line ends them).
@@ -695,6 +711,81 @@ mod tests {
                 SessionEvent::Connected => panic!("unexpected Connected"),
             }
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Real `sdl-freerdp3`: every property we keep, plus our arguments, must
+    /// pass FreeRDP's argument parsing. Without `loadbalanceinfo` FreeRDP stops
+    /// right after parsing, before any network access.
+    #[test]
+    #[ignore = "needs sdl-freerdp3"]
+    fn real_freerdp_accepts_all_kept_properties() {
+        let ints = [
+            "gatewayusagemethod:i:1",
+            "gatewayprofileusagemethod:i:1",
+            "gatewaycredentialssource:i:0",
+            "gatewaybrokeringtype:i:1",
+            "remoteapplicationmode:i:0",
+            "enablerdsaadauth:i:0",
+            "enablecredsspsupport:i:1",
+            "authentication level:i:1",
+            "promptcredentialonce:i:1",
+            "targetisaadjoined:i:0",
+            "use redirection server name:i:0",
+            "audiomode:i:0",
+            "videoplaybackmode:i:1",
+            "use multimon:i:0",
+            "screen mode id:i:2",
+            "smart sizing:i:1",
+            "dynamic resolution:i:1",
+            "autoreconnection enabled:i:1",
+        ];
+        let strs = [
+            "full address:s:127.0.0.1",
+            "alternate full address:s:127.0.0.1",
+            "gatewayhostname:s:127.0.0.1:1",
+            "armpath:s:x",
+            "aadtenantid:s:x",
+            "geo:s:x",
+            "hubdiscoverygeourl:s:https://127.0.0.1/",
+            "wvd endpoint pool:s:x",
+            "workspace id:s:x",
+            "resourceprovider:s:x",
+            "remotedesktopname:s:x",
+            "kdcproxyname:s:x",
+        ];
+        let mut text = ints
+            .iter()
+            .chain(&strs)
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        text.push_str("\r\n");
+        let connection = ConnectionFile::parse(text.as_bytes()).unwrap();
+        let dir = std::env::temp_dir().join(format!("avd-real-freerdp-{}", std::process::id()));
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let s = LaunchSpec {
+            connection,
+            username: Some("anna@example.com".into()),
+            password: Some(Secret::new("pw".into())),
+            logon: LogonSetting::EmptyDomain,
+            helper: PathBuf::from("/nonexistent/helper"),
+            profile: dir.join("profile"),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let freerdp = find_freerdp().expect("sdl-freerdp3 installed");
+        let _session =
+            launch_with(&freerdp, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
+        let SessionEvent::Ended { log, .. } = rx.recv_timeout(Duration::from_secs(30)).unwrap()
+        else {
+            panic!("expected end")
+        };
+        let parse_errors: Vec<_> = log.iter().filter(|l| l.contains("cmdline")).collect();
+        assert!(parse_errors.is_empty(), "{parse_errors:#?}");
+        assert!(
+            log.iter().any(|l| l.contains("loadBalanceInfo")),
+            "{log:#?}"
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 }
