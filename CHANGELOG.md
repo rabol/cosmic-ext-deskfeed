@@ -30,6 +30,8 @@ First version (0.1.0), not yet released.
 - Signing out waits for the account's sign-in window and FreeRDP (with its sign-in helper) to end before deleting its cookies, so nothing can write them back; the helper never recreates deleted folders. Signing the same account in again waits until that is done.
 - Every connection attempt ends: the app stops a sign-in window that outlives its time, and a connection that hasn't connected within the time to wait plus the sign-in pages. Events from an earlier attempt are ignored.
 - Sign-in folders of cancelled "Add account" sign-ins are removed.
+- The log replaces IDs, user names, IP addresses, organization host names and long tokens with placeholders, also in FreeRDP's error lines (redacted before they are shortened).
+- Output from FreeRDP and messages to the sign-in helper are read with a size limit.
 - Installation with `just install`: desktop entry, icons, AppStream metadata.
 
 ### Known limitations

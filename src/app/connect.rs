@@ -279,8 +279,16 @@ impl AppModel {
             window_title: window_title.clone(),
             app_id: <Self as cosmic::Application>::APP_ID.to_owned(),
         };
-        // No secrets here: the setting and, for a custom domain, its name.
-        crate::app_log!("Starting FreeRDP with logon setting {logon:?}");
+        // The kind of setting only; a custom domain's name is tenant data.
+        crate::app_log!(
+            "Starting FreeRDP with logon setting {}",
+            match &logon {
+                LogonSetting::Automatic => "Automatic",
+                LogonSetting::EmptyDomain => "EmptyDomain",
+                LogonSetting::CustomDomain(_) => "CustomDomain",
+                LogonSetting::EntraSignIn => "EntraSignIn",
+            }
+        );
         self.connections
             .insert(key.to_owned(), Connection::Connecting);
         self.pending_logon

@@ -662,7 +662,10 @@ impl Log {
             if self.lines.len() == MAX_LOG_LINES {
                 self.lines.remove(0);
             }
-            self.lines.push(line.chars().take(300).collect());
+            // Redacted before it is shortened, so a cut token can't slip
+            // past the redaction (log.rs).
+            self.lines
+                .push(crate::log::redact(line).chars().take(300).collect());
         }
         if !self.connected && line.contains(CONNECTED_MARKER) {
             self.connected = true;

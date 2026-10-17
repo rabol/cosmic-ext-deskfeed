@@ -7,8 +7,9 @@
 //!   `~/.local/state/cosmic-ext-deskfeed/`), folder 0700, file 0600.
 //! - Rotated at 1 MiB; one older file (`app.log.1`) is kept.
 //! - Lines also go to stderr, for runs from a terminal.
-//! - Callers never log secrets; as a last guard, anything shaped like a JWT
-//!   (access, refresh or ID token) is replaced before writing.
+//! - Callers never log secrets or tenant data. As a last guard every line
+//!   is redacted before it is written (`redact`): tokens, IDs, user names,
+//!   IP addresses and host names outside Microsoft's service domains.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -80,24 +81,132 @@ fn rotate() {
     }
 }
 
-/// Bounded, one line, and no token-shaped words.
-fn redact(message: &str) -> String {
+/// Bounded, one line, with secrets and tenant data replaced: JWTs and
+/// other long tokens, GUIDs (tenant, object and other IDs), user names
+/// (`user@domain`, `DOMAIN\user`), IP addresses, and host names except
+/// Microsoft's service domains. Also for text from other programs
+/// (FreeRDP's log lines); redact before shortening, so a cut can't hide a
+/// token from it.
+pub fn redact(message: &str) -> String {
     let one_line: String = message
         .chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .take(MAX_LINE)
         .collect();
-    one_line
-        .split(' ')
-        .map(|word| {
-            if looks_like_jwt(word) {
-                "<redacted>"
-            } else {
-                word
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut out = String::with_capacity(one_line.len());
+    let mut word = String::new();
+    for c in one_line.chars() {
+        if is_word_char(c) {
+            word.push(c);
+        } else {
+            out.push_str(replace_word(&word).unwrap_or(&word));
+            word.clear();
+            out.push(c);
+        }
+    }
+    out.push_str(replace_word(&word).unwrap_or(&word));
+    out
+}
+
+/// Characters that make up tokens, names and addresses; anything else
+/// (spaces, `:/=,;"'()[]<>`, …) separates them.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | '\\' | '%' | '+' | '~')
+}
+
+fn replace_word(word: &str) -> Option<&'static str> {
+    if word.is_empty() {
+        return None;
+    }
+    if looks_like_jwt(word) {
+        return Some("<redacted>");
+    }
+    if is_guid(word) {
+        return Some("<id>");
+    }
+    if word.contains('\\')
+        || word
+            .split_once('@')
+            .is_some_and(|(user, domain)| !user.is_empty() && domain.contains('.'))
+    {
+        return Some("<user>");
+    }
+    if is_ipv4(word) {
+        return Some("<ip>");
+    }
+    match host_kind(word) {
+        Some(Host::Private) => return Some("<host>"),
+        Some(Host::Public) => return None,
+        None => {}
+    }
+    // Opaque tokens, codes and cookie values: long, letters and digits.
+    if word.len() >= 32
+        && word.chars().any(|c| c.is_ascii_digit())
+        && word.chars().any(|c| c.is_ascii_alphabetic())
+    {
+        return Some("<redacted>");
+    }
+    None
+}
+
+fn is_guid(word: &str) -> bool {
+    let parts: Vec<&str> = word.split('-').collect();
+    parts.len() == 5
+        && parts
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+fn is_ipv4(word: &str) -> bool {
+    let parts: Vec<&str> = word.split('.').collect();
+    parts.len() == 4 && parts.iter().all(|p| p.parse::<u8>().is_ok())
+}
+
+/// Microsoft's service domains: not tenant data, and useful to see.
+const PUBLIC_DOMAINS: &[&str] = &[
+    "microsoft.com",
+    "microsoftonline.com",
+    "windows.net",
+    "azure.com",
+    "azure.net",
+    "msftauth.net",
+    "msauth.net",
+];
+
+/// Dotted names that are not host names: logger tags, D-Bus and app IDs,
+/// and file names.
+const NOT_HOSTS: &[&str] = &["com.freerdp.", "org.freedesktop.", "io.github."];
+const FILE_ENDINGS: &[&str] = &[
+    "c", "cpp", "h", "hpp", "rs", "so", "dll", "exe", "json", "xml", "rdp", "log", "txt", "md",
+    "png", "html", "js", "sh", "py", "toml", "ftl",
+];
+
+enum Host {
+    /// One of Microsoft's service domains.
+    Public,
+    Private,
+}
+
+/// Whether `word` is a DNS name (two or more labels, alphabetic last
+/// label), and whose.
+fn host_kind(word: &str) -> Option<Host> {
+    let name = word.trim_end_matches('.').to_ascii_lowercase();
+    let labels: Vec<&str> = name.split('.').collect();
+    let last = labels.last().copied().unwrap_or_default();
+    let dns = labels.len() >= 2
+        && labels
+            .iter()
+            .all(|l| !l.is_empty() && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+        && last.len() >= 2
+        && last.chars().all(|c| c.is_ascii_alphabetic());
+    let public = PUBLIC_DOMAINS
+        .iter()
+        .any(|d| name == *d || name.ends_with(&format!(".{d}")));
+    if !dns || NOT_HOSTS.iter().any(|p| name.starts_with(p)) || FILE_ENDINGS.contains(&last) {
+        return None;
+    }
+    Some(if public { Host::Public } else { Host::Private })
 }
 
 /// `eyJ…` (base64 of `{"`), two dots, long: the shape of a JWT.
@@ -183,5 +292,47 @@ mod tests {
         // Ordinary text stays.
         assert_eq!(redact("saved sign-in: 1 found"), "saved sign-in: 1 found");
         assert_eq!(redact(&"x".repeat(5000)).len(), MAX_LINE);
+    }
+
+    #[test]
+    fn tenant_data_and_opaque_secrets_are_removed() {
+        let cases = [
+            (
+                "tenant 11111111-2222-3333-4444-555555555555 ok",
+                "tenant <id> ok",
+            ),
+            ("user anna@contoso.com signed in", "user <user> signed in"),
+            (r"logon CONTOSO\anna failed", "logon <user> failed"),
+            (
+                "connecting to avd-host-0.contoso.local:3389",
+                "connecting to <host>:3389",
+            ),
+            ("peer 10.1.2.3:443", "peer <ip>:443"),
+            (
+                "refused Feed URL (NotAllowed): https://evil.example:443/api/x",
+                "refused Feed URL (NotAllowed): https://<host>:443/api/x",
+            ),
+            (
+                "cookie=0.AXwAq3bF9hX2kUe7Zr1pN8mQ4sT6vW8yZ0aB2cD4eF6gH8iJ",
+                "cookie=<redacted>",
+            ),
+        ];
+        for (input, want) in cases {
+            assert_eq!(redact(input), want, "{input}");
+        }
+    }
+
+    #[test]
+    fn useful_diagnostics_stay() {
+        for keep in [
+            "[ERROR][com.freerdp.core.connection] - [rdp_client_wait_for_activation]: \
+             ERRCONNECT_ACTIVATION_TIMEOUT [0x0002001C]",
+            "gateway afdfp-rdgateway-r1.wvd.microsoft.com:443",
+            "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+            "[sdl_disp.cpp:437] FreeRDP 3.32.2",
+            "STATE_NEGO --> STATE_AAD",
+        ] {
+            assert_eq!(redact(keep), keep);
+        }
     }
 }

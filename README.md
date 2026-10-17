@@ -74,7 +74,7 @@ If something doesn't work, **View → Dependencies** shows what's missing, and *
 - Passwords and tokens reach FreeRDP through a private pipe, never through the command line or environment.
 - Your account's tokens are only sent to the Microsoft addresses the app was built for (`login.microsoftonline.com`, `*.wvd.microsoft.com`), always over HTTPS.
 - The Microsoft sign-in window is a separate, locked-down program: HTTPS only, no pop-ups or downloads, and it only hands back the sign-in result.
-- The log (`~/.local/state/cosmic-ext-deskfeed/app.log`, readable only by you, at most about 2 MiB) contains no passwords or tokens.
+- The log (`~/.local/state/cosmic-ext-deskfeed/app.log`, readable only by you, at most about 2 MiB) contains no passwords or tokens; IDs, user names, IP addresses and your organization's host names are replaced by placeholders before anything is written, including in FreeRDP's error lines. Check it before sharing it anyway.
 - No telemetry.
 
 Design details: [specs.md](./specs.md) and the [architecture decision records](./docs/adr/README.md).
