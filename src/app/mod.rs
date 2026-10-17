@@ -31,7 +31,7 @@ use crate::service::endpoint::{EndpointPolicy, Role};
 use crate::service::feed::ResourceKind;
 use crate::service::http::{Http, HttpError};
 use crate::sessions::launcher::{self, LaunchSpec, LogonSetting, SessionEnd, SessionEvent};
-use crate::sessions::rdpfile::ConnectionFile;
+use crate::sessions::rdpfile::{ConnectionFile, RdpError};
 use crate::settings::{self, ConnectionSettings, Toggle};
 
 mod account_flow;

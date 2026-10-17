@@ -8,6 +8,14 @@
 //! serial ports, microphone, clipboard) is dropped and explicitly turned
 //! off; the user's own settings decide those later. Commands such as
 //! `alternate shell` are never passed on.
+//!
+//! The file decides where the access token goes (`gatewayhostname`), so a
+//! file naming any other gateway than an AVD service host is refused. Its
+//! certificate policy (`authentication level`) is not kept: in FreeRDP
+//! 3.32.2 level 0 skips the session host's certificate check (`tls.c`), and
+//! without the property FreeRDP uses its default, 2, which checks.
+
+use crate::service::endpoint::is_avd_gateway;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -42,7 +50,6 @@ const ALLOWED: &[&str] = &[
     "remotedesktopname",
     "enablerdsaadauth",
     "enablecredsspsupport",
-    "authentication level",
     "promptcredentialonce",
     "targetisaadjoined",
     "kdcproxyname",
@@ -77,6 +84,8 @@ pub enum RdpError {
     TooLarge,
     /// No `full address`, so there is nothing to connect to.
     MissingAddress,
+    /// No gateway, or one that isn't an AVD service host.
+    GatewayNotAllowed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +135,9 @@ impl ConnectionFile {
         }
         if !matches!(props.get("full address"), Some(Value::Str(s)) if !s.is_empty()) {
             return Err(RdpError::MissingAddress);
+        }
+        if !matches!(props.get("gatewayhostname"), Some(Value::Str(g)) if is_avd_gateway(g)) {
+            return Err(RdpError::GatewayNotAllowed);
         }
         Ok(Self { props, dropped })
     }
@@ -189,9 +201,11 @@ fn split_line(line: &str) -> Option<(&str, &str, &str)> {
 mod tests {
     use super::*;
 
+    const GW: &str = "gatewayhostname:s:rdgateway.wvd.microsoft.com:443\r\n";
+
     const SAMPLE: &str = "full address:s:rdgateway.example\r\n\
         alternate full address:s:rdgateway.example\r\n\
-        gatewayhostname:s:gw.example:443\r\n\
+        gatewayhostname:s:rdgateway.wvd.microsoft.com:443\r\n\
         armpath:s:abc/def\r\n\
         loadbalanceinfo:s:lb\r\n\
         enablecredsspsupport:i:1\r\n\
@@ -213,7 +227,7 @@ mod tests {
         let text = f.to_freerdp_text();
         for kept in [
             "full address:s:rdgateway.example",
-            "gatewayhostname:s:gw.example:443",
+            "gatewayhostname:s:rdgateway.wvd.microsoft.com:443",
             "armpath:s:abc/def",
             "audiomode:i:0",
         ] {
@@ -240,7 +254,7 @@ mod tests {
     #[test]
     fn reads_utf16_with_bom() {
         let mut bytes = vec![0xFF, 0xFE];
-        for u in "full address:s:h\r\nenablerdsaadauth:i:1\r\n".encode_utf16() {
+        for u in format!("full address:s:h\r\n{GW}enablerdsaadauth:i:1\r\n").encode_utf16() {
             bytes.extend_from_slice(&u.to_le_bytes());
         }
         let f = ConnectionFile::parse(&bytes).unwrap();
@@ -273,7 +287,8 @@ mod tests {
         // A value can't smuggle a second property: lines are split first,
         // and control characters inside values are refused.
         let f = ConnectionFile::parse(
-            b"full address:s:h\r\nremotedesktopname:s:a\x0bdrivestoredirect:s:*\r\n",
+            format!("full address:s:h\r\n{GW}remotedesktopname:s:a\x0bdrivestoredirect:s:*\r\n")
+                .as_bytes(),
         )
         .unwrap();
         let text = f.to_freerdp_text();
@@ -283,8 +298,38 @@ mod tests {
 
     #[test]
     fn bad_integer_is_dropped() {
-        let f = ConnectionFile::parse(b"full address:s:h\r\nenablerdsaadauth:i:yes\r\n").unwrap();
+        let f = ConnectionFile::parse(
+            format!("full address:s:h\r\n{GW}enablerdsaadauth:i:yes\r\n").as_bytes(),
+        )
+        .unwrap();
         assert!(!f.entra_sso());
+        assert_eq!(f.dropped, 1);
+    }
+
+    #[test]
+    fn token_only_goes_to_an_avd_gateway() {
+        for gateway in [
+            "",
+            "gatewayhostname:s:attacker.example:443\r\n",
+            "gatewayhostname:s:127.0.0.1:1\r\n",
+            "gatewayhostname:i:1\r\n",
+        ] {
+            let text = format!("full address:s:h\r\n{gateway}");
+            assert_eq!(
+                ConnectionFile::parse(text.as_bytes()).unwrap_err(),
+                RdpError::GatewayNotAllowed,
+                "{gateway}"
+            );
+        }
+    }
+
+    #[test]
+    fn certificate_policy_is_not_taken_from_the_feed() {
+        let f = ConnectionFile::parse(
+            format!("full address:s:h\r\n{GW}authentication level:i:0\r\n").as_bytes(),
+        )
+        .unwrap();
+        assert!(!f.to_freerdp_text().contains("authentication level"));
         assert_eq!(f.dropped, 1);
     }
 

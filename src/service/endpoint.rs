@@ -14,6 +14,11 @@
 //! traffic") as required for Remote Desktop clients ("Required FQDNs and
 //! endpoints for Azure Virtual Desktop", End user devices), so feed roles
 //! accept one host label under that domain, still with the path checks.
+//!
+//! The same domain holds the gateway that FreeRDP sends the access token to
+//! (`gatewayhostname` in a connection file; FreeRDP 3.32.2 `arm.c` connects
+//! to it and adds `Authorization: Bearer`). The owner's connection file
+//! (2026-10-17) named `afdfp-rdgateway-r1.wvd.microsoft.com:443`.
 
 use url::Url;
 
@@ -241,6 +246,20 @@ impl EndpointPolicy {
     }
 }
 
+/// A connection file's `gatewayhostname` (`host` or `host:port`) that may
+/// receive the access token: one label under `wvd.microsoft.com`, port 443.
+pub fn is_avd_gateway(value: &str) -> bool {
+    let (host, port) = match value.rsplit_once(':') {
+        Some((host, port)) => match port.parse::<u16>() {
+            Ok(port) => (host, port),
+            Err(_) => return false,
+        },
+        None => (value, 443),
+    };
+    port == 443
+        && Host::LabelUnder(AVD_SERVICE_DOMAIN.to_owned()).matches(&host.to_ascii_lowercase())
+}
+
 /// `/{tenant}/oauth2/v2.0/token` with a single plain tenant segment.
 fn is_token_path(path: &str) -> bool {
     let mut parts = path.split('/');
@@ -434,6 +453,33 @@ mod tests {
                 .is_err(),
                 "{path}"
             );
+        }
+    }
+
+    #[test]
+    fn gateway_must_be_an_avd_service_host() {
+        for ok in [
+            "afdfp-rdgateway-r1.wvd.microsoft.com:443",
+            "rdgateway.wvd.microsoft.com",
+            "RDGATEWAY.wvd.microsoft.com:443",
+        ] {
+            assert!(is_avd_gateway(ok), "{ok}");
+        }
+        for bad in [
+            "attacker.example:443",
+            "127.0.0.1:1",
+            "[::1]:443",
+            "rdgateway.wvd.microsoft.com:8443",
+            "rdgateway.wvd.microsoft.com:",
+            "rdgateway.wvd.microsoft.com.evil.example",
+            "a.b.wvd.microsoft.com",
+            "user@rdgateway.wvd.microsoft.com",
+            " rdgateway.wvd.microsoft.com",
+            "rdgateway.wvd.microsoft.com.",
+            "wvd.microsoft.com",
+            "",
+        ] {
+            assert!(!is_avd_gateway(bad), "{bad}");
         }
     }
 

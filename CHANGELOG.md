@@ -18,6 +18,7 @@ First version (0.1.0), not yet released.
 - "Open on a new workspace" through COSMIC's window and workspace protocols.
 - Dependency check at startup and under View → Dependencies.
 - Log file under `~/.local/state/cosmic-ext-deskfeed/` with View → Open log folder.
+- Connection files from the feed are refused unless their gateway is an Azure Virtual Desktop service host (the access token goes there), and their certificate policy is ignored, so the session host's certificate is always checked.
 - Installation with `just install`: desktop entry, icons, AppStream metadata.
 
 ### Known limitations

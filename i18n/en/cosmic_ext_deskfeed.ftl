@@ -78,6 +78,7 @@ error-password-chars = The password contains a line break, which can't be sent.
 error-bad-domain = Enter a domain name using letters, digits, dots and dashes.
 error-no-connection-file = The service didn't provide connection details for this desktop.
 error-bad-connection-file = The connection details for this desktop couldn't be read ({ $detail }).
+error-gateway-not-allowed = This desktop's connection details name a gateway outside Azure Virtual Desktop, so Deskfeed didn't connect.
 error-freerdp-missing = FreeRDP (sdl-freerdp3) is not installed. Install the freerdp package.
 error-launch = The remote desktop client couldn't start ({ $detail }).
 error-account-locked = Your account is locked. Contact your IT department.

@@ -628,9 +628,9 @@ mod tests {
 
     fn spec(logon: LogonSetting, password: Option<&str>, entra_file: bool) -> LaunchSpec {
         let text = if entra_file {
-            "full address:s:h\r\nenablerdsaadauth:i:1\r\n"
+            "full address:s:h\r\ngatewayhostname:s:rdgateway.wvd.microsoft.com\r\nenablerdsaadauth:i:1\r\n"
         } else {
-            "full address:s:h\r\n"
+            "full address:s:h\r\ngatewayhostname:s:rdgateway.wvd.microsoft.com\r\n"
         };
         LaunchSpec {
             connection: ConnectionFile::parse(text.as_bytes()).unwrap(),
@@ -937,7 +937,6 @@ mod tests {
             "remoteapplicationmode:i:0",
             "enablerdsaadauth:i:0",
             "enablecredsspsupport:i:1",
-            "authentication level:i:1",
             "promptcredentialonce:i:1",
             "targetisaadjoined:i:0",
             "use redirection server name:i:0",
@@ -952,7 +951,8 @@ mod tests {
         let strs = [
             "full address:s:127.0.0.1",
             "alternate full address:s:127.0.0.1",
-            "gatewayhostname:s:127.0.0.1:1",
+            // Never contacted: FreeRDP stops before the network (see above).
+            "gatewayhostname:s:rdgateway.wvd.microsoft.com:443",
             "armpath:s:x",
             "aadtenantid:s:x",
             "geo:s:x",

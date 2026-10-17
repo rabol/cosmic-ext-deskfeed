@@ -118,7 +118,10 @@ impl AppModel {
                     .map_err(|e| describe_fetch_error(&FetchError::Http(e)))?;
                 ConnectionFile::parse(&resp.body)
                     .map(|c| (Arc::new(c), signed_in))
-                    .map_err(|e| fl!("error-bad-connection-file", detail = format!("{e:?}")))
+                    .map_err(|e| match e {
+                        RdpError::GatewayNotAllowed => fl!("error-gateway-not-allowed"),
+                        e => fl!("error-bad-connection-file", detail = format!("{e:?}")),
+                    })
             })
             .await
             .unwrap_or_else(|_| Err(fl!("error-generic")));
