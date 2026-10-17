@@ -55,11 +55,58 @@ const BASE_ENV: &[&str] = &[
     "PATH",
     "http_proxy",
     "https_proxy",
+    "all_proxy",
     "no_proxy",
     "HTTP_PROXY",
     "HTTPS_PROXY",
+    "ALL_PROXY",
     "NO_PROXY",
 ];
+
+/// The proxy the app's own HTTP client uses: the first set of these, in
+/// ureq's order (ureq 3.4.2 `Proxy::try_from_env`).
+const APP_PROXY_VARS: &[&str] = &[
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+];
+
+/// What to give FreeRDP so it uses the same proxy as the app (spec §7).
+///
+/// FreeRDP reads only `https_proxy`/`HTTPS_PROXY` (3.32.2
+/// `libfreerdp/core/proxy.c`, `proxy_prepare`), so a proxy set only as
+/// `http_proxy` or `all_proxy` would be used by the app but not by FreeRDP.
+/// It accepts `http://`, `socks5://` or no scheme (`proxy_parse_uri`).
+/// `get` reads an environment variable.
+fn freerdp_proxy(get: impl Fn(&str) -> Option<String>) -> ProxyForFreeRdp {
+    let set = |name: &str| get(name).filter(|v| !v.is_empty());
+    if set("https_proxy").is_some() || set("HTTPS_PROXY").is_some() {
+        return ProxyForFreeRdp::AlreadySet;
+    }
+    let Some(proxy) = APP_PROXY_VARS.iter().find_map(|name| set(name)) else {
+        return ProxyForFreeRdp::None;
+    };
+    let scheme = proxy.split_once("://").map(|(s, _)| s.to_ascii_lowercase());
+    match scheme.as_deref() {
+        None | Some("http" | "socks5") => ProxyForFreeRdp::Set(proxy),
+        Some(other) => ProxyForFreeRdp::Unsupported(other.to_owned()),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ProxyForFreeRdp {
+    /// No proxy configured.
+    None,
+    /// FreeRDP reads it from its environment itself.
+    AlreadySet,
+    /// Give FreeRDP `https_proxy` with this value.
+    Set(String),
+    /// A scheme FreeRDP can't use (for example `https`).
+    Unsupported(String),
+}
 
 /// Copies the allowed variables ([`BASE_ENV`] plus `extra`) from the app's
 /// environment into `cmd`, which should start with `env_clear()`.
@@ -404,6 +451,16 @@ fn spawn_freerdp(
         .stderr(Stdio::piped())
         .process_group(0);
     pass_environment(&mut cmd, &["PULSE_SERVER"]);
+    match freerdp_proxy(|name| std::env::var(name).ok()) {
+        ProxyForFreeRdp::Set(proxy) => {
+            cmd.env("https_proxy", proxy);
+        }
+        ProxyForFreeRdp::Unsupported(scheme) => crate::app_log!(
+            "proxy: FreeRDP supports only http:// and socks5:// proxies, not {scheme}://; \
+             connecting without passing it on"
+        ),
+        ProxyForFreeRdp::None | ProxyForFreeRdp::AlreadySet => {}
+    }
     cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_PROFILE", profile);
     // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it
     // stopped. This logger prints no names, passwords or tokens (FreeRDP
@@ -654,6 +711,49 @@ mod tests {
         assert!(!args(&s).iter().any(|x| x.starts_with("/wm-class:")));
         s.window_title = "\n".into();
         assert!(!args(&s).iter().any(|x| x.starts_with("/title:")));
+    }
+
+    #[test]
+    fn freerdp_gets_the_proxy_the_app_uses() {
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                vars.iter()
+                    .find(|(n, _)| *n == name)
+                    .map(|(_, v)| (*v).to_owned())
+            }
+        };
+        assert_eq!(freerdp_proxy(env(&[])), ProxyForFreeRdp::None);
+        // FreeRDP reads these itself.
+        assert_eq!(
+            freerdp_proxy(env(&[("https_proxy", "http://p:3128")])),
+            ProxyForFreeRdp::AlreadySet
+        );
+        // Only http_proxy or all_proxy: passed on as https_proxy.
+        assert_eq!(
+            freerdp_proxy(env(&[("http_proxy", "http://p:3128")])),
+            ProxyForFreeRdp::Set("http://p:3128".into())
+        );
+        assert_eq!(
+            freerdp_proxy(env(&[
+                ("all_proxy", "socks5://s:1080"),
+                ("http_proxy", "http://p:3128")
+            ])),
+            ProxyForFreeRdp::Set("socks5://s:1080".into())
+        );
+        assert_eq!(
+            freerdp_proxy(env(&[("HTTP_PROXY", "p:3128")])),
+            ProxyForFreeRdp::Set("p:3128".into())
+        );
+        // Empty values don't count.
+        assert_eq!(
+            freerdp_proxy(env(&[("http_proxy", "")])),
+            ProxyForFreeRdp::None
+        );
+        // Schemes FreeRDP rejects.
+        assert_eq!(
+            freerdp_proxy(env(&[("http_proxy", "https://p:443")])),
+            ProxyForFreeRdp::Unsupported("https".into())
+        );
     }
 
     #[test]
