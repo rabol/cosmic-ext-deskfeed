@@ -4,7 +4,7 @@ AVD Client handles work sign-ins, so security reports are welcome and taken seri
 
 ## Reporting a vulnerability
 
-Please **don't open a public issue**. Report it privately through GitHub: on the repository page, open **Security → Report a vulnerability** (GitHub's private vulnerability reporting). Include what you found, how to reproduce it, and which version or commit you used.
+Please **don't open a public issue**. Report it privately, either through GitHub (on the repository page, **Security → Report a vulnerability**) or by email to **cosmic-ext-avd@rabol.dev**. Include what you found, how to reproduce it, and which version or commit you used.
 
 You'll get an answer as soon as possible. Fixes are released before details are made public.
 

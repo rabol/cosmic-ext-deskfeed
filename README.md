@@ -149,6 +149,10 @@ Most of the crates in `Cargo.lock` (696 in total) come in through libcosmic. The
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). Please report security problems privately as described in [SECURITY.md](./SECURITY.md). Changes are listed in [CHANGELOG.md](./CHANGELOG.md); third-party licenses in [THIRD-PARTY-LICENSES.md](./THIRD-PARTY-LICENSES.md).
 
+## Contact
+
+**cosmic-ext-avd@rabol.dev**. For bugs and ideas, please prefer [GitHub issues](https://github.com/rabol/cosmic-ext-avd/issues); never include your organization's tenant details.
+
 ## License
 
 [MIT](./LICENSE) © 2026 Steen Rabol.
