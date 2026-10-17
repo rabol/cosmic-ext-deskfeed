@@ -31,11 +31,12 @@ Dated because these are undocumented Microsoft interfaces.
 - 2026-10-17 12:13 (reference app, `/d:AzureAD`, password pasted via `FREERDP_ASKPASS`, no dialog): `0x52E` again, 10 s after the gateway step. A typing error is now unlikely.
 - FreeRDP history: commit `967793134` (2025-09-26, "[core,arm] fix domain setting"): "While AzureAD seems to be required for many setups, some need an empty domain (or maybe a different all together?)". FreeRDP issue #11887 (fixed in 3.18): an AVD setup that needed an empty domain; the same reporter also connected by forcing Entra authentication to the session host (`enablerdsaadauth:i:1`) although the host pool didn't set it. Issue #10298: `RDSTLS_RESULT_LOGON_FAILURE` with several formats; the maintainer calls the right format "hard to determine". No later FreeRDP change to `arm.c`/`rdstls.c` addresses this (checked `3.32.2..master`).
 - Next tests: (1) empty domain (no Advanced flags) with a pasted password; (2) Advanced flags `/sec:aad` (Entra authentication to the session host, no password).
+- 2026-10-17 14:23 (the app itself, native build, COSMIC Wayland): sign-in through the WebKitGTK helper with the public client ID, code exchange with PKCE, ID token validation, feed discovery and all tenant feeds succeeded on the owner's account: 3 workspaces, 3 desktops listed. The feed service accepted the public client ID with `X-MS-User-Agent: com.microsoft.rdc.html/2.0.79.2 rdhtml-sdk/2.0.4`.
 
 ## Compatibility matrix
 
 | Configuration | Feed discovery | Gateway | Session host | Notes |
 |---|---|---|---|---|
-| Public client ID, host pool without SSO, `sdl-freerdp3` 3.32.2 native Wayland, native build | not yet tested | works (reference app log) | `0x52E` with UPN + empty domain (reference app) | Step C |
+| Public client ID, host pool without SSO, `sdl-freerdp3` 3.32.2 native Wayland, native build | works (app, 2026-10-17) | works (reference app log) | `0x52E` with UPN + empty domain (reference app) | Step C |
 | Public client ID, host pool with SSO (`/sec:aad`) | not yet tested | not yet tested | not yet tested | Needs a host pool with SSO |
 | Admin-provided registration | not yet tested | not yet tested | not yet tested | Step H |
