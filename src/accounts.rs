@@ -174,9 +174,24 @@ pub fn clean_unfinished_profiles() {
     }
 }
 
-/// One token renewal or keyring write at a time (spec §6: serialize
-/// refresh per account; serializing all accounts is simpler and enough).
-static RENEWAL: Mutex<()> = Mutex::new(());
+/// One token renewal or keyring write at a time per account (spec §6).
+/// Per account, so one account waiting (for example on a keyring prompt)
+/// doesn't hold up another's renewal.
+static ACCOUNT_LOCKS: LazyLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn account_lock(id: &str) -> Arc<Mutex<()>> {
+    ACCOUNT_LOCKS
+        .lock()
+        .expect("not poisoned")
+        .entry(id.to_owned())
+        .or_default()
+        .clone()
+}
+
+/// One call to the keyring at a time, so it shows at most one unlock
+/// prompt.
+static KEYRING: Mutex<()> = Mutex::new(());
 
 /// Sign-outs per account. Work that started before an account's sign-out
 /// must not save its tokens afterwards (spec §6: late callbacks must not
@@ -255,6 +270,7 @@ struct Keyring;
 
 impl Store for Keyring {
     fn load_all(&self, config: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
+        let _keyring = KEYRING.lock();
         secrets::load_all(config)
     }
     fn save(
@@ -263,9 +279,11 @@ impl Store for Keyring {
         identity: &Identity,
         refresh_token: &Secret,
     ) -> Result<(), SecretsError> {
+        let _keyring = KEYRING.lock();
         secrets::save(config, identity, refresh_token)
     }
     fn delete(&self, config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
+        let _keyring = KEYRING.lock();
         secrets::delete(config, identity)
     }
 }
@@ -287,7 +305,8 @@ fn system() -> Env<'static> {
 /// Saves the account's refresh token, unless it was signed out since
 /// `started` (a [`sign_out_count`]). The error is the notice to show.
 pub fn save(account: &SignedIn, started: u64) -> Result<(), String> {
-    let _renewal = RENEWAL.lock();
+    let lock = account_lock(&account_id(&account.identity));
+    let _account = lock.lock();
     save_locked(&system(), account, started)
 }
 
@@ -319,7 +338,8 @@ pub fn delete(identity: &Identity) -> Result<(), String> {
 
 fn delete_in(env: &Env, identity: &Identity) -> Result<(), String> {
     note_sign_out(&account_id(identity));
-    let _renewal = RENEWAL.lock();
+    let lock = account_lock(&account_id(identity));
+    let _account = lock.lock();
     let deleted = env.store.delete(&env.config, identity);
     crate::app_log!("saved sign-in: deleted (sign-out): {deleted:?}");
     deleted.map_err(|_| fl!("error-sign-out-incomplete"))
@@ -328,6 +348,7 @@ fn delete_in(env: &Env, identity: &Identity) -> Result<(), String> {
 pub fn keyring_detail(e: &SecretsError) -> String {
     match e {
         SecretsError::Dismissed => fl!("keyring-dismissed"),
+        SecretsError::NoAnswer => fl!("keyring-no-answer"),
         SecretsError::Malformed => fl!("keyring-malformed"),
         SecretsError::Unavailable(_) => fl!("keyring-unavailable"),
     }
@@ -354,7 +375,6 @@ pub fn load_saved() -> Result<Vec<Stored>, String> {
 }
 
 fn load_saved_in(env: &Env) -> Result<Vec<Stored>, String> {
-    let _renewal = RENEWAL.lock();
     match env.store.load_all(&env.config) {
         Ok(all) => {
             crate::app_log!("saved sign-in: {} found", all.len());
@@ -388,7 +408,8 @@ fn restore_in(http: &Http, env: &Env, stored: &Stored) -> Restore {
     let config = &env.config;
     let id = account_id(&stored.identity);
     let started = sign_out_count(&id);
-    let _renewal = RENEWAL.lock();
+    let lock = account_lock(&id);
+    let _account = lock.lock();
     let renewed = token::refresh(http, config, &stored.refresh_token);
     if let Err(e) = &renewed {
         crate::app_log!("saved sign-in: renewal failed ({})", token_error_kind(e));
@@ -487,7 +508,8 @@ fn renew_in(http: &Http, env: &Env, account: Arc<SignedIn>) -> Result<Arc<Signed
         return Ok(account);
     }
     let started = sign_out_count(&account_id(&account.identity));
-    let _renewal = RENEWAL.lock();
+    let lock = account_lock(&account_id(&account.identity));
+    let _account = lock.lock();
     // Another renewal may have finished while this one waited for the
     // lock: use its result, or at least its (rotated) refresh token.
     let account = match newest(&account) {

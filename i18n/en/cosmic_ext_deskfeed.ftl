@@ -21,6 +21,7 @@ error-keyring-load = Your saved sign-in couldn't be read: { $detail } Sign in to
 notice-not-saved = Your sign-in couldn't be saved: { $detail } You'll need to sign in again the next time you start the app.
 keyring-unavailable = the system keyring isn't available.
 keyring-dismissed = the keyring stayed locked.
+keyring-no-answer = the keyring's unlock prompt wasn't answered.
 keyring-malformed = the saved data couldn't be read.
 cancel = Cancel
 quit-title = Quit Deskfeed?

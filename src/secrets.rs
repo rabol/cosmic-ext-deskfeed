@@ -37,6 +37,9 @@ const KIND: &str = "refresh-token";
 const PAYLOAD_VERSION: u32 = 1;
 const MAX_PAYLOAD: usize = 64 * 1024;
 
+/// How long an unlock prompt may stay unanswered.
+const PROMPT_WAIT: std::time::Duration = std::time::Duration::from_mins(2);
+
 /// `(session, parameters, value, content type)` from the specification.
 type SecretStruct = (OwnedObjectPath, Vec<u8>, Vec<u8>, String);
 
@@ -46,6 +49,8 @@ pub enum SecretsError {
     Unavailable(String),
     /// The user dismissed the keyring's unlock prompt.
     Dismissed,
+    /// The unlock prompt got no answer in time; it was dismissed.
+    NoAnswer,
     /// The stored item isn't one we can read.
     Malformed,
 }
@@ -55,6 +60,7 @@ impl fmt::Display for SecretsError {
         match self {
             Self::Unavailable(e) => write!(f, "keyring unavailable: {e}"),
             Self::Dismissed => write!(f, "keyring unlock dismissed"),
+            Self::NoAnswer => write!(f, "keyring unlock prompt not answered in time"),
             Self::Malformed => write!(f, "stored sign-in can't be read"),
         }
     }
@@ -169,14 +175,28 @@ impl Keyring {
         self.proxy(SERVICE_PATH, SERVICE)
     }
 
-    /// Runs a prompt (for example "unlock the keyring") and waits for it.
+    /// Runs a prompt (for example "unlock the keyring") and waits for it,
+    /// at most [`PROMPT_WAIT`]; then dismisses it (`Prompt.Dismiss`), so a
+    /// forgotten prompt can't keep the app waiting.
     fn prompt(&self, path: &OwnedObjectPath) -> Result<OwnedValue, SecretsError> {
-        let prompt = self.proxy(path.as_str(), PROMPT)?;
+        let prompt = Proxy::new(&self.conn, BUS_NAME, path.clone().into_inner(), PROMPT)?;
         let mut completed = prompt.receive_signal("Completed")?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(completed.next());
+        });
         prompt.call_method("Prompt", &("",))?;
-        let msg = completed
-            .next()
-            .ok_or_else(|| SecretsError::Unavailable("prompt ended".into()))?;
+        let msg = match rx.recv_timeout(PROMPT_WAIT) {
+            Ok(Some(msg)) => msg,
+            Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(SecretsError::Unavailable("prompt ended".into()));
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // The service then sends Completed, which ends the thread.
+                let _ = prompt.call_method("Dismiss", &());
+                return Err(SecretsError::NoAnswer);
+            }
+        };
         let (dismissed, result): (bool, OwnedValue) = msg.body().deserialize()?;
         if dismissed {
             Err(SecretsError::Dismissed)
