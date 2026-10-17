@@ -1,0 +1,57 @@
+# Checks on every push to main and every pull request (spec §11).
+#
+# Runs in an Arch Linux container: the sign-in helper needs GTK >= 4.18 and
+# WebKitGTK >= 2.52 (signin/Cargo.toml), newer than Ubuntu's packages.
+# Third-party actions are pinned to a commit; the job can only read the
+# repository.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Format, lint, test, build, validate
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install build and check tools
+        run: >
+          pacman -Syu --noconfirm --needed
+          git rust just pkgconf
+          gtk4 webkitgtk-6.0 libxkbcommon wayland
+          desktop-file-utils appstream
+
+      - name: Check out
+        # actions/checkout v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked --workspace
+
+      - name: Release build
+        run: cargo build --locked --release --workspace
+
+      - name: Desktop entry and AppStream metadata
+        run: |
+          desktop-file-validate target/xdgen/app.desktop
+          appstreamcli validate --no-net target/xdgen/app.metainfo.xml
