@@ -21,12 +21,15 @@ use gtk::glib;
 use serde_json::{Value, json};
 
 use crate::protocol::{self, RedirectTarget, Reply};
-use crate::view::{self, SignInView};
+use crate::view::{self, Show, SignInView};
 
 const PROFILE_ENV: &str = "COSMIC_EXT_AVD_SIGNIN_PROFILE";
 const MAX_LINE: usize = 64 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 180_000;
 const MAX_TIMEOUT_MS: u64 = 15 * 60 * 1000;
+/// How long the hidden `prompt=none` attempt may take before the normal
+/// sign-in is used instead.
+const SILENT_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Incoming {
@@ -249,13 +252,36 @@ fn handle(msg: &Incoming, view: &SignInView, send: &Arc<impl Fn(String) + 'stati
             timeout_ms,
         } => {
             let (id, redirect_uri, reply_send) = (*id, redirect_uri.clone(), send.clone());
-            let started = view.navigate(
-                url,
-                target.clone(),
-                true,
-                Duration::from_millis(*timeout_ms),
-                move |reply| reply_send(navigate_response(id, &redirect_uri, reply)),
-            );
+            let respond = move |reply| reply_send(navigate_response(id, &redirect_uri, reply));
+            let timeout = Duration::from_millis(*timeout_ms);
+            // First without any page (`prompt=none`); the normal sign-in only
+            // if Microsoft says it needs the user.
+            let started = match protocol::with_prompt_none(url) {
+                Some(silent_url) => {
+                    let (view2, url, target2) = (view.clone(), url.clone(), target.clone());
+                    view.navigate(
+                        &silent_url,
+                        target.clone(),
+                        Show::Never,
+                        SILENT_TIMEOUT,
+                        move |reply| {
+                            // Status only: never the code or token.
+                            let outcome = match &reply {
+                                Reply::Ok { .. } => "ok, no page shown".to_owned(),
+                                Reply::Error { error, .. } => format!("error {error}"),
+                                other => format!("{other:?}"),
+                            };
+                            eprintln!("cosmic-ext-avd-signin: silent token request (prompt=none): {outcome}");
+                            if protocol::needs_interaction(&reply) {
+                                view2.navigate(&url, target2, Show::IfNeeded, timeout, respond);
+                            } else {
+                                respond(reply);
+                            }
+                        },
+                    )
+                }
+                None => view.navigate(url, target.clone(), Show::IfNeeded, timeout, respond),
+            };
             if !started {
                 send(error(id, "navigate_already_in_progress"));
             }

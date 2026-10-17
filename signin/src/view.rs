@@ -30,6 +30,18 @@ const SHOW_AFTER: Duration = Duration::from_millis(1500);
 
 type OnResult = Box<dyn FnOnce(Reply)>;
 
+/// When the sign-in window may appear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Show {
+    /// At once.
+    Now,
+    /// Only if the sign-in hasn't finished shortly after a page loaded
+    /// (the user has to act).
+    IfNeeded,
+    /// Never: a `prompt=none` request, which must not show anything.
+    Never,
+}
+
 struct Inner {
     webview: WebView,
     cookies: Option<CookieManager>,
@@ -38,7 +50,7 @@ struct Inner {
     window: gtk::Window,
     target: RefCell<RedirectTarget>,
     on_result: RefCell<Option<OnResult>>,
-    silent: Cell<bool>,
+    show: Cell<Show>,
     timeout: RefCell<Option<glib::SourceId>>,
     show_timer: RefCell<Option<glib::SourceId>>,
 }
@@ -97,7 +109,7 @@ impl SignInView {
             window,
             target: RefCell::new(RedirectTarget::NativeClient),
             on_result: RefCell::new(None),
-            silent: Cell::new(false),
+            show: Cell::new(Show::Now),
             timeout: RefCell::new(None),
             show_timer: RefCell::new(None),
         }));
@@ -208,7 +220,7 @@ impl SignInView {
         &self,
         url: &str,
         target: RedirectTarget,
-        silent_first: bool,
+        show: Show,
         timeout: Duration,
         on_result: impl FnOnce(Reply) + 'static,
     ) -> bool {
@@ -218,13 +230,13 @@ impl SignInView {
         }
         *inner.target.borrow_mut() = target;
         *inner.on_result.borrow_mut() = Some(Box::new(on_result));
-        inner.silent.set(silent_first);
+        inner.show.set(show);
         let view = self.clone();
         *inner.timeout.borrow_mut() = Some(glib::timeout_add_local_once(timeout, move || {
             view.0.timeout.borrow_mut().take();
             view.finish(Reply::Timeout);
         }));
-        if !silent_first {
+        if show == Show::Now {
             inner.window.present();
         }
         self.restore_then_load(url.to_owned());
@@ -289,7 +301,10 @@ impl SignInView {
 
     fn schedule_show(&self) {
         let inner = &self.0;
-        if !inner.silent.get() || inner.window.is_visible() || inner.on_result.borrow().is_none() {
+        if inner.show.get() != Show::IfNeeded
+            || inner.window.is_visible()
+            || inner.on_result.borrow().is_none()
+        {
             return;
         }
         if let Some(old) = inner.show_timer.borrow_mut().take() {

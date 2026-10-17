@@ -87,6 +87,35 @@ pub fn parse_request(line: &str) -> Result<ValidRequest, RequestError> {
     })
 }
 
+/// The same authorize URL with `prompt=none`, or `None` if it already has
+/// a `prompt`. Microsoft: `prompt=none` "ensures that the user isn't
+/// presented with any interactive prompt. If the request can't be completed
+/// silently by using single-sign on, the Microsoft identity platform returns
+/// an `interaction_required` error" (OAuth 2.0 authorization code flow
+/// reference, learn.microsoft.com).
+pub fn with_prompt_none(url: &str) -> Option<String> {
+    let mut url = valid_start_url(url)?;
+    if url.query_pairs().any(|(k, _)| k == "prompt") {
+        return None;
+    }
+    url.query_pairs_mut().append_pair("prompt", "none");
+    Some(url.into())
+}
+
+/// Whether a `prompt=none` attempt needs the normal, visible sign-in:
+/// the documented "can't do this silently" errors (`interaction_required`,
+/// `login_required`, `consent_required`), or no answer in time.
+pub fn needs_interaction(reply: &Reply) -> bool {
+    match reply {
+        Reply::Error { error, .. } => matches!(
+            error.as_str(),
+            "interaction_required" | "login_required" | "consent_required"
+        ),
+        Reply::Timeout => true,
+        _ => false,
+    }
+}
+
 /// What to do with a navigation the web view is about to make.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Navigation {
@@ -268,6 +297,45 @@ fn short(s: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | ','))
         .take(64)
         .collect()
+}
+
+#[cfg(test)]
+mod silent_tests {
+    use super::*;
+
+    const AUTH: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=a&response_type=code&scope=s%20t&redirect_uri=r";
+
+    #[test]
+    fn adds_prompt_none_once() {
+        let u = with_prompt_none(AUTH).unwrap();
+        let url = Url::parse(&u).unwrap();
+        let prompts: Vec<_> = url.query_pairs().filter(|(k, _)| k == "prompt").collect();
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0].1, "none");
+        // The other parameters are unchanged.
+        assert!(url.query_pairs().any(|(k, v)| k == "scope" && v == "s t"));
+        assert_eq!(with_prompt_none(&format!("{AUTH}&prompt=login")), None);
+        assert_eq!(with_prompt_none("https://evil.example/authorize"), None);
+    }
+
+    #[test]
+    fn documented_errors_fall_back_to_interactive() {
+        let err = |e: &str| Reply::Error {
+            error: e.into(),
+            error_codes: None,
+            state: None,
+        };
+        for e in ["interaction_required", "login_required", "consent_required"] {
+            assert!(needs_interaction(&err(e)), "{e}");
+        }
+        assert!(needs_interaction(&Reply::Timeout));
+        assert!(!needs_interaction(&err("access_denied")));
+        assert!(!needs_interaction(&Reply::Cancelled));
+        assert!(!needs_interaction(&Reply::Ok {
+            code: "c".into(),
+            state: String::new()
+        }));
+    }
 }
 
 #[cfg(test)]

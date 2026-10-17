@@ -435,6 +435,11 @@ fn supervise(
             let events = events.clone();
             std::thread::spawn(move || {
                 for line in BufReader::new(stream).lines().map_while(Result::ok) {
+                    // Our sign-in helper's status lines (FreeRDP passes its
+                    // stderr through); they hold no codes or tokens.
+                    if line.starts_with("cosmic-ext-avd-signin: ") {
+                        eprintln!("{line}");
+                    }
                     if log.lock().expect("not poisoned").push(&line) {
                         events(SessionEvent::Connected);
                     }

@@ -29,7 +29,7 @@ use std::time::Duration;
 use gtk::glib;
 
 use protocol::{RedirectTarget, Reply, ValidRequest};
-use view::SignInView;
+use view::{Show, SignInView};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -67,7 +67,11 @@ fn run_app_mode(profile: &std::path::Path, request: &ValidRequest) -> ExitCode {
         view.navigate(
             request.url.as_str(),
             RedirectTarget::NativeClient,
-            request.silent_first,
+            if request.silent_first {
+                Show::IfNeeded
+            } else {
+                Show::Now
+            },
             Duration::from_millis(request.timeout_ms),
             move |reply| {
                 done.set(true);
