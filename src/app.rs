@@ -2,8 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Instant;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
 use cosmic::app::context_drawer;
@@ -17,10 +18,12 @@ use sha2::Digest;
 use url::Url;
 
 use crate::auth::attempt::ClientConfig;
+use crate::auth::id_token;
 use crate::auth::signin::{self, Cancel, SignInError, SignedIn};
 use crate::auth::token::{self, Secret, TokenError};
 use crate::config::Config;
 use crate::fl;
+use crate::secrets::{self, SecretsError};
 use crate::service::discovery::{self, FetchError};
 use crate::service::endpoint::{EndpointPolicy, Role};
 use crate::service::feed::ResourceKind;
@@ -57,12 +60,20 @@ pub struct AppModel {
     /// asks for a password instead of trying it again.
     entra_failed: HashSet<String>,
     logon_labels: Vec<String>,
+    /// Shown above the desktop list, for example when the keyring couldn't
+    /// save the sign-in.
+    notice: Option<String>,
+    /// The saved sign-in couldn't be renewed for a temporary reason; the
+    /// signed-out view offers to try again.
+    can_retry_restore: bool,
 }
 
 enum Session {
     SignedOut {
         error: Option<String>,
     },
+    /// Signing in with the refresh token saved in the keyring.
+    Restoring,
     SigningIn {
         cancel: Cancel,
     },
@@ -146,6 +157,24 @@ pub enum Message {
     DialogCancel,
     Session(u64, String, SessionEvent),
     Disconnect(String),
+    Restored(u64, Restore),
+    RetryRestore,
+    /// The keyring saved (or failed to save) the sign-in.
+    Saved(u64, Result<(), String>),
+    SignOutFinished(u64, Result<(), String>),
+}
+
+/// The outcome of signing in with the saved refresh token.
+#[derive(Debug, Clone)]
+pub enum Restore {
+    NothingSaved,
+    /// Signed in. The text is a notice if the renewed token couldn't be
+    /// saved.
+    Ready(Arc<SignedIn>, Option<String>),
+    /// The saved sign-in can't be used any more; sign in again.
+    SignInAgain(String),
+    /// Network trouble; the saved sign-in is kept for another try.
+    Retry(String),
 }
 
 /// Sign-in failures, cheap to clone for messages.
@@ -215,6 +244,8 @@ impl cosmic::Application for AppModel {
             dialog: None,
             last_failure: HashMap::new(),
             entra_failed: HashSet::new(),
+            notice: None,
+            can_retry_restore: false,
             logon_labels: vec![
                 fl!("logon-automatic"),
                 fl!("logon-empty-domain"),
@@ -222,8 +253,9 @@ impl cosmic::Application for AppModel {
                 fl!("logon-entra"),
             ],
         };
-        let command = app.update_title();
-        (app, command)
+        let title = app.update_title();
+        let restore = app.start_restore();
+        (app, Task::batch([title, restore]))
     }
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
@@ -334,7 +366,17 @@ impl cosmic::Application for AppModel {
 
     fn view(&self) -> Element<'_, Self::Message> {
         match &self.session {
-            Session::SignedOut { error } => signed_out_view(error.as_deref()),
+            Session::SignedOut { error } => {
+                signed_out_view(error.as_deref(), self.can_retry_restore)
+            }
+            Session::Restoring => centered(
+                widget::column::with_capacity(2)
+                    .push(widget::text::title3(fl!("restoring")))
+                    .push(widget::text::body(fl!("restoring-hint")))
+                    .spacing(cosmic::theme::spacing().space_s)
+                    .align_x(Alignment::Center)
+                    .into(),
+            ),
             Session::SigningIn { .. } => centered(
                 widget::column::with_capacity(3)
                     .push(widget::text::title3(fl!("signing-in")))
@@ -349,7 +391,13 @@ impl cosmic::Application for AppModel {
                 workspaces,
                 error,
                 ..
-            } => resources_view(*loading, workspaces, error.as_deref(), &self.connections),
+            } => resources_view(
+                *loading,
+                workspaces,
+                error.as_deref(),
+                self.notice.as_deref(),
+                &self.connections,
+            ),
         }
     }
 
@@ -389,20 +437,39 @@ impl cosmic::Application for AppModel {
                 }
                 match result {
                     Ok(account) => {
+                        let save = self.save_sign_in(&account);
                         self.session = Session::Ready {
                             account,
                             loading: true,
                             workspaces: Vec::new(),
                             error: None,
                         };
-                        return self.load_resources();
+                        return Task::batch([save, self.load_resources()]);
                     }
                     Err(SignInFailure(error)) => self.session = Session::SignedOut { error },
                 }
             }
             Message::Refresh => return self.load_resources(),
             Message::Discovered(generation, result) => self.discovered(generation, result),
-            Message::SignOut => self.sign_out(),
+            Message::SignOut => return self.sign_out(),
+            Message::Restored(generation, outcome) => {
+                if generation == self.generation {
+                    return self.restored(outcome);
+                }
+            }
+            Message::RetryRestore => return self.start_restore(),
+            Message::Saved(generation, result) => {
+                if generation == self.generation {
+                    self.notice = result.err();
+                }
+            }
+            Message::SignOutFinished(generation, result) => {
+                if generation == self.generation
+                    && let (Session::SignedOut { error }, Err(e)) = (&mut self.session, result)
+                {
+                    *error = Some(e);
+                }
+            }
             Message::Connect(key) => return self.prepare_connection(&key),
             Message::ConnectionFileReady(generation, key, result) => {
                 if generation == self.generation {
@@ -566,7 +633,7 @@ impl AppModel {
         }
     }
 
-    fn sign_out(&mut self) {
+    fn sign_out(&mut self) -> Task<cosmic::Action<Message>> {
         // Invalidate everything in flight, end sessions, then forget the
         // account and its sign-in cookies (spec §6).
         self.generation += 1;
@@ -582,6 +649,8 @@ impl AppModel {
         self.last_failure.clear();
         self.entra_failed.clear();
         self.dialog = None;
+        self.notice = None;
+        self.can_retry_restore = false;
         let mut error = None;
         for dir in [signin_profile_dir(), signin_session_dir()]
             .into_iter()
@@ -592,6 +661,83 @@ impl AppModel {
             }
         }
         self.session = Session::SignedOut { error };
+        // The keyring may block (for example on an unlock prompt), so not on
+        // the UI thread.
+        SIGN_OUTS.fetch_add(1, Ordering::SeqCst);
+        let generation = self.generation;
+        cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(|| {
+                let _renewal = RENEWAL.lock();
+                secrets::delete_all(&ClientConfig::public_remote_desktop())
+            })
+            .await;
+            let result = match result {
+                Ok(Ok(())) => Ok(()),
+                _ => Err(fl!("error-sign-out-incomplete")),
+            };
+            Message::SignOutFinished(generation, result)
+        })
+    }
+
+    /// Signs in with the refresh token from the keyring, if there is one.
+    fn start_restore(&mut self) -> Task<cosmic::Action<Message>> {
+        self.generation += 1;
+        let generation = self.generation;
+        self.session = Session::Restoring;
+        self.can_retry_restore = false;
+        let http = self.http.clone();
+        cosmic::task::future(async move {
+            let outcome = tokio::task::spawn_blocking(move || restore(&http))
+                .await
+                .unwrap_or_else(|_| Restore::Retry(fl!("error-generic")));
+            Message::Restored(generation, outcome)
+        })
+    }
+
+    fn restored(&mut self, outcome: Restore) -> Task<cosmic::Action<Message>> {
+        match outcome {
+            Restore::Ready(account, notice) => {
+                self.notice = notice;
+                self.session = Session::Ready {
+                    account,
+                    loading: true,
+                    workspaces: Vec::new(),
+                    error: None,
+                };
+                self.load_resources()
+            }
+            Restore::NothingSaved => {
+                self.session = Session::SignedOut { error: None };
+                Task::none()
+            }
+            Restore::SignInAgain(error) => {
+                self.session = Session::SignedOut { error: Some(error) };
+                Task::none()
+            }
+            Restore::Retry(error) => {
+                self.can_retry_restore = true;
+                self.session = Session::SignedOut { error: Some(error) };
+                Task::none()
+            }
+        }
+    }
+
+    /// Saves a new sign-in's refresh token in the keyring.
+    fn save_sign_in(&mut self, account: &Arc<SignedIn>) -> Task<cosmic::Action<Message>> {
+        self.notice = None;
+        self.can_retry_restore = false;
+        let generation = self.generation;
+        let account = account.clone();
+        let started = sign_out_count();
+        cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let _renewal = RENEWAL.lock();
+                save_refresh_token(&account, started)
+            })
+            .await
+            .unwrap_or_else(|_| Err(fl!("error-generic")));
+            Message::Saved(generation, result)
+        })
     }
 
     fn find_resource(&self, key: &str) -> Option<ResourceView> {
@@ -872,20 +1018,128 @@ impl AppModel {
     }
 }
 
-/// Renews the tokens when the access token expires within the margin.
-/// Blocking.
+/// One token renewal (or keyring write) at a time (spec §6: serialize
+/// refresh per account; the app has one account).
+static RENEWAL: Mutex<()> = Mutex::new(());
+
+/// Counts sign-outs. Work that started before a sign-out must not save its
+/// tokens afterwards (spec §6: late callbacks must not restore the account).
+static SIGN_OUTS: AtomicU64 = AtomicU64::new(0);
+
+fn sign_out_count() -> u64 {
+    SIGN_OUTS.load(Ordering::SeqCst)
+}
+
+/// Saves the account's refresh token, unless the user signed out since
+/// `started` (a [`sign_out_count`]). The error is the notice to show.
+/// Blocking; the caller holds [`RENEWAL`], as sign-out's delete does.
+fn save_refresh_token(account: &SignedIn, started: u64) -> Result<(), String> {
+    if sign_out_count() != started {
+        return Ok(());
+    }
+    let Some(refresh_token) = &account.tokens.refresh_token else {
+        return Err(fl!("notice-not-saved", detail = "no refresh token"));
+    };
+    secrets::save(
+        &ClientConfig::public_remote_desktop(),
+        &account.identity,
+        refresh_token,
+    )
+    .map_err(|e| fl!("notice-not-saved", detail = keyring_detail(&e)))
+}
+
+fn keyring_detail(e: &SecretsError) -> String {
+    match e {
+        SecretsError::Dismissed => fl!("keyring-dismissed"),
+        SecretsError::Malformed => fl!("keyring-malformed"),
+        SecretsError::Unavailable(_) => fl!("keyring-unavailable"),
+    }
+}
+
+/// Signs in with the saved refresh token. Blocking.
+fn restore(http: &Http) -> Restore {
+    let config = ClientConfig::public_remote_desktop();
+    let started = sign_out_count();
+    let _renewal = RENEWAL.lock();
+    let stored = match secrets::load(&config) {
+        Ok(Some(stored)) => stored,
+        Ok(None) => return Restore::NothingSaved,
+        // Spec §6: no files as a fallback. The user signs in for this
+        // session; saving will report the keyring problem again.
+        Err(e) => {
+            return Restore::SignInAgain(fl!("error-keyring-load", detail = keyring_detail(&e)));
+        }
+    };
+    let tokens = match token::refresh(http, &config, &stored.refresh_token) {
+        Ok(tokens) => tokens,
+        Err(TokenError::Transient(_)) => return Restore::Retry(fl!("error-restore-network")),
+        Err(TokenError::InvalidGrant { .. }) => {
+            // Revoked or expired for good: forget it.
+            let _ = secrets::delete_all(&config);
+            return Restore::SignInAgain(fl!("error-saved-sign-in-expired"));
+        }
+        // Policy or interaction needed: an interactive sign-in replaces it.
+        Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
+    };
+    // A renewed ID token must name the same account (and is checked like
+    // any other); without one, the saved identity stands.
+    let identity = match tokens.id_token.as_deref() {
+        None => stored.identity.clone(),
+        Some(raw) => {
+            let keys = match id_token::fetch_keys(http) {
+                Ok(keys) => keys,
+                Err(_) => return Restore::Retry(fl!("error-restore-network")),
+            };
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            match id_token::validate_renewed(raw, &keys, &config.client_id, now, &stored.identity) {
+                Ok(identity) => identity,
+                Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
+            }
+        }
+    };
+    let rotated = tokens
+        .refresh_token
+        .as_ref()
+        .is_some_and(|t| t.expose() != stored.refresh_token.expose());
+    let account = SignedIn { identity, tokens };
+    let notice = if rotated {
+        save_refresh_token(&account, started).err()
+    } else {
+        None
+    };
+    Restore::Ready(Arc::new(account), notice)
+}
+
+/// Renews the tokens when the access token expires within the margin, and
+/// saves a rotated refresh token. Blocking.
 fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, String> {
     if !account.tokens.needs_refresh(Instant::now()) {
         return Ok(account);
     }
+    let started = sign_out_count();
+    let _renewal = RENEWAL.lock();
     let Some(refresh_token) = &account.tokens.refresh_token else {
         return Err(fl!("error-session-expired"));
     };
     match token::refresh(http, &ClientConfig::public_remote_desktop(), refresh_token) {
-        Ok(tokens) => Ok(Arc::new(SignedIn {
-            identity: account.identity.clone(),
-            tokens,
-        })),
+        Ok(tokens) => {
+            let renewed = SignedIn {
+                identity: account.identity.clone(),
+                tokens,
+            };
+            let rotated = renewed
+                .tokens
+                .refresh_token
+                .as_ref()
+                .is_some_and(|t| t.expose() != refresh_token.expose());
+            if rotated {
+                // Best effort: if this fails, the next start asks to sign in.
+                let _ = save_refresh_token(&renewed, started);
+            }
+            Ok(Arc::new(renewed))
+        }
         Err(TokenError::Transient(_)) => Err(fl!("error-generic")),
         Err(_) => Err(fl!("error-session-expired")),
     }
@@ -1034,14 +1288,17 @@ fn centered(content: Element<'_, Message>) -> Element<'_, Message> {
         .into()
 }
 
-fn signed_out_view(error: Option<&str>) -> Element<'_, Message> {
+fn signed_out_view(error: Option<&str>, can_retry: bool) -> Element<'_, Message> {
     let space = cosmic::theme::spacing();
-    let mut col = widget::column::with_capacity(5)
+    let mut col = widget::column::with_capacity(6)
         .push(widget::text::title1(fl!("app-title")))
         .push(widget::text::body(fl!("unofficial-notice")).width(Length::Fixed(420.0)))
         .push(widget::button::suggested(fl!("sign-in")).on_press(Message::SignIn))
         .spacing(space.space_m)
         .align_x(Alignment::Center);
+    if can_retry {
+        col = col.push(widget::button::standard(fl!("try-again")).on_press(Message::RetryRestore));
+    }
     if let Some(error) = error {
         col = col.push(widget::text::body(error.to_owned()).width(Length::Fixed(420.0)));
     }
@@ -1099,10 +1356,14 @@ fn resources_view<'a>(
     loading: bool,
     workspaces: &'a [WorkspaceView],
     error: Option<&'a str>,
+    notice: Option<&'a str>,
     connections: &'a HashMap<String, Connection>,
 ) -> Element<'a, Message> {
     let space = cosmic::theme::spacing();
-    let mut col = widget::column::with_capacity(workspaces.len() + 3).spacing(space.space_m);
+    let mut col = widget::column::with_capacity(workspaces.len() + 4).spacing(space.space_m);
+    if let Some(notice) = notice {
+        col = col.push(widget::text::body(notice.to_owned()));
+    }
     if loading {
         col = col.push(widget::text::body(fl!("loading-desktops")));
     }

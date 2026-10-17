@@ -4,10 +4,11 @@ mod app;
 mod auth;
 mod config;
 mod i18n;
+mod secrets;
+mod service;
 // Not wired into the UI yet; the password dialog will use it (ADR 0005).
 #[allow(dead_code)]
 mod sessions;
-mod service;
 
 fn main() -> cosmic::iced::Result {
     // Get the system's preferred languages.

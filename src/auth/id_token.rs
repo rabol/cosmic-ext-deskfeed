@@ -62,6 +62,8 @@ pub enum IdTokenError {
     Expired,
     NotYetValid,
     NonceMismatch,
+    /// A renewed ID token names another tenant or account.
+    AccountMismatch,
     MissingClaims,
     KeysUnavailable(String),
 }
@@ -116,6 +118,33 @@ pub fn validate(
     nonce: &str,
     now_unix: u64,
 ) -> Result<Identity, IdTokenError> {
+    verify(token, keys, client_id, Some(nonce), now_unix)
+}
+
+/// Validates the ID token of a token renewal. It comes straight from the
+/// token endpoint, without a sign-in attempt, so there is no nonce to
+/// compare; instead it must name the same tenant and account as `expected`.
+pub fn validate_renewed(
+    token: &str,
+    keys: &[Jwk],
+    client_id: &str,
+    now_unix: u64,
+    expected: &Identity,
+) -> Result<Identity, IdTokenError> {
+    let identity = verify(token, keys, client_id, None, now_unix)?;
+    if identity.tenant_id != expected.tenant_id || identity.object_id != expected.object_id {
+        return Err(IdTokenError::AccountMismatch);
+    }
+    Ok(identity)
+}
+
+fn verify(
+    token: &str,
+    keys: &[Jwk],
+    client_id: &str,
+    nonce: Option<&str>,
+    now_unix: u64,
+) -> Result<Identity, IdTokenError> {
     if token.len() > MAX_TOKEN_LEN {
         return Err(IdTokenError::Malformed);
     }
@@ -162,7 +191,9 @@ pub fn validate(
     if claims.nbf.is_some_and(|nbf| nbf > now_unix + SKEW_SECS) {
         return Err(IdTokenError::NotYetValid);
     }
-    if claims.nonce.as_deref() != Some(nonce) {
+    if let Some(nonce) = nonce
+        && claims.nonce.as_deref() != Some(nonce)
+    {
         return Err(IdTokenError::NonceMismatch);
     }
     let object_id = claims
@@ -222,6 +253,26 @@ mod tests {
         assert_eq!(id.object_id, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         assert_eq!(id.username.as_deref(), Some("anna@example.com"));
         assert_eq!(id.display_name.as_deref(), Some("Anna Example"));
+    }
+
+    #[test]
+    fn renewed_token_must_match_the_account() {
+        let expected = validate(JWT, &keys(), CLIENT, "test-nonce", NOW).unwrap();
+        assert_eq!(
+            validate_renewed(JWT, &keys(), CLIENT, NOW, &expected),
+            Ok(expected.clone())
+        );
+        let mut other = expected.clone();
+        other.object_id = "ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee".into();
+        assert_eq!(
+            validate_renewed(JWT, &keys(), CLIENT, NOW, &other),
+            Err(IdTokenError::AccountMismatch)
+        );
+        // Signature and claims are still checked.
+        assert_eq!(
+            validate_renewed(JWT, &keys(), "other-client", NOW, &expected),
+            Err(IdTokenError::WrongAudience)
+        );
     }
 
     #[test]

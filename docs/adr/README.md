@@ -12,5 +12,6 @@ Each significant decision is recorded as a short Markdown file, `NNNN-title.md`,
 | [0006](0006-build-app-alongside-compatibility-work.md) | Build the app alongside the compatibility work | Accepted |
 | [0007](0007-sign-in-web-view.md) | Sign-in web view: WebKitGTK 6 in a separate helper process | Accepted |
 | [0008](0008-http-and-crypto-crates.md) | HTTP, TLS and crypto crates | Accepted |
+| [0009](0009-secret-service-over-zbus.md) | Secret Service over zbus, no keyring crate | Accepted |
 
 Do not put tenant data (host names, tenant or workspace IDs, user names, feed URLs) in ADRs. Describe evidence in redacted form.
