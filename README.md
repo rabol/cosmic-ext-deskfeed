@@ -145,6 +145,10 @@ Kept to a minimum on purpose; each one has a reason ([ADR 0003](./docs/adr/0003-
 
 Most of the crates in `Cargo.lock` (696 in total) come in through libcosmic. The crates this project adds beyond libcosmic's own dependency tree are `ureq`, `rustls` and `ring` (with rustls's certificate-verifier crates) for HTTPS, `open` (from the COSMIC app template), and `gtk4` and `webkit6` in the sign-in helper. All other crates in the table were already part of libcosmic's tree (checked with `cargo tree`).
 
+## Contributing and security
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Please report security problems privately as described in [SECURITY.md](./SECURITY.md). Changes are listed in [CHANGELOG.md](./CHANGELOG.md); third-party licenses in [THIRD-PARTY-LICENSES.md](./THIRD-PARTY-LICENSES.md).
+
 ## License
 
 [MIT](./LICENSE) © 2026 Steen Rabol.
