@@ -5,6 +5,75 @@
 use super::*;
 
 impl AppModel {
+    /// Connection messages: connecting, the password dialog, sessions, the workspace move. Routed here by `update`.
+    pub(super) fn connection_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+        match message {
+            Message::Connect(key) => return self.prepare_connection(&key),
+            Message::ConnectionFileReady(id, epoch, key, result) => {
+                let Some(account) = self.account_mut(&id).filter(|a| a.epoch == epoch) else {
+                    return Task::none();
+                };
+                let result = result.map(|(connection, renewed)| {
+                    if let AccountState::Ready { signed_in, .. } = &mut account.state
+                        && !Arc::ptr_eq(signed_in, &renewed)
+                    {
+                        *signed_in = renewed;
+                    }
+                    connection
+                });
+                return self.connection_file_ready(&id, key, result);
+            }
+            Message::PasswordInput(PasswordText(s)) => {
+                if let Some(d) = &mut self.dialog {
+                    d.password = s;
+                }
+            }
+            Message::TogglePasswordVisible => {
+                if let Some(d) = &mut self.dialog {
+                    d.password_hidden = !d.password_hidden;
+                }
+            }
+            Message::LogonSelected(i) => {
+                if let Some(d) = &mut self.dialog {
+                    d.logon = i;
+                    d.error = None;
+                }
+            }
+            Message::CustomDomainInput(s) => {
+                if let Some(d) = &mut self.dialog {
+                    d.custom_domain = s;
+                }
+            }
+            Message::DialogCancel => {
+                if let Some(d) = self.dialog.take() {
+                    self.connections.remove(&d.key);
+                }
+            }
+            Message::DialogConnect => return self.dialog_connect(),
+            Message::Session(id, epoch, key, event) => {
+                if self.account(&id).is_some_and(|a| a.epoch == epoch) {
+                    self.session_event(&key, event);
+                }
+            }
+            Message::Disconnect(key) => {
+                if let Some(s) = self.running.get(&key) {
+                    s.disconnect();
+                }
+            }
+            Message::WorkspaceMoved(key, result) => {
+                self.movers.remove(&key);
+                // Not worth interrupting the user: the desktop opened, only
+                // not on a new workspace.
+                if let Err(e) = result {
+                    crate::app_log!("open on a new workspace: not moved ({e})");
+                }
+            }
+            // `update` routes only this handler's messages here.
+            other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
+        }
+        Task::none()
+    }
+
     /// Step 1 of connecting: download and filter the connection file.
     pub(super) fn prepare_connection(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
         if self.running.contains_key(key)

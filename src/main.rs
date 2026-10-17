@@ -9,9 +9,9 @@ mod i18n;
 mod log;
 mod secrets;
 mod service;
+mod sessions;
 mod settings;
 mod workspace;
-mod sessions;
 
 fn main() -> cosmic::iced::Result {
     // Get the system's preferred languages.

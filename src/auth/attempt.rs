@@ -168,7 +168,6 @@ impl Attempt {
         same_endpoint(url, &self.config.redirect_uri)
     }
 
-
     /// Validates the callback URL and, on success, ends the attempt.
     /// Any callback, valid or not, after the first one is rejected.
     pub fn complete(&mut self, callback: &str) -> Result<AuthorizationCode, CallbackError> {

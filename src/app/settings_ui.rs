@@ -11,6 +11,42 @@ pub(super) enum Level {
 }
 
 impl AppModel {
+    /// Settings messages: opening and changing account and desktop settings. Routed here by `update`.
+    pub(super) fn settings_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+        match message {
+            Message::OpenAccountSettings(id) => {
+                self.settings_target = Some(id);
+                self.context_page = ContextPage::AccountSettings;
+                self.core.window.show_context = true;
+            }
+            Message::OpenDesktopSettings(key) => {
+                self.settings_target = Some(key);
+                self.context_page = ContextPage::DesktopSettings;
+                self.core.window.show_context = true;
+            }
+            Message::AccountToggle(id, t, on) => {
+                self.edit_settings(Level::Account, &id, |s| s.set_toggle(t, Some(on)));
+            }
+            Message::AccountTimeout(id, secs) => {
+                self.edit_settings(Level::Account, &id, |s| s.set_timeout(Some(secs)));
+            }
+            Message::DesktopToggle(key, t, choice) => {
+                let value = match choice {
+                    1 => Some(true),
+                    2 => Some(false),
+                    _ => None,
+                };
+                self.edit_settings(Level::Desktop, &key, |s| s.set_toggle(t, value));
+            }
+            Message::DesktopTimeout(key, secs) => {
+                self.edit_settings(Level::Desktop, &key, |s| s.set_timeout(secs));
+            }
+            // `update` routes only this handler's messages here.
+            other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
+        }
+        Task::none()
+    }
+
     /// Changes one account's or desktop's settings and saves the config.
     /// Empty entries are removed.
     pub(super) fn edit_settings(

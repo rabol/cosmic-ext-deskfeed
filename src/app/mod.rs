@@ -44,7 +44,6 @@ mod views;
 
 use errors::*;
 use model::*;
-use settings_ui::*;
 use views::*;
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
@@ -385,6 +384,45 @@ impl cosmic::Application for AppModel {
 
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
         match message {
+            Message::SavedLoaded(..)
+            | Message::Restored(..)
+            | Message::RetryRestore(..)
+            | Message::AddAccount
+            | Message::SignInAccount(..)
+            | Message::CancelSignIn(..)
+            | Message::SignInFinished(..)
+            | Message::Saved(..)
+            | Message::Refresh(..)
+            | Message::Discovered(..)
+            | Message::SignOut(..)
+            | Message::SignOutSelected
+            | Message::SignOutFinished(..) => self.account_message(message),
+            Message::Connect(..)
+            | Message::ConnectionFileReady(..)
+            | Message::PasswordInput(..)
+            | Message::TogglePasswordVisible
+            | Message::LogonSelected(..)
+            | Message::CustomDomainInput(..)
+            | Message::DialogCancel
+            | Message::DialogConnect
+            | Message::Session(..)
+            | Message::Disconnect(..)
+            | Message::WorkspaceMoved(..) => self.connection_message(message),
+            Message::OpenAccountSettings(..)
+            | Message::OpenDesktopSettings(..)
+            | Message::AccountToggle(..)
+            | Message::AccountTimeout(..)
+            | Message::DesktopToggle(..)
+            | Message::DesktopTimeout(..) => self.settings_message(message),
+            other => self.app_message(other),
+        }
+    }
+}
+
+impl AppModel {
+    /// App-wide messages: dependencies, the context drawer, links, notices, the log. Routed here by `update`.
+    pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+        match message {
             Message::CheckDependencies => return self.check_dependencies(),
             Message::DependenciesChecked(checks) => {
                 for c in &checks {
@@ -418,150 +456,12 @@ impl cosmic::Application for AppModel {
                     }
                 }
             }
-            Message::SavedLoaded(result) => return self.saved_loaded(result),
-            Message::Restored(id, generation, outcome) => {
-                return self.restored(&id, generation, outcome);
-            }
-            Message::RetryRestore(id) => return self.start_restore(&id),
-            Message::AddAccount => return self.start_add(),
-            Message::SignInAccount(id) => return self.start_account_sign_in(&id),
-            Message::CancelSignIn(None) => {
-                if let Some(Adding {
-                    cancel: Some(c), ..
-                }) = &self.adding
-                {
-                    c.cancel();
-                }
-                self.adding = None;
-            }
-            Message::CancelSignIn(Some(id)) => {
-                let generation = self.next();
-                if let Some(a) = self.account_mut(&id) {
-                    if let AccountState::SigningIn { cancel } = &a.state {
-                        cancel.cancel();
-                    }
-                    a.generation = generation;
-                    a.state = AccountState::NeedsSignIn { error: None };
-                }
-            }
-            Message::SignInFinished(origin, generation, profile, result) => {
-                return self.sign_in_finished(origin, generation, profile, result);
-            }
-            Message::Saved(id, generation, result) => {
-                if let Some(a) = self.account_mut(&id)
-                    && a.generation == generation
-                {
-                    a.notice = result.err();
-                }
-            }
-            Message::Refresh(id) => return self.load_resources(&id),
-            Message::Discovered(id, generation, result) => {
-                self.discovered(&id, generation, result);
-            }
-            Message::SignOut(id) => return self.sign_out(&id),
-            Message::SignOutSelected => {
-                if let Some(Page::Account(id)) = self.selected_page() {
-                    return self.sign_out(&id);
-                }
-            }
-            Message::SignOutFinished(result) => {
-                if let Err(e) = result {
-                    self.notice = Some(e);
-                }
-            }
-            Message::Connect(key) => return self.prepare_connection(&key),
-            Message::ConnectionFileReady(id, epoch, key, result) => {
-                let Some(account) = self.account_mut(&id).filter(|a| a.epoch == epoch) else {
-                    return Task::none();
-                };
-                let result = result.map(|(connection, renewed)| {
-                    if let AccountState::Ready { signed_in, .. } = &mut account.state
-                        && !Arc::ptr_eq(signed_in, &renewed)
-                    {
-                        *signed_in = renewed;
-                    }
-                    connection
-                });
-                return self.connection_file_ready(&id, key, result);
-            }
-            Message::PasswordInput(PasswordText(s)) => {
-                if let Some(d) = &mut self.dialog {
-                    d.password = s;
-                }
-            }
-            Message::TogglePasswordVisible => {
-                if let Some(d) = &mut self.dialog {
-                    d.password_hidden = !d.password_hidden;
-                }
-            }
-            Message::LogonSelected(i) => {
-                if let Some(d) = &mut self.dialog {
-                    d.logon = i;
-                    d.error = None;
-                }
-            }
-            Message::CustomDomainInput(s) => {
-                if let Some(d) = &mut self.dialog {
-                    d.custom_domain = s;
-                }
-            }
-            Message::DialogCancel => {
-                if let Some(d) = self.dialog.take() {
-                    self.connections.remove(&d.key);
-                }
-            }
-            Message::DialogConnect => return self.dialog_connect(),
-            Message::Session(id, epoch, key, event) => {
-                if self.account(&id).is_some_and(|a| a.epoch == epoch) {
-                    self.session_event(&key, event);
-                }
-            }
-            Message::Disconnect(key) => {
-                if let Some(s) = self.running.get(&key) {
-                    s.disconnect();
-                }
-            }
-            Message::OpenAccountSettings(id) => {
-                self.settings_target = Some(id);
-                self.context_page = ContextPage::AccountSettings;
-                self.core.window.show_context = true;
-            }
-            Message::OpenDesktopSettings(key) => {
-                self.settings_target = Some(key);
-                self.context_page = ContextPage::DesktopSettings;
-                self.core.window.show_context = true;
-            }
-            Message::AccountToggle(id, t, on) => {
-                self.edit_settings(Level::Account, &id, |s| s.set_toggle(t, Some(on)));
-            }
-            Message::AccountTimeout(id, secs) => {
-                self.edit_settings(Level::Account, &id, |s| s.set_timeout(Some(secs)));
-            }
-            Message::DesktopToggle(key, t, choice) => {
-                let value = match choice {
-                    1 => Some(true),
-                    2 => Some(false),
-                    _ => None,
-                };
-                self.edit_settings(Level::Desktop, &key, |s| s.set_toggle(t, value));
-            }
-            Message::DesktopTimeout(key, secs) => {
-                self.edit_settings(Level::Desktop, &key, |s| s.set_timeout(secs));
-            }
-            Message::WorkspaceMoved(key, result) => {
-                self.movers.remove(&key);
-                // Not worth interrupting the user: the desktop opened, only
-                // not on a new workspace.
-                if let Err(e) = result {
-                    crate::app_log!("open on a new workspace: not moved ({e})");
-                }
-            }
+            // `update` routes only this handler's messages here.
+            other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
         }
         Task::none()
     }
-}
 
-impl AppModel {
     pub fn update_title(&mut self) -> Task<cosmic::Action<Message>> {
         let title = fl!("app-title");
         match self.core.main_window_id() {

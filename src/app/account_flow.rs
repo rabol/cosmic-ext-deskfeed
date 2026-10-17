@@ -5,6 +5,66 @@
 use super::*;
 
 impl AppModel {
+    /// Account messages: saved sign-ins, sign-in, desktop lists, sign-out. Routed here by `update`.
+    pub(super) fn account_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+        match message {
+            Message::SavedLoaded(result) => return self.saved_loaded(result),
+            Message::Restored(id, generation, outcome) => {
+                return self.restored(&id, generation, outcome);
+            }
+            Message::RetryRestore(id) => return self.start_restore(&id),
+            Message::AddAccount => return self.start_add(),
+            Message::SignInAccount(id) => return self.start_account_sign_in(&id),
+            Message::CancelSignIn(None) => {
+                if let Some(Adding {
+                    cancel: Some(c), ..
+                }) = &self.adding
+                {
+                    c.cancel();
+                }
+                self.adding = None;
+            }
+            Message::CancelSignIn(Some(id)) => {
+                let generation = self.next();
+                if let Some(a) = self.account_mut(&id) {
+                    if let AccountState::SigningIn { cancel } = &a.state {
+                        cancel.cancel();
+                    }
+                    a.generation = generation;
+                    a.state = AccountState::NeedsSignIn { error: None };
+                }
+            }
+            Message::SignInFinished(origin, generation, profile, result) => {
+                return self.sign_in_finished(origin, generation, profile, result);
+            }
+            Message::Saved(id, generation, result) => {
+                if let Some(a) = self.account_mut(&id)
+                    && a.generation == generation
+                {
+                    a.notice = result.err();
+                }
+            }
+            Message::Refresh(id) => return self.load_resources(&id),
+            Message::Discovered(id, generation, result) => {
+                self.discovered(&id, generation, result);
+            }
+            Message::SignOut(id) => return self.sign_out(&id),
+            Message::SignOutSelected => {
+                if let Some(Page::Account(id)) = self.selected_page() {
+                    return self.sign_out(&id);
+                }
+            }
+            Message::SignOutFinished(result) => {
+                if let Err(e) = result {
+                    self.notice = Some(e);
+                }
+            }
+            // `update` routes only this handler's messages here.
+            other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
+        }
+        Task::none()
+    }
+
     /// Start: one entry per saved sign-in, each restored in the background.
     pub(super) fn saved_loaded(
         &mut self,
