@@ -109,3 +109,10 @@ dep-keyring = Keyring (Secret Service)
 dep-keyring-hint = Keeps you signed in between starts. Without it you sign in each time. Install and start a Secret Service such as oo7 or GNOME Keyring.
 dep-runtime = User runtime folder
 dep-runtime-hint = Private folder for connection files (XDG_RUNTIME_DIR), provided by your login session.
+
+# Accounts
+account-menu = Account
+add-account = Add account
+unnamed-account = Account
+loading-accounts = Loading saved accounts…
+sign-in-needed = Sign in to see this account's desktops.

@@ -68,6 +68,7 @@ impl From<zbus::Error> for SecretsError {
 }
 
 /// A saved sign-in.
+#[derive(Clone)]
 pub struct Stored {
     pub identity: Identity,
     pub refresh_token: Secret,
@@ -249,26 +250,31 @@ pub fn check() -> Result<(), SecretsError> {
     Ok(())
 }
 
-/// Loads the saved sign-in for this client identity, if any. With more
-/// than one (not created by this version), the first readable one wins.
-pub fn load(config: &ClientConfig) -> Result<Option<Stored>, SecretsError> {
+/// Loads every saved sign-in for this client identity, one per account.
+/// Items that can't be read are skipped (and reported on stderr without
+/// contents); the user signs in to that account again.
+pub fn load_all(config: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
     let keyring = Keyring::open()?;
-    let items = keyring.search(&app_attributes(config))?;
-    let mut last_error = None;
-    for item in &items {
-        match keyring.read(item) {
-            Ok(stored) => return Ok(Some(stored)),
-            Err(e) => last_error = Some(e),
+    let mut accounts: Vec<Stored> = Vec::new();
+    for item in keyring.search(&app_attributes(config))? {
+        match keyring.read(&item) {
+            Ok(stored) => {
+                let same = |s: &Stored| {
+                    s.identity.tenant_id == stored.identity.tenant_id
+                        && s.identity.object_id == stored.identity.object_id
+                };
+                if !accounts.iter().any(same) {
+                    accounts.push(stored);
+                }
+            }
+            Err(e) => eprintln!("saved sign-in: skipped an item ({e})"),
         }
     }
-    match last_error {
-        Some(e) => Err(e),
-        None => Ok(None),
-    }
+    Ok(accounts)
 }
 
-/// Saves (or replaces) the account's refresh token, then removes items of
-/// other accounts: the app has one account at a time.
+/// Saves (or replaces) one account's refresh token. Other accounts' items
+/// are left alone.
 pub fn save(
     config: &ClientConfig,
     identity: &Identity,
@@ -302,22 +308,20 @@ pub fn save(
     if item.as_str() == "/" && prompt.as_str() != "/" {
         keyring.prompt(&prompt)?;
     }
-    // Other accounts' items: best effort.
-    for other in keyring.search(&app_attributes(config))? {
-        let attrs: HashMap<String, String> = keyring
-            .proxy(other.as_str(), ITEM)?
-            .get_property("Attributes")
-            .unwrap_or_default();
-        if attrs.get("account").map(String::as_str) != Some(identity.object_id.as_str())
-            || attrs.get("tenant").map(String::as_str) != Some(identity.tenant_id.as_str())
-        {
-            let _ = keyring.delete(&other);
-        }
+    Ok(())
+}
+
+/// Deletes one account's saved sign-in (sign-out of that account).
+pub fn delete(config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
+    let keyring = Keyring::open()?;
+    for item in keyring.search(&account_attributes(config, identity))? {
+        keyring.delete(&item)?;
     }
     Ok(())
 }
 
-/// Deletes all of the app's saved sign-ins (sign-out).
+/// Deletes all of the app's saved sign-ins for this client identity.
+#[cfg(test)]
 pub fn delete_all(config: &ClientConfig) -> Result<(), SecretsError> {
     let keyring = Keyring::open()?;
     for item in keyring.search(&app_attributes(config))? {
@@ -382,21 +386,26 @@ mod tests {
         let mut config = ClientConfig::public_remote_desktop();
         config.client_id = "00000000-0000-0000-0000-00000000test".into();
         delete_all(&config).unwrap();
-        assert!(load(&config).unwrap().is_none());
+        assert!(load_all(&config).unwrap().is_empty());
         save(&config, &identity(), &Secret::new("rt-one".into())).unwrap();
-        // Replacing keeps one item.
+        // Replacing keeps one item per account.
         save(&config, &identity(), &Secret::new("rt-two".into())).unwrap();
-        let stored = load(&config).unwrap().unwrap();
-        assert_eq!(stored.identity, identity());
-        assert_eq!(stored.refresh_token.expose(), "rt-two");
-        // Another account replaces the first (one account at a time).
+        let all = load_all(&config).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].identity, identity());
+        assert_eq!(all[0].refresh_token.expose(), "rt-two");
+        // A second account is kept next to the first.
         let mut other = identity();
         other.object_id = "ffffffff-bbbb-cccc-dddd-eeeeeeeeeeee".into();
         save(&config, &other, &Secret::new("rt-three".into())).unwrap();
-        let keyring = Keyring::open().unwrap();
-        assert_eq!(keyring.search(&app_attributes(&config)).unwrap().len(), 1);
+        assert_eq!(load_all(&config).unwrap().len(), 2);
+        // Deleting one leaves the other.
+        delete(&config, &identity()).unwrap();
+        let all = load_all(&config).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].identity, other);
         delete_all(&config).unwrap();
-        assert!(load(&config).unwrap().is_none());
+        assert!(load_all(&config).unwrap().is_empty());
     }
 
     #[test]

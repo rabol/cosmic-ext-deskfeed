@@ -2,9 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::Instant;
 
 use base64::Engine as _;
 use cosmic::app::context_drawer;
@@ -13,18 +12,19 @@ use cosmic::iced::alignment::{Horizontal, Vertical};
 use cosmic::iced::futures::{StreamExt, channel::mpsc};
 use cosmic::iced::{Alignment, Length, Subscription};
 use cosmic::prelude::*;
-use cosmic::widget::{self, about::About, menu};
+use cosmic::widget::{self, about::About, menu, nav_bar};
 use sha2::Digest;
 use url::Url;
 
+use crate::accounts::{self, Restore};
 use crate::auth::attempt::ClientConfig;
-use crate::auth::id_token;
+use crate::auth::id_token::Identity;
 use crate::auth::signin::{self, Cancel, SignInError, SignedIn};
-use crate::auth::token::{self, Secret, TokenError};
+use crate::auth::token::{Secret, TokenError};
 use crate::config::Config;
 use crate::deps::{self, Check, Dependency, Status};
 use crate::fl;
-use crate::secrets::{self, SecretsError};
+use crate::secrets::Stored;
 use crate::service::discovery::{self, FetchError};
 use crate::service::endpoint::{EndpointPolicy, Role};
 use crate::service::feed::ResourceKind;
@@ -43,11 +43,19 @@ pub struct AppModel {
     config: Config,
     config_handler: Option<cosmic_config::Config>,
     http: Arc<Http>,
-    session: Session,
-    /// Increases on every sign-in and sign-out; results tagged with an older
-    /// value are stale and ignored (spec §8).
-    generation: u64,
-    /// Connection state per resource key.
+    /// Accounts in the sidebar, then "Add account".
+    nav: nav_bar::Model,
+    accounts: Vec<Account>,
+    /// Reading saved sign-ins from the keyring at start.
+    loading_saved: bool,
+    /// Signing in to an account that isn't in the list yet.
+    adding: Option<Adding>,
+    /// App-wide message, for example when the keyring can't be read.
+    notice: Option<String>,
+    /// Source of generations and epochs; results tagged with an older value
+    /// are stale and ignored (spec §8).
+    counter: u64,
+    /// Connection state per resource key (keys include the account).
     connections: HashMap<String, Connection>,
     running: HashMap<String, launcher::Session>,
     /// Logon setting and connection file of sessions not yet connected, to
@@ -61,31 +69,96 @@ pub struct AppModel {
     /// asks for a password instead of trying it again.
     entra_failed: HashSet<String>,
     logon_labels: Vec<String>,
-    /// Shown above the desktop list, for example when the keyring couldn't
-    /// save the sign-in.
-    notice: Option<String>,
-    /// The saved sign-in couldn't be renewed for a temporary reason; the
-    /// signed-out view offers to try again.
-    can_retry_restore: bool,
     /// Last dependency check; `None` while it runs.
     deps: Option<Vec<Check>>,
 }
 
-enum Session {
-    SignedOut {
-        error: Option<String>,
-    },
+/// A page in the sidebar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Page {
+    Account(String),
+    Add,
+}
+
+struct Adding {
+    generation: u64,
+    /// `Some` while the sign-in window is open.
+    cancel: Option<Cancel>,
+    error: Option<String>,
+}
+
+struct Account {
+    /// [`accounts::account_id`].
+    id: String,
+    identity: Identity,
+    state: AccountState,
+    /// The saved sign-in this account was restored from, for "Try again".
+    stored: Option<Stored>,
+    /// Shown above the desktop list, for example when the keyring couldn't
+    /// save the sign-in.
+    notice: Option<String>,
+    /// The saved sign-in couldn't be renewed for a temporary reason.
+    can_retry: bool,
+    /// Changes on every sign-in attempt and refresh of this account.
+    generation: u64,
+    /// Fixed for the life of this entry; session and connection events
+    /// carry it, so events from before a sign-out are ignored.
+    epoch: u64,
+}
+
+enum AccountState {
     /// Signing in with the refresh token saved in the keyring.
     Restoring,
+    NeedsSignIn {
+        error: Option<String>,
+    },
     SigningIn {
         cancel: Cancel,
     },
     Ready {
-        account: Arc<SignedIn>,
+        signed_in: Arc<SignedIn>,
         loading: bool,
         workspaces: Vec<WorkspaceView>,
         error: Option<String>,
     },
+}
+
+impl Account {
+    fn label(&self) -> String {
+        self.identity
+            .username
+            .clone()
+            .or_else(|| self.identity.display_name.clone())
+            .unwrap_or_else(|| fl!("unnamed-account"))
+    }
+
+    fn signed_in(&self) -> Option<&Arc<SignedIn>> {
+        match &self.state {
+            AccountState::Ready { signed_in, .. } => Some(signed_in),
+            _ => None,
+        }
+    }
+
+    fn resource(&self, key: &str) -> Option<&ResourceView> {
+        match &self.state {
+            AccountState::Ready { workspaces, .. } => workspaces
+                .iter()
+                .flat_map(|w| &w.resources)
+                .find(|r| r.key == key),
+            _ => None,
+        }
+    }
+
+    fn resource_keys(&self) -> Vec<String> {
+        match &self.state {
+            AccountState::Ready { workspaces, .. } => workspaces
+                .iter()
+                .flat_map(|w| &w.resources)
+                .map(|r| r.key.clone())
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +186,7 @@ enum Connection {
 }
 
 struct PasswordDialog {
+    account: String,
     key: String,
     title: String,
     connection: Arc<ConnectionFile>,
@@ -138,16 +212,36 @@ pub enum Message {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
     UpdateConfig(Config),
-    SignIn,
-    CancelSignIn,
-    SignInFinished(u64, Result<Arc<SignedIn>, SignInFailure>),
-    Refresh,
-    Discovered(u64, Result<Vec<WorkspaceView>, String>),
-    SignOut,
+    DismissNotice,
+    /// The saved sign-ins, or why they couldn't be read.
+    SavedLoaded(Result<Vec<Stored>, String>),
+    /// Account ID, generation, outcome.
+    Restored(String, u64, Restore),
+    RetryRestore(String),
+    AddAccount,
+    /// Sign in again to an account in the list.
+    SignInAccount(String),
+    /// `None`: the sign-in for a new account.
+    CancelSignIn(Option<String>),
+    /// Account it was for (`None`: a new one), generation, profile used.
+    SignInFinished(
+        Option<String>,
+        u64,
+        PathBuf,
+        Result<Arc<SignedIn>, SignInFailure>,
+    ),
+    /// The keyring saved (or failed to save) the sign-in.
+    Saved(String, u64, Result<(), String>),
+    Refresh(String),
+    Discovered(String, u64, Result<Vec<WorkspaceView>, String>),
+    SignOut(String),
+    SignOutSelected,
+    SignOutFinished(Result<(), String>),
     Connect(String),
-    /// The connection file, and the account with renewed tokens if they
-    /// had to be renewed first.
+    /// Account ID, epoch, resource key, and the connection file with the
+    /// account (tokens renewed first if needed).
     ConnectionFileReady(
+        String,
         u64,
         String,
         Result<(Arc<ConnectionFile>, Arc<SignedIn>), String>,
@@ -158,28 +252,11 @@ pub enum Message {
     CustomDomainInput(String),
     DialogConnect,
     DialogCancel,
-    Session(u64, String, SessionEvent),
+    /// Account ID, epoch, resource key, event.
+    Session(String, u64, String, SessionEvent),
     Disconnect(String),
-    Restored(u64, Restore),
-    RetryRestore,
-    /// The keyring saved (or failed to save) the sign-in.
-    Saved(u64, Result<(), String>),
-    SignOutFinished(u64, Result<(), String>),
     CheckDependencies,
     DependenciesChecked(Vec<Check>),
-}
-
-/// The outcome of signing in with the saved refresh token.
-#[derive(Debug, Clone)]
-pub enum Restore {
-    NothingSaved,
-    /// Signed in. The text is a notice if the renewed token couldn't be
-    /// saved.
-    Ready(Arc<SignedIn>, Option<String>),
-    /// The saved sign-in can't be used any more; sign in again.
-    SignInAgain(String),
-    /// Network trouble; the saved sign-in is kept for another try.
-    Retry(String),
 }
 
 /// Sign-in failures, cheap to clone for messages.
@@ -219,6 +296,7 @@ impl cosmic::Application for AppModel {
         _flags: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
         launcher::clean_stale_runtime_dirs();
+        accounts::clean_unfinished_profiles();
         let about = About::default()
             .name(fl!("app-title"))
             .icon(widget::icon::from_svg_bytes(APP_ICON))
@@ -241,68 +319,85 @@ impl cosmic::Application for AppModel {
             config,
             config_handler,
             http: Arc::new(Http::new(EndpointPolicy::azure_public())),
-            session: Session::SignedOut { error: None },
-            generation: 0,
+            nav: nav_bar::Model::default(),
+            accounts: Vec::new(),
+            loading_saved: true,
+            adding: None,
+            notice: None,
+            counter: 0,
             connections: HashMap::new(),
             running: HashMap::new(),
             pending_logon: HashMap::new(),
             dialog: None,
             last_failure: HashMap::new(),
             entra_failed: HashSet::new(),
-            notice: None,
-            can_retry_restore: false,
-            deps: None,
             logon_labels: vec![
                 fl!("logon-automatic"),
                 fl!("logon-empty-domain"),
                 fl!("logon-custom-domain"),
                 fl!("logon-entra"),
             ],
+            deps: None,
         };
+        app.rebuild_nav(&Page::Add);
         let title = app.update_title();
-        let restore = app.start_restore();
+        let load = cosmic::task::future(async {
+            let result = tokio::task::spawn_blocking(accounts::load_saved)
+                .await
+                .unwrap_or_else(|_| Err(fl!("error-generic")));
+            Message::SavedLoaded(result)
+        });
         let deps = app.check_dependencies();
-        (app, Task::batch([title, restore, deps]))
+        (app, Task::batch([title, load, deps]))
+    }
+
+    fn nav_model(&self) -> Option<&nav_bar::Model> {
+        Some(&self.nav)
+    }
+
+    fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<cosmic::Action<Self::Message>> {
+        self.nav.activate(id);
+        Task::none()
     }
 
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
-        let menu_bar = menu::bar(vec![menu::Tree::with_children(
-            menu::root(fl!("view")).apply(Element::from),
-            menu::items(
-                &self.key_binds,
-                vec![
-                    menu::Item::Button(fl!("dependencies"), None, MenuAction::Dependencies),
-                    menu::Item::Button(fl!("about"), None, MenuAction::About),
-                ],
+        let menu_bar = menu::bar(vec![
+            menu::Tree::with_children(
+                menu::root(fl!("account-menu")).apply(Element::from),
+                menu::items(
+                    &self.key_binds,
+                    vec![
+                        menu::Item::Button(fl!("add-account"), None, MenuAction::AddAccount),
+                        menu::Item::Button(fl!("sign-out"), None, MenuAction::SignOut),
+                    ],
+                ),
             ),
-        )]);
+            menu::Tree::with_children(
+                menu::root(fl!("view")).apply(Element::from),
+                menu::items(
+                    &self.key_binds,
+                    vec![
+                        menu::Item::Button(fl!("dependencies"), None, MenuAction::Dependencies),
+                        menu::Item::Button(fl!("about"), None, MenuAction::About),
+                    ],
+                ),
+            ),
+        ]);
         vec![menu_bar.into()]
     }
 
     fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
-        let Session::Ready {
-            account, loading, ..
-        } = &self.session
-        else {
+        let Some(account) = self.selected_account() else {
             return vec![];
         };
-        let name = account
-            .identity
-            .username
-            .clone()
-            .or_else(|| account.identity.display_name.clone())
-            .unwrap_or_default();
+        let AccountState::Ready { loading, .. } = &account.state else {
+            return vec![];
+        };
         let mut refresh = widget::button::text(fl!("refresh"));
         if !loading {
-            refresh = refresh.on_press(Message::Refresh);
+            refresh = refresh.on_press(Message::Refresh(account.id.clone()));
         }
-        vec![
-            widget::text::body(name).into(),
-            refresh.into(),
-            widget::button::text(fl!("sign-out"))
-                .on_press(Message::SignOut)
-                .into(),
-        ]
+        vec![refresh.into()]
     }
 
     fn context_drawer(&self) -> Option<context_drawer::ContextDrawer<'_, Self::Message>> {
@@ -332,10 +427,10 @@ impl cosmic::Application for AppModel {
 
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
         let d = self.dialog.as_ref()?;
-        let account = match &self.session {
-            Session::Ready { account, .. } => account.identity.username.clone().unwrap_or_default(),
-            _ => String::new(),
-        };
+        let account = self
+            .account(&d.account)
+            .and_then(|a| a.identity.username.clone())
+            .unwrap_or_default();
         let space = cosmic::theme::spacing();
         let mut controls = widget::column::with_capacity(6).spacing(space.space_s);
         if let Some(e) = &d.error {
@@ -387,20 +482,22 @@ impl cosmic::Application for AppModel {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        let main = self.session_view();
+        let space = cosmic::theme::spacing();
+        let mut col = widget::column::with_capacity(3).spacing(space.space_s);
         // Missing required dependencies: a warning above everything, with
         // the details in the context drawer.
-        match &self.deps {
-            Some(checks) if !deps::required_ok(checks) => widget::column::with_capacity(2)
-                .push(
-                    widget::warning(fl!("deps-missing"))
-                        .on_close(Message::ToggleContextPage(ContextPage::Dependencies)),
-                )
-                .push(main)
-                .spacing(cosmic::theme::spacing().space_s)
-                .into(),
-            _ => main,
+        if let Some(checks) = &self.deps
+            && !deps::required_ok(checks)
+        {
+            col = col.push(
+                widget::warning(fl!("deps-missing"))
+                    .on_close(Message::ToggleContextPage(ContextPage::Dependencies)),
+            );
         }
+        if let Some(notice) = &self.notice {
+            col = col.push(widget::warning(notice.clone()).on_close(Message::DismissNotice));
+        }
+        col.push(self.page_view()).into()
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
@@ -410,59 +507,6 @@ impl cosmic::Application for AppModel {
     }
 
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
-        self.update_main(message)
-    }
-}
-
-impl AppModel {
-    fn check_dependencies(&mut self) -> Task<cosmic::Action<Message>> {
-        self.deps = None;
-        cosmic::task::future(async move {
-            let checks = tokio::task::spawn_blocking(deps::check_all)
-                .await
-                .unwrap_or_default();
-            Message::DependenciesChecked(checks)
-        })
-    }
-
-    fn session_view(&self) -> Element<'_, Message> {
-        match &self.session {
-            Session::SignedOut { error } => {
-                signed_out_view(error.as_deref(), self.can_retry_restore)
-            }
-            Session::Restoring => centered(
-                widget::column::with_capacity(2)
-                    .push(widget::text::title3(fl!("restoring")))
-                    .push(widget::text::body(fl!("restoring-hint")))
-                    .spacing(cosmic::theme::spacing().space_s)
-                    .align_x(Alignment::Center)
-                    .into(),
-            ),
-            Session::SigningIn { .. } => centered(
-                widget::column::with_capacity(3)
-                    .push(widget::text::title3(fl!("signing-in")))
-                    .push(widget::text::body(fl!("signing-in-hint")))
-                    .push(widget::button::standard(fl!("cancel")).on_press(Message::CancelSignIn))
-                    .spacing(cosmic::theme::spacing().space_s)
-                    .align_x(Alignment::Center)
-                    .into(),
-            ),
-            Session::Ready {
-                loading,
-                workspaces,
-                error,
-                ..
-            } => resources_view(
-                *loading,
-                workspaces,
-                error.as_deref(),
-                self.notice.as_deref(),
-                &self.connections,
-            ),
-        }
-    }
-
-    fn update_main(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::CheckDependencies => return self.check_dependencies(),
             Message::DependenciesChecked(checks) => {
@@ -487,66 +531,72 @@ impl AppModel {
                     eprintln!("failed to open link: {err}");
                 }
             }
-            Message::SignIn => return self.start_sign_in(),
-            Message::CancelSignIn => {
-                if let Session::SigningIn { cancel } = &self.session {
-                    cancel.cancel();
-                }
-                self.generation += 1;
-                self.session = Session::SignedOut { error: None };
+            Message::DismissNotice => self.notice = None,
+            Message::SavedLoaded(result) => return self.saved_loaded(result),
+            Message::Restored(id, generation, outcome) => {
+                return self.restored(&id, generation, outcome);
             }
-            Message::SignInFinished(generation, result) => {
-                if generation != self.generation {
-                    return Task::none();
-                }
-                match result {
-                    Ok(account) => {
-                        let save = self.save_sign_in(&account);
-                        self.session = Session::Ready {
-                            account,
-                            loading: true,
-                            workspaces: Vec::new(),
-                            error: None,
-                        };
-                        return Task::batch([save, self.load_resources()]);
-                    }
-                    Err(SignInFailure(error)) => self.session = Session::SignedOut { error },
-                }
-            }
-            Message::Refresh => return self.load_resources(),
-            Message::Discovered(generation, result) => self.discovered(generation, result),
-            Message::SignOut => return self.sign_out(),
-            Message::Restored(generation, outcome) => {
-                if generation == self.generation {
-                    return self.restored(outcome);
-                }
-            }
-            Message::RetryRestore => return self.start_restore(),
-            Message::Saved(generation, result) => {
-                if generation == self.generation {
-                    self.notice = result.err();
-                }
-            }
-            Message::SignOutFinished(generation, result) => {
-                if generation == self.generation
-                    && let (Session::SignedOut { error }, Err(e)) = (&mut self.session, result)
+            Message::RetryRestore(id) => return self.start_restore(&id),
+            Message::AddAccount => return self.start_add(),
+            Message::SignInAccount(id) => return self.start_account_sign_in(&id),
+            Message::CancelSignIn(None) => {
+                if let Some(Adding {
+                    cancel: Some(c), ..
+                }) = &self.adding
                 {
-                    *error = Some(e);
+                    c.cancel();
+                }
+                self.adding = None;
+            }
+            Message::CancelSignIn(Some(id)) => {
+                let generation = self.next();
+                if let Some(a) = self.account_mut(&id) {
+                    if let AccountState::SigningIn { cancel } = &a.state {
+                        cancel.cancel();
+                    }
+                    a.generation = generation;
+                    a.state = AccountState::NeedsSignIn { error: None };
+                }
+            }
+            Message::SignInFinished(origin, generation, profile, result) => {
+                return self.sign_in_finished(origin, generation, profile, result);
+            }
+            Message::Saved(id, generation, result) => {
+                if let Some(a) = self.account_mut(&id)
+                    && a.generation == generation
+                {
+                    a.notice = result.err();
+                }
+            }
+            Message::Refresh(id) => return self.load_resources(&id),
+            Message::Discovered(id, generation, result) => {
+                self.discovered(&id, generation, result);
+            }
+            Message::SignOut(id) => return self.sign_out(&id),
+            Message::SignOutSelected => {
+                if let Some(Page::Account(id)) = self.selected_page() {
+                    return self.sign_out(&id);
+                }
+            }
+            Message::SignOutFinished(result) => {
+                if let Err(e) = result {
+                    self.notice = Some(e);
                 }
             }
             Message::Connect(key) => return self.prepare_connection(&key),
-            Message::ConnectionFileReady(generation, key, result) => {
-                if generation == self.generation {
-                    let result = result.map(|(connection, renewed)| {
-                        if let Session::Ready { account, .. } = &mut self.session
-                            && !Arc::ptr_eq(account, &renewed)
-                        {
-                            *account = renewed;
-                        }
-                        connection
-                    });
-                    return self.connection_file_ready(key, result);
-                }
+            Message::ConnectionFileReady(id, epoch, key, result) => {
+                let Some(account) = self.account_mut(&id).filter(|a| a.epoch == epoch) else {
+                    return Task::none();
+                };
+                let result = result.map(|(connection, renewed)| {
+                    if let AccountState::Ready { signed_in, .. } = &mut account.state
+                        && !Arc::ptr_eq(signed_in, &renewed)
+                    {
+                        *signed_in = renewed;
+                    }
+                    connection
+                });
+                return self.connection_file_ready(&id, key, result);
             }
             Message::PasswordInput(PasswordText(s)) => {
                 if let Some(d) = &mut self.dialog {
@@ -575,8 +625,8 @@ impl AppModel {
                 }
             }
             Message::DialogConnect => return self.dialog_connect(),
-            Message::Session(generation, key, event) => {
-                if generation == self.generation {
+            Message::Session(id, epoch, key, event) => {
+                if self.account(&id).is_some_and(|a| a.epoch == epoch) {
                     self.session_event(&key, event);
                 }
             }
@@ -599,66 +649,467 @@ impl AppModel {
         }
     }
 
-    fn account(&self) -> Option<Arc<SignedIn>> {
-        match &self.session {
-            Session::Ready { account, .. } => Some(account.clone()),
-            _ => None,
+    fn next(&mut self) -> u64 {
+        self.counter += 1;
+        self.counter
+    }
+
+    fn account(&self, id: &str) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.id == id)
+    }
+
+    fn account_mut(&mut self, id: &str) -> Option<&mut Account> {
+        self.accounts.iter_mut().find(|a| a.id == id)
+    }
+
+    fn selected_page(&self) -> Option<Page> {
+        self.nav.data::<Page>(self.nav.active()).cloned()
+    }
+
+    fn selected_account(&self) -> Option<&Account> {
+        match self.selected_page()? {
+            Page::Account(id) => self.account(&id),
+            Page::Add => None,
         }
     }
 
-    fn start_sign_in(&mut self) -> Task<cosmic::Action<Message>> {
-        let Some(helper) = signin::find_helper() else {
-            self.session = Session::SignedOut {
-                error: Some(fl!("error-helper-missing")),
-            };
+    /// The account whose desktop list contains `key`.
+    fn account_of_resource(&self, key: &str) -> Option<&Account> {
+        self.accounts.iter().find(|a| a.resource(key).is_some())
+    }
+
+    /// Rebuilds the sidebar: accounts in order, then "Add account".
+    fn rebuild_nav(&mut self, select: &Page) {
+        self.nav.clear();
+        for a in &self.accounts {
+            let page = Page::Account(a.id.clone());
+            let entry = self
+                .nav
+                .insert()
+                .text(a.label())
+                .icon(widget::icon::from_name("avatar-default-symbolic").icon())
+                .data(page.clone());
+            if &page == select {
+                entry.activate();
+            }
+        }
+        let add = self
+            .nav
+            .insert()
+            .text(fl!("add-account"))
+            .icon(widget::icon::from_name("list-add-symbolic").icon())
+            .data(Page::Add);
+        if select == &Page::Add || self.accounts.is_empty() {
+            add.activate();
+        }
+    }
+
+    fn check_dependencies(&mut self) -> Task<cosmic::Action<Message>> {
+        self.deps = None;
+        cosmic::task::future(async move {
+            let checks = tokio::task::spawn_blocking(deps::check_all)
+                .await
+                .unwrap_or_default();
+            Message::DependenciesChecked(checks)
+        })
+    }
+
+    fn page_view(&self) -> Element<'_, Message> {
+        if self.loading_saved {
+            return centered(widget::text::body(fl!("loading-accounts")).into());
+        }
+        match self.selected_page() {
+            Some(Page::Account(id)) => match self.account(&id) {
+                Some(account) => self.account_view(account),
+                None => self.add_view(),
+            },
+            _ => self.add_view(),
+        }
+    }
+
+    fn add_view(&self) -> Element<'_, Message> {
+        let space = cosmic::theme::spacing();
+        if let Some(Adding {
+            cancel: Some(_), ..
+        }) = &self.adding
+        {
+            return waiting_view(Message::CancelSignIn(None));
+        }
+        let mut col = widget::column::with_capacity(5)
+            .push(widget::text::title1(if self.accounts.is_empty() {
+                fl!("app-title")
+            } else {
+                fl!("add-account")
+            }))
+            .push(widget::text::body(fl!("unofficial-notice")).width(Length::Fixed(420.0)))
+            .push(widget::button::suggested(fl!("sign-in")).on_press(Message::AddAccount))
+            .spacing(space.space_m)
+            .align_x(Alignment::Center);
+        if let Some(Adding { error: Some(e), .. }) = &self.adding {
+            col = col.push(widget::text::body(e.clone()).width(Length::Fixed(420.0)));
+        }
+        centered(col.into())
+    }
+
+    fn account_view<'a>(&'a self, account: &'a Account) -> Element<'a, Message> {
+        let space = cosmic::theme::spacing();
+        match &account.state {
+            AccountState::Restoring => centered(
+                widget::column::with_capacity(2)
+                    .push(widget::text::title3(fl!("restoring")))
+                    .push(widget::text::body(fl!("restoring-hint")))
+                    .spacing(space.space_s)
+                    .align_x(Alignment::Center)
+                    .into(),
+            ),
+            AccountState::NeedsSignIn { error } => {
+                let mut col = widget::column::with_capacity(5)
+                    .push(widget::text::title3(account.label()))
+                    .push(
+                        widget::text::body(error.clone().unwrap_or_else(|| fl!("sign-in-needed")))
+                            .width(Length::Fixed(420.0)),
+                    )
+                    .push(
+                        widget::button::suggested(fl!("sign-in"))
+                            .on_press(Message::SignInAccount(account.id.clone())),
+                    )
+                    .spacing(space.space_m)
+                    .align_x(Alignment::Center);
+                if account.can_retry {
+                    col = col.push(
+                        widget::button::standard(fl!("try-again"))
+                            .on_press(Message::RetryRestore(account.id.clone())),
+                    );
+                }
+                col = col.push(
+                    widget::button::text(fl!("sign-out"))
+                        .on_press(Message::SignOut(account.id.clone())),
+                );
+                centered(col.into())
+            }
+            AccountState::SigningIn { .. } => {
+                waiting_view(Message::CancelSignIn(Some(account.id.clone())))
+            }
+            AccountState::Ready {
+                loading,
+                workspaces,
+                error,
+                ..
+            } => resources_view(
+                *loading,
+                workspaces,
+                error.as_deref(),
+                account.notice.as_deref(),
+                &self.connections,
+            ),
+        }
+    }
+
+    /// Start: one entry per saved sign-in, each restored in the background.
+    fn saved_loaded(
+        &mut self,
+        result: Result<Vec<Stored>, String>,
+    ) -> Task<cosmic::Action<Message>> {
+        self.loading_saved = false;
+        let saved = match result {
+            Ok(saved) => saved,
+            Err(e) => {
+                self.notice = Some(e);
+                Vec::new()
+            }
+        };
+        let mut tasks = Vec::new();
+        for stored in saved {
+            let id = accounts::account_id(&stored.identity);
+            if self.account(&id).is_some() {
+                continue;
+            }
+            accounts::adopt_legacy_profile(&id);
+            let epoch = self.next();
+            self.accounts.push(Account {
+                id: id.clone(),
+                identity: stored.identity.clone(),
+                state: AccountState::Restoring,
+                stored: Some(stored),
+                notice: None,
+                can_retry: false,
+                generation: 0,
+                epoch,
+            });
+            tasks.push(self.start_restore(&id));
+        }
+        let select = self
+            .accounts
+            .first()
+            .map_or(Page::Add, |a| Page::Account(a.id.clone()));
+        self.rebuild_nav(&select);
+        Task::batch(tasks)
+    }
+
+    /// Signs in with the account's saved refresh token.
+    fn start_restore(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+        let generation = self.next();
+        let Some(account) = self.account_mut(id) else {
             return Task::none();
         };
-        let Some(profile) = signin_profile_dir() else {
-            self.session = Session::SignedOut {
-                error: Some(fl!("error-no-data-dir")),
-            };
+        let Some(stored) = account.stored.clone() else {
+            account.state = AccountState::NeedsSignIn { error: None };
             return Task::none();
         };
-        self.generation += 1;
-        let generation = self.generation;
+        account.generation = generation;
+        account.state = AccountState::Restoring;
+        account.can_retry = false;
+        let http = self.http.clone();
+        let id = id.to_owned();
+        cosmic::task::future(async move {
+            let outcome = tokio::task::spawn_blocking(move || accounts::restore(&http, &stored))
+                .await
+                .unwrap_or_else(|_| Restore::Retry(fl!("error-generic")));
+            Message::Restored(id, generation, outcome)
+        })
+    }
+
+    fn restored(
+        &mut self,
+        id: &str,
+        generation: u64,
+        outcome: Restore,
+    ) -> Task<cosmic::Action<Message>> {
+        let Some(account) = self.account_mut(id).filter(|a| a.generation == generation) else {
+            return Task::none();
+        };
+        match outcome {
+            Restore::Ready(signed_in, notice) => {
+                account.identity = signed_in.identity.clone();
+                account.notice = notice;
+                account.state = AccountState::Ready {
+                    signed_in,
+                    loading: true,
+                    workspaces: Vec::new(),
+                    error: None,
+                };
+                self.load_resources(id)
+            }
+            Restore::SignInAgain(error) => {
+                account.stored = None;
+                account.state = AccountState::NeedsSignIn { error: Some(error) };
+                Task::none()
+            }
+            Restore::Retry(error) => {
+                account.can_retry = true;
+                account.state = AccountState::NeedsSignIn { error: Some(error) };
+                Task::none()
+            }
+        }
+    }
+
+    /// Opens the sign-in window for an account not in the list yet, with a
+    /// fresh cookie profile.
+    fn start_add(&mut self) -> Task<cosmic::Action<Message>> {
+        if matches!(
+            self.adding,
+            Some(Adding {
+                cancel: Some(_),
+                ..
+            })
+        ) {
+            return Task::none();
+        }
+        self.rebuild_nav(&Page::Add);
+        let generation = self.next();
+        let profile = accounts::new_profile_dir();
+        let error = |e| Adding {
+            generation,
+            cancel: None,
+            error: Some(e),
+        };
+        let (Some(helper), Some(profile)) = (signin::find_helper(), profile) else {
+            self.adding = Some(error(fl!("error-helper-missing")));
+            return Task::none();
+        };
         let cancel = Cancel::default();
-        self.session = Session::SigningIn {
+        self.adding = Some(Adding {
+            generation,
+            cancel: Some(cancel.clone()),
+            error: None,
+        });
+        self.run_sign_in(None, generation, helper, profile, None, cancel)
+    }
+
+    /// Signs in again to an account in the list, with its own cookies and
+    /// its user name preselected.
+    fn start_account_sign_in(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+        let generation = self.next();
+        let (Some(helper), Some(profile)) = (signin::find_helper(), accounts::profile_dir(id))
+        else {
+            if let Some(a) = self.account_mut(id) {
+                a.state = AccountState::NeedsSignIn {
+                    error: Some(fl!("error-helper-missing")),
+                };
+            }
+            return Task::none();
+        };
+        let Some(account) = self.account_mut(id) else {
+            return Task::none();
+        };
+        let cancel = Cancel::default();
+        account.generation = generation;
+        account.state = AccountState::SigningIn {
             cancel: cancel.clone(),
         };
+        let hint = account.identity.username.clone();
+        self.run_sign_in(
+            Some(id.to_owned()),
+            generation,
+            helper,
+            profile,
+            hint,
+            cancel,
+        )
+    }
+
+    fn run_sign_in(
+        &self,
+        origin: Option<String>,
+        generation: u64,
+        helper: PathBuf,
+        profile: PathBuf,
+        login_hint: Option<String>,
+        cancel: Cancel,
+    ) -> Task<cosmic::Action<Message>> {
         let http = self.http.clone();
         cosmic::task::future(async move {
+            let used = profile.clone();
             let result = tokio::task::spawn_blocking(move || {
                 signin::sign_in(
                     &http,
                     &ClientConfig::public_remote_desktop(),
                     &helper,
                     &profile,
-                    None,
+                    login_hint.as_deref(),
                     &cancel,
                 )
             })
             .await
             .unwrap_or(Err(SignInError::HelperFailed("task".into())));
             Message::SignInFinished(
+                origin,
                 generation,
+                used,
                 result.map(Arc::new).map_err(describe_sign_in_error),
             )
         })
     }
 
-    fn load_resources(&mut self) -> Task<cosmic::Action<Message>> {
-        let Session::Ready {
-            account, loading, ..
-        } = &mut self.session
+    fn sign_in_finished(
+        &mut self,
+        origin: Option<String>,
+        generation: u64,
+        profile: PathBuf,
+        result: Result<Arc<SignedIn>, SignInFailure>,
+    ) -> Task<cosmic::Action<Message>> {
+        let current = match &origin {
+            None => self
+                .adding
+                .as_ref()
+                .is_some_and(|a| a.generation == generation),
+            Some(id) => self.account(id).is_some_and(|a| a.generation == generation),
+        };
+        if !current {
+            return Task::none();
+        }
+        let signed_in = match result {
+            Ok(s) => s,
+            Err(SignInFailure(error)) => {
+                match &origin {
+                    None => {
+                        self.adding = error.map(|e| Adding {
+                            generation,
+                            cancel: None,
+                            error: Some(e),
+                        });
+                    }
+                    Some(id) => {
+                        if let Some(a) = self.account_mut(id) {
+                            a.state = AccountState::NeedsSignIn { error };
+                        }
+                    }
+                }
+                return Task::none();
+            }
+        };
+        let id = accounts::account_id(&signed_in.identity);
+        match &origin {
+            None => {
+                self.adding = None;
+                accounts::adopt_profile(&profile, &id);
+            }
+            // Signed in to a different account in that account's window:
+            // the original stays signed out, the new one is added.
+            Some(old) if *old != id => {
+                if let Some(a) = self.account_mut(old) {
+                    a.state = AccountState::NeedsSignIn { error: None };
+                }
+            }
+            Some(_) => {}
+        }
+        let generation = self.next();
+        let epoch = self.next();
+        let state = AccountState::Ready {
+            signed_in: signed_in.clone(),
+            loading: true,
+            workspaces: Vec::new(),
+            error: None,
+        };
+        match self.account_mut(&id) {
+            Some(a) => {
+                a.identity = signed_in.identity.clone();
+                a.state = state;
+                a.notice = None;
+                a.can_retry = false;
+                a.generation = generation;
+            }
+            None => self.accounts.push(Account {
+                id: id.clone(),
+                identity: signed_in.identity.clone(),
+                state,
+                stored: None,
+                notice: None,
+                can_retry: false,
+                generation,
+                epoch,
+            }),
+        }
+        self.rebuild_nav(&Page::Account(id.clone()));
+        let started = accounts::sign_out_count(&id);
+        let save_id = id.clone();
+        let save = cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || accounts::save(&signed_in, started))
+                .await
+                .unwrap_or_else(|_| Err(fl!("error-generic")));
+            Message::Saved(save_id, generation, result)
+        });
+        Task::batch([save, self.load_resources(&id)])
+    }
+
+    fn load_resources(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+        let generation = self.next();
+        let Some(account) = self.account_mut(id) else {
+            return Task::none();
+        };
+        let AccountState::Ready {
+            signed_in, loading, ..
+        } = &mut account.state
         else {
             return Task::none();
         };
         *loading = true;
-        let generation = self.generation;
+        account.generation = generation;
+        let signed_in = signed_in.clone();
         let http = self.http.clone();
-        let account = account.clone();
+        let id = id.to_owned();
         cosmic::task::future(async move {
-            let acc = account.clone();
+            let acc = signed_in.clone();
             let result = tokio::task::spawn_blocking(move || {
                 discovery::discover(&http, &acc.tokens.access_token)
             })
@@ -666,25 +1117,30 @@ impl AppModel {
             let result = match result {
                 Ok(Ok(feeds)) => Ok(feeds
                     .into_iter()
-                    .map(|f| workspace_view(&account, f))
+                    .map(|f| workspace_view(&signed_in, f))
                     .collect()),
                 Ok(Err(e)) => Err(describe_fetch_error(&e)),
                 Err(_) => Err(fl!("error-generic")),
             };
-            Message::Discovered(generation, result)
+            Message::Discovered(id, generation, result)
         })
     }
 
-    fn discovered(&mut self, generation: u64, result: Result<Vec<WorkspaceView>, String>) {
-        if generation != self.generation {
+    fn discovered(
+        &mut self,
+        id: &str,
+        generation: u64,
+        result: Result<Vec<WorkspaceView>, String>,
+    ) {
+        let Some(account) = self.account_mut(id).filter(|a| a.generation == generation) else {
             return;
-        }
-        if let Session::Ready {
+        };
+        if let AccountState::Ready {
             loading,
             workspaces,
             error,
             ..
-        } = &mut self.session
+        } = &mut account.state
         {
             *loading = false;
             match result {
@@ -697,124 +1153,45 @@ impl AppModel {
         }
     }
 
-    fn sign_out(&mut self) -> Task<cosmic::Action<Message>> {
-        // Invalidate everything in flight, end sessions, then forget the
-        // account and its sign-in cookies (spec §6).
-        self.generation += 1;
-        if let Session::SigningIn { cancel } = &self.session {
+    /// Signs one account out: ends its sessions, removes it from the list,
+    /// deletes its cookies and keyring item (spec §6).
+    fn sign_out(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+        let Some(pos) = self.accounts.iter().position(|a| a.id == id) else {
+            return Task::none();
+        };
+        let account = self.accounts.remove(pos);
+        if let AccountState::SigningIn { cancel } = &account.state {
             cancel.cancel();
         }
-        for s in self.running.values() {
-            s.disconnect();
-        }
-        self.running.clear();
-        self.connections.clear();
-        self.pending_logon.clear();
-        self.last_failure.clear();
-        self.entra_failed.clear();
-        self.dialog = None;
-        self.notice = None;
-        self.can_retry_restore = false;
-        let mut error = None;
-        for dir in [signin_profile_dir(), signin_session_dir()]
-            .into_iter()
-            .flatten()
-        {
-            if dir.exists() && std::fs::remove_dir_all(&dir).is_err() {
-                error = Some(fl!("error-sign-out-incomplete"));
+        for key in account.resource_keys() {
+            if let Some(s) = self.running.remove(&key) {
+                s.disconnect();
             }
+            self.connections.remove(&key);
+            self.pending_logon.remove(&key);
+            self.last_failure.remove(&key);
+            self.entra_failed.remove(&key);
         }
-        self.session = Session::SignedOut { error };
+        if self.dialog.as_ref().is_some_and(|d| d.account == id) {
+            self.dialog = None;
+        }
+        if accounts::remove_files(id).is_err() {
+            self.notice = Some(fl!("error-sign-out-incomplete"));
+        }
+        let select = self
+            .accounts
+            .first()
+            .map_or(Page::Add, |a| Page::Account(a.id.clone()));
+        self.rebuild_nav(&select);
         // The keyring may block (for example on an unlock prompt), so not on
         // the UI thread.
-        SIGN_OUTS.fetch_add(1, Ordering::SeqCst);
-        let generation = self.generation;
+        let identity = account.identity;
         cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(|| {
-                let _renewal = RENEWAL.lock();
-                let deleted = secrets::delete_all(&ClientConfig::public_remote_desktop());
-                eprintln!("saved sign-in: deleted (sign-out): {deleted:?}");
-                deleted
-            })
-            .await;
-            let result = match result {
-                Ok(Ok(())) => Ok(()),
-                _ => Err(fl!("error-sign-out-incomplete")),
-            };
-            Message::SignOutFinished(generation, result)
-        })
-    }
-
-    /// Signs in with the refresh token from the keyring, if there is one.
-    fn start_restore(&mut self) -> Task<cosmic::Action<Message>> {
-        self.generation += 1;
-        let generation = self.generation;
-        self.session = Session::Restoring;
-        self.can_retry_restore = false;
-        let http = self.http.clone();
-        cosmic::task::future(async move {
-            let outcome = tokio::task::spawn_blocking(move || restore(&http))
+            let result = tokio::task::spawn_blocking(move || accounts::delete(&identity))
                 .await
-                .unwrap_or_else(|_| Restore::Retry(fl!("error-generic")));
-            Message::Restored(generation, outcome)
+                .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
+            Message::SignOutFinished(result)
         })
-    }
-
-    fn restored(&mut self, outcome: Restore) -> Task<cosmic::Action<Message>> {
-        match outcome {
-            Restore::Ready(account, notice) => {
-                self.notice = notice;
-                self.session = Session::Ready {
-                    account,
-                    loading: true,
-                    workspaces: Vec::new(),
-                    error: None,
-                };
-                self.load_resources()
-            }
-            Restore::NothingSaved => {
-                self.session = Session::SignedOut { error: None };
-                Task::none()
-            }
-            Restore::SignInAgain(error) => {
-                self.session = Session::SignedOut { error: Some(error) };
-                Task::none()
-            }
-            Restore::Retry(error) => {
-                self.can_retry_restore = true;
-                self.session = Session::SignedOut { error: Some(error) };
-                Task::none()
-            }
-        }
-    }
-
-    /// Saves a new sign-in's refresh token in the keyring.
-    fn save_sign_in(&mut self, account: &Arc<SignedIn>) -> Task<cosmic::Action<Message>> {
-        self.notice = None;
-        self.can_retry_restore = false;
-        let generation = self.generation;
-        let account = account.clone();
-        let started = sign_out_count();
-        cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                let _renewal = RENEWAL.lock();
-                save_refresh_token(&account, started)
-            })
-            .await
-            .unwrap_or_else(|_| Err(fl!("error-generic")));
-            Message::Saved(generation, result)
-        })
-    }
-
-    fn find_resource(&self, key: &str) -> Option<ResourceView> {
-        let Session::Ready { workspaces, .. } = &self.session else {
-            return None;
-        };
-        workspaces
-            .iter()
-            .flat_map(|w| &w.resources)
-            .find(|r| r.key == key)
-            .cloned()
     }
 
     /// Step 1 of connecting: download and filter the connection file.
@@ -827,9 +1204,15 @@ impl AppModel {
         {
             return Task::none(); // no accidental duplicate launches
         }
-        let (Some(account), Some(resource)) = (self.account(), self.find_resource(key)) else {
+        let Some(account) = self.account_of_resource(key) else {
             return Task::none();
         };
+        let (Some(signed_in), Some(resource)) =
+            (account.signed_in().cloned(), account.resource(key))
+        else {
+            return Task::none();
+        };
+        let (id, epoch) = (account.id.clone(), account.epoch);
         let Some(url) = resource.connection_file.clone() else {
             self.connections.insert(
                 key.to_owned(),
@@ -839,35 +1222,35 @@ impl AppModel {
         };
         self.connections
             .insert(key.to_owned(), Connection::Preparing);
-        let generation = self.generation;
         let http = self.http.clone();
         let key = key.to_owned();
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
                 // The access token also goes to FreeRDP, so it must stay
                 // valid through the connection.
-                let account = renew_if_needed(&http, account)?;
+                let signed_in = accounts::renew_if_needed(&http, signed_in)?;
                 let resp = http
                     .get(
                         &url,
                         Role::ConnectionFile,
-                        Some(&account.tokens.access_token),
+                        Some(&signed_in.tokens.access_token),
                     )
                     .map_err(|e| describe_fetch_error(&FetchError::Http(e)))?;
                 ConnectionFile::parse(&resp.body)
-                    .map(|c| (Arc::new(c), account))
+                    .map(|c| (Arc::new(c), signed_in))
                     .map_err(|e| fl!("error-bad-connection-file", detail = format!("{e:?}")))
             })
             .await
             .unwrap_or_else(|_| Err(fl!("error-generic")));
-            Message::ConnectionFileReady(generation, key, result)
+            Message::ConnectionFileReady(id, epoch, key, result)
         })
     }
 
-    /// Step 2: Entra single sign-on hosts connect at once; others ask for
-    /// the Windows password.
+    /// Step 2: Entra sign-in first; the Windows password only when chosen or
+    /// after Entra sign-in failed.
     fn connection_file_ready(
         &mut self,
+        account: &str,
         key: String,
         result: Result<Arc<ConnectionFile>, String>,
     ) -> Task<cosmic::Action<Message>> {
@@ -885,19 +1268,21 @@ impl AppModel {
         let entra_first =
             connection.entra_sso() || matches!(remembered, None | Some(LogonSetting::EntraSignIn));
         if entra_first && !self.entra_failed.contains(&key) {
-            return self.launch(&key, &connection, LogonSetting::EntraSignIn, None);
+            return self.launch(account, &key, &connection, LogonSetting::EntraSignIn, None);
         }
         let remembered = match remembered {
             Some(LogonSetting::EntraSignIn) | None => LogonSetting::Automatic,
             Some(other) => other,
         };
         let title = self
-            .find_resource(&key)
-            .map(|r| r.title)
+            .account(account)
+            .and_then(|a| a.resource(&key))
+            .map(|r| r.title.clone())
             .unwrap_or_default();
         let (logon, custom_domain) = logon_index(&remembered);
         let error = self.last_failure.remove(&key);
         self.dialog = Some(PasswordDialog {
+            account: account.to_owned(),
             key,
             title,
             connection,
@@ -941,19 +1326,25 @@ impl AppModel {
             None
         };
         let d = self.dialog.take().expect("checked above");
-        self.launch(&d.key, &d.connection, logon, password)
+        self.launch(&d.account, &d.key, &d.connection, logon, password)
     }
 
     /// Step 3: start FreeRDP and forward its events to the app.
     fn launch(
         &mut self,
+        account: &str,
         key: &str,
         connection: &Arc<ConnectionFile>,
         logon: LogonSetting,
         password: Option<Secret>,
     ) -> Task<cosmic::Action<Message>> {
-        let (Some(account), Some(helper), Some(profile)) =
-            (self.account(), signin::find_helper(), signin_profile_dir())
+        let Some((signed_in, epoch)) = self
+            .account(account)
+            .and_then(|a| Some((a.signed_in()?.clone(), a.epoch)))
+        else {
+            return Task::none();
+        };
+        let (Some(helper), Some(profile)) = (signin::find_helper(), accounts::profile_dir(account))
         else {
             self.connections.insert(
                 key.to_owned(),
@@ -963,13 +1354,13 @@ impl AppModel {
         };
         let spec = LaunchSpec {
             connection: (**connection).clone(),
-            username: account.identity.username.clone(),
+            username: signed_in.identity.username.clone(),
             password,
             logon: logon.clone(),
             helper,
             profile,
-            gateway_token: (!account.tokens.needs_refresh(Instant::now()))
-                .then(|| account.tokens.access_token.clone()),
+            gateway_token: (!signed_in.tokens.needs_refresh(Instant::now()))
+                .then(|| signed_in.tokens.access_token.clone()),
         };
         // No secrets here: the setting and, for a custom domain, its name.
         eprintln!("Starting FreeRDP with logon setting {logon:?}");
@@ -984,9 +1375,10 @@ impl AppModel {
                     .insert(key.to_owned(), Connection::Connecting);
                 self.pending_logon
                     .insert(key.to_owned(), (logon, connection.clone()));
-                let generation = self.generation;
-                let key = key.to_owned();
-                cosmic::task::stream(rx.map(move |e| Message::Session(generation, key.clone(), e)))
+                let (account, key) = (account.to_owned(), key.to_owned());
+                cosmic::task::stream(
+                    rx.map(move |e| Message::Session(account.clone(), epoch, key.clone(), e)),
+                )
             }
             Err(e) => {
                 let text = match e {
@@ -1084,188 +1476,45 @@ impl AppModel {
     }
 }
 
-/// One token renewal (or keyring write) at a time (spec §6: serialize
-/// refresh per account; the app has one account).
-static RENEWAL: Mutex<()> = Mutex::new(());
-
-/// Counts sign-outs. Work that started before a sign-out must not save its
-/// tokens afterwards (spec §6: late callbacks must not restore the account).
-static SIGN_OUTS: AtomicU64 = AtomicU64::new(0);
-
-fn sign_out_count() -> u64 {
-    SIGN_OUTS.load(Ordering::SeqCst)
-}
-
-/// Saves the account's refresh token, unless the user signed out since
-/// `started` (a [`sign_out_count`]). The error is the notice to show.
-/// Blocking; the caller holds [`RENEWAL`], as sign-out's delete does.
-fn save_refresh_token(account: &SignedIn, started: u64) -> Result<(), String> {
-    if sign_out_count() != started {
-        eprintln!("saved sign-in: not stored (signed out meanwhile)");
-        return Ok(());
-    }
-    let Some(refresh_token) = &account.tokens.refresh_token else {
-        eprintln!("saved sign-in: not stored (no refresh token in the response)");
-        return Err(fl!("notice-not-saved", detail = "no refresh token"));
-    };
-    let result = secrets::save(
-        &ClientConfig::public_remote_desktop(),
-        &account.identity,
-        refresh_token,
-    );
-    // Diagnostics: outcome and error kind only, never tokens or IDs.
-    match &result {
-        Ok(()) => eprintln!("saved sign-in: stored"),
-        Err(e) => eprintln!("saved sign-in: not stored ({e})"),
-    }
-    result.map_err(|e| fl!("notice-not-saved", detail = keyring_detail(&e)))
-}
-
-fn keyring_detail(e: &SecretsError) -> String {
-    match e {
-        SecretsError::Dismissed => fl!("keyring-dismissed"),
-        SecretsError::Malformed => fl!("keyring-malformed"),
-        SecretsError::Unavailable(_) => fl!("keyring-unavailable"),
-    }
-}
-
-/// The kind of a token error, for diagnostics (no server text).
-fn token_error_kind(e: &TokenError) -> String {
-    match e {
-        TokenError::Transient(_) => "network".into(),
-        TokenError::InvalidGrant { aadsts } => format!("invalid_grant, AADSTS {aadsts:?}"),
-        TokenError::InteractionRequired { aadsts } => {
-            format!("interaction_required, AADSTS {aadsts:?}")
-        }
-        TokenError::ConsentRequired { aadsts } => format!("consent_required, AADSTS {aadsts:?}"),
-        TokenError::Denied { aadsts } => format!("denied by policy, AADSTS {aadsts:?}"),
-        TokenError::Other { error, aadsts } => format!("{error}, AADSTS {aadsts:?}"),
-        TokenError::Malformed => "malformed response".into(),
-    }
-}
-
-/// Signs in with the saved refresh token. Blocking.
-fn restore(http: &Http) -> Restore {
-    let config = ClientConfig::public_remote_desktop();
-    let started = sign_out_count();
-    let _renewal = RENEWAL.lock();
-    let stored = match secrets::load(&config) {
-        Ok(Some(stored)) => {
-            eprintln!("saved sign-in: found");
-            stored
-        }
-        Ok(None) => {
-            eprintln!("saved sign-in: none");
-            return Restore::NothingSaved;
-        }
-        // Spec §6: no files as a fallback. The user signs in for this
-        // session; saving will report the keyring problem again.
-        Err(e) => {
-            eprintln!("saved sign-in: can't load ({e})");
-            return Restore::SignInAgain(fl!("error-keyring-load", detail = keyring_detail(&e)));
-        }
-    };
-    let renewed = token::refresh(http, &config, &stored.refresh_token);
-    if let Err(e) = &renewed {
-        eprintln!("saved sign-in: renewal failed ({})", token_error_kind(e));
-    }
-    let tokens = match renewed {
-        Ok(tokens) => tokens,
-        Err(TokenError::Transient(_)) => return Restore::Retry(fl!("error-restore-network")),
-        Err(TokenError::InvalidGrant { .. }) => {
-            // Revoked or expired for good: forget it.
-            let deleted = secrets::delete_all(&config);
-            eprintln!("saved sign-in: deleted (invalid_grant): {deleted:?}");
-            return Restore::SignInAgain(fl!("error-saved-sign-in-expired"));
-        }
-        // Policy or interaction needed: an interactive sign-in replaces it.
-        Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
-    };
-    // A renewed ID token must name the same account (and is checked like
-    // any other); without one, the saved identity stands.
-    let identity = match tokens.id_token.as_deref() {
-        None => stored.identity.clone(),
-        Some(raw) => {
-            let keys = match id_token::fetch_keys(http) {
-                Ok(keys) => keys,
-                Err(_) => return Restore::Retry(fl!("error-restore-network")),
-            };
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |d| d.as_secs());
-            match id_token::validate_renewed(raw, &keys, &config.client_id, now, &stored.identity) {
-                Ok(identity) => identity,
-                Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
-            }
-        }
-    };
-    let rotated = tokens
-        .refresh_token
-        .as_ref()
-        .is_some_and(|t| t.expose() != stored.refresh_token.expose());
-    eprintln!(
-        "saved sign-in: renewed (refresh token {})",
-        if rotated { "rotated" } else { "unchanged" }
-    );
-    let account = SignedIn { identity, tokens };
-    let notice = if rotated {
-        save_refresh_token(&account, started).err()
-    } else {
-        None
-    };
-    Restore::Ready(Arc::new(account), notice)
-}
-
-/// Renews the tokens when the access token expires within the margin, and
-/// saves a rotated refresh token. Blocking.
-fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, String> {
-    if !account.tokens.needs_refresh(Instant::now()) {
-        return Ok(account);
-    }
-    let started = sign_out_count();
-    let _renewal = RENEWAL.lock();
-    let Some(refresh_token) = &account.tokens.refresh_token else {
-        return Err(fl!("error-session-expired"));
-    };
-    match token::refresh(http, &ClientConfig::public_remote_desktop(), refresh_token) {
-        Ok(tokens) => {
-            let renewed = SignedIn {
-                identity: account.identity.clone(),
-                tokens,
-            };
-            let rotated = renewed
-                .tokens
-                .refresh_token
-                .as_ref()
-                .is_some_and(|t| t.expose() != refresh_token.expose());
-            if rotated {
-                // Best effort: if this fails, the next start asks to sign in.
-                let _ = save_refresh_token(&renewed, started);
-            }
-            Ok(Arc::new(renewed))
-        }
-        Err(TokenError::Transient(_)) => Err(fl!("error-generic")),
-        Err(_) => Err(fl!("error-session-expired")),
-    }
-}
-
-/// The sign-in web view's private directory for the (single) account.
-fn signin_profile_dir() -> Option<PathBuf> {
-    Some(
-        dirs::data_dir()?
-            .join("cosmic-ext-avd")
-            .join("signin")
-            .join("default"),
+/// "Waiting for sign-in" with a Cancel button.
+fn waiting_view(cancel: Message) -> Element<'static, Message> {
+    centered(
+        widget::column::with_capacity(3)
+            .push(widget::text::title3(fl!("signing-in")))
+            .push(widget::text::body(fl!("signing-in-hint")))
+            .push(widget::button::standard(fl!("cancel")).on_press(cancel))
+            .spacing(cosmic::theme::spacing().space_s)
+            .align_x(Alignment::Center)
+            .into(),
     )
 }
 
-/// The sign-in session cookies the helpers share (RAM-only; see
-/// `signin/src/session_jar.rs`).
-fn signin_session_dir() -> Option<PathBuf> {
-    let runtime = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
-    runtime
-        .is_absolute()
-        .then(|| runtime.join("cosmic-ext-avd-web"))
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum ContextPage {
+    #[default]
+    About,
+    Dependencies,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MenuAction {
+    About,
+    Dependencies,
+    AddAccount,
+    SignOut,
+}
+
+impl menu::action::MenuAction for MenuAction {
+    type Message = Message;
+
+    fn message(&self) -> Self::Message {
+        match self {
+            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+            MenuAction::Dependencies => Message::ToggleContextPage(ContextPage::Dependencies),
+            MenuAction::AddAccount => Message::AddAccount,
+            MenuAction::SignOut => Message::SignOutSelected,
+        }
+    }
 }
 
 /// Opaque key for a resource: hash of account, tenant and resource ID.
@@ -1468,23 +1717,6 @@ fn dependency_text(d: Dependency) -> (String, String) {
     }
 }
 
-fn signed_out_view(error: Option<&str>, can_retry: bool) -> Element<'_, Message> {
-    let space = cosmic::theme::spacing();
-    let mut col = widget::column::with_capacity(6)
-        .push(widget::text::title1(fl!("app-title")))
-        .push(widget::text::body(fl!("unofficial-notice")).width(Length::Fixed(420.0)))
-        .push(widget::button::suggested(fl!("sign-in")).on_press(Message::SignIn))
-        .spacing(space.space_m)
-        .align_x(Alignment::Center);
-    if can_retry {
-        col = col.push(widget::button::standard(fl!("try-again")).on_press(Message::RetryRestore));
-    }
-    if let Some(error) = error {
-        col = col.push(widget::text::body(error.to_owned()).width(Length::Fixed(420.0)));
-    }
-    centered(col.into())
-}
-
 fn resource_row<'a>(r: &'a ResourceView, conn: Option<&'a Connection>) -> Element<'a, Message> {
     let kind = match r.kind {
         ResourceKind::Desktop => fl!("kind-desktop"),
@@ -1578,28 +1810,4 @@ fn resources_view<'a>(
             .padding(space.space_m),
     )
     .into()
-}
-
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub enum ContextPage {
-    #[default]
-    About,
-    Dependencies,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MenuAction {
-    About,
-    Dependencies,
-}
-
-impl menu::action::MenuAction for MenuAction {
-    type Message = Message;
-
-    fn message(&self) -> Self::Message {
-        match self {
-            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
-            MenuAction::Dependencies => Message::ToggleContextPage(ContextPage::Dependencies),
-        }
-    }
 }
