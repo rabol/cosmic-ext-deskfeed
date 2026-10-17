@@ -668,7 +668,9 @@ impl AppModel {
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(|| {
                 let _renewal = RENEWAL.lock();
-                secrets::delete_all(&ClientConfig::public_remote_desktop())
+                let deleted = secrets::delete_all(&ClientConfig::public_remote_desktop());
+                eprintln!("saved sign-in: deleted (sign-out): {deleted:?}");
+                deleted
             })
             .await;
             let result = match result {
@@ -1035,17 +1037,24 @@ fn sign_out_count() -> u64 {
 /// Blocking; the caller holds [`RENEWAL`], as sign-out's delete does.
 fn save_refresh_token(account: &SignedIn, started: u64) -> Result<(), String> {
     if sign_out_count() != started {
+        eprintln!("saved sign-in: not stored (signed out meanwhile)");
         return Ok(());
     }
     let Some(refresh_token) = &account.tokens.refresh_token else {
+        eprintln!("saved sign-in: not stored (no refresh token in the response)");
         return Err(fl!("notice-not-saved", detail = "no refresh token"));
     };
-    secrets::save(
+    let result = secrets::save(
         &ClientConfig::public_remote_desktop(),
         &account.identity,
         refresh_token,
-    )
-    .map_err(|e| fl!("notice-not-saved", detail = keyring_detail(&e)))
+    );
+    // Diagnostics: outcome and error kind only, never tokens or IDs.
+    match &result {
+        Ok(()) => eprintln!("saved sign-in: stored"),
+        Err(e) => eprintln!("saved sign-in: not stored ({e})"),
+    }
+    result.map_err(|e| fl!("notice-not-saved", detail = keyring_detail(&e)))
 }
 
 fn keyring_detail(e: &SecretsError) -> String {
@@ -1056,26 +1065,53 @@ fn keyring_detail(e: &SecretsError) -> String {
     }
 }
 
+/// The kind of a token error, for diagnostics (no server text).
+fn token_error_kind(e: &TokenError) -> String {
+    match e {
+        TokenError::Transient(_) => "network".into(),
+        TokenError::InvalidGrant { aadsts } => format!("invalid_grant, AADSTS {aadsts:?}"),
+        TokenError::InteractionRequired { aadsts } => {
+            format!("interaction_required, AADSTS {aadsts:?}")
+        }
+        TokenError::ConsentRequired { aadsts } => format!("consent_required, AADSTS {aadsts:?}"),
+        TokenError::Denied { aadsts } => format!("denied by policy, AADSTS {aadsts:?}"),
+        TokenError::Other { error, aadsts } => format!("{error}, AADSTS {aadsts:?}"),
+        TokenError::Malformed => "malformed response".into(),
+    }
+}
+
 /// Signs in with the saved refresh token. Blocking.
 fn restore(http: &Http) -> Restore {
     let config = ClientConfig::public_remote_desktop();
     let started = sign_out_count();
     let _renewal = RENEWAL.lock();
     let stored = match secrets::load(&config) {
-        Ok(Some(stored)) => stored,
-        Ok(None) => return Restore::NothingSaved,
+        Ok(Some(stored)) => {
+            eprintln!("saved sign-in: found");
+            stored
+        }
+        Ok(None) => {
+            eprintln!("saved sign-in: none");
+            return Restore::NothingSaved;
+        }
         // Spec §6: no files as a fallback. The user signs in for this
         // session; saving will report the keyring problem again.
         Err(e) => {
+            eprintln!("saved sign-in: can't load ({e})");
             return Restore::SignInAgain(fl!("error-keyring-load", detail = keyring_detail(&e)));
         }
     };
-    let tokens = match token::refresh(http, &config, &stored.refresh_token) {
+    let renewed = token::refresh(http, &config, &stored.refresh_token);
+    if let Err(e) = &renewed {
+        eprintln!("saved sign-in: renewal failed ({})", token_error_kind(e));
+    }
+    let tokens = match renewed {
         Ok(tokens) => tokens,
         Err(TokenError::Transient(_)) => return Restore::Retry(fl!("error-restore-network")),
         Err(TokenError::InvalidGrant { .. }) => {
             // Revoked or expired for good: forget it.
-            let _ = secrets::delete_all(&config);
+            let deleted = secrets::delete_all(&config);
+            eprintln!("saved sign-in: deleted (invalid_grant): {deleted:?}");
             return Restore::SignInAgain(fl!("error-saved-sign-in-expired"));
         }
         // Policy or interaction needed: an interactive sign-in replaces it.
@@ -1103,6 +1139,10 @@ fn restore(http: &Http) -> Restore {
         .refresh_token
         .as_ref()
         .is_some_and(|t| t.expose() != stored.refresh_token.expose());
+    eprintln!(
+        "saved sign-in: renewed (refresh token {})",
+        if rotated { "rotated" } else { "unchanged" }
+    );
     let account = SignedIn { identity, tokens };
     let notice = if rotated {
         save_refresh_token(&account, started).err()
