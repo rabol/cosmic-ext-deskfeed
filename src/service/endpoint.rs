@@ -6,10 +6,14 @@
 //! origin and path prefix reviewed for that role. Broad matching such as
 //! `*.microsoft.com` is deliberately not used.
 //!
-//! Observed 2026-10-17 (reference app feeds, owner's tenant): discovery,
-//! feeds, `.rdp` files and icons all live on `rdweb.wvd.microsoft.com`
-//! under `/api/arm/feeddiscovery`. Regional `rdweb-g-*` hosts appear only
-//! for diagnostics and hub discovery, which the app does not call.
+//! Observed 2026-10-17 (owner's tenant): discovery, feeds, `.rdp` files and
+//! icons live under `/api/arm/feeddiscovery`. Discovery is on
+//! `rdweb.wvd.microsoft.com`; the feed URLs it returns were on that host
+//! after an interactive sign-in and on `rdweb-r1.wvd.microsoft.com` after a
+//! token renewal. Microsoft lists `*.wvd.microsoft.com` (TCP 443, "Service
+//! traffic") as required for Remote Desktop clients ("Required FQDNs and
+//! endpoints for Azure Virtual Desktop", End user devices), so feed roles
+//! accept one host label under that domain, still with the path checks.
 
 use url::Url;
 
@@ -56,10 +60,36 @@ pub enum EndpointError {
 }
 
 #[derive(Debug, Clone)]
+enum Host {
+    Exact(String),
+    /// `<one label>.<domain>`, the label made of letters, digits and `-`.
+    LabelUnder(String),
+}
+
+impl Host {
+    fn matches(&self, host: &str) -> bool {
+        match self {
+            Self::Exact(h) => host == h,
+            Self::LabelUnder(domain) => host
+                .strip_suffix(domain.as_str())
+                .and_then(|rest| rest.strip_suffix('.'))
+                .is_some_and(|label| {
+                    !label.is_empty()
+                        && label.len() <= 63
+                        && !label.starts_with('-')
+                        && label
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                }),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct Rule {
     role: Role,
     scheme: &'static str,
-    host: String,
+    host: Host,
     port: u16,
     /// The path must equal this, or start with it followed by `/`.
     path_prefix: &'static str,
@@ -72,32 +102,53 @@ pub struct EndpointPolicy {
 }
 
 const AVD_FEED_HOST: &str = "rdweb.wvd.microsoft.com";
+/// Microsoft's documented client service domain (`*.wvd.microsoft.com`).
+const AVD_SERVICE_DOMAIN: &str = "wvd.microsoft.com";
 const LOGIN_HOST: &str = "login.microsoftonline.com";
 
 impl EndpointPolicy {
     /// Azure public cloud.
     pub fn azure_public() -> Self {
-        Self::for_hosts("https", LOGIN_HOST, AVD_FEED_HOST, 443)
+        Self::for_hosts(
+            "https",
+            LOGIN_HOST,
+            AVD_FEED_HOST,
+            Host::LabelUnder(AVD_SERVICE_DOMAIN.to_owned()),
+            443,
+        )
     }
 
-    fn for_hosts(scheme: &'static str, login: &str, feed: &str, port: u16) -> Self {
-        let rule = |role, host: &str, path_prefix| Rule {
+    /// `feed`: the discovery host. `tenant_feeds`: hosts allowed for the
+    /// feeds, connection files and icons that discovery points to.
+    fn for_hosts(
+        scheme: &'static str,
+        login: &str,
+        feed: &str,
+        tenant_feeds: Host,
+        port: u16,
+    ) -> Self {
+        let rule = |role, host: Host, path_prefix| Rule {
             role,
             scheme,
-            host: host.to_owned(),
+            host,
             port,
             path_prefix,
         };
+        let exact = |h: &str| Host::Exact(h.to_owned());
         Self {
             rules: vec![
                 // Token endpoints are /{tenant}/oauth2/v2.0/token; checked in
                 // `check` because the tenant segment varies.
-                rule(Role::Token, login, "/"),
-                rule(Role::SigningKeys, login, "/common/discovery/v2.0/keys"),
-                rule(Role::FeedDiscovery, feed, "/api/arm/feeddiscovery"),
-                rule(Role::Feed, feed, "/api/arm/feeddiscovery/tenants"),
-                rule(Role::ConnectionFile, feed, "/api/arm/feeddiscovery/tenants"),
-                rule(Role::Icon, feed, "/api/arm/feeddiscovery/tenants"),
+                rule(Role::Token, exact(login), "/"),
+                rule(Role::SigningKeys, exact(login), "/common/discovery/v2.0/keys"),
+                rule(Role::FeedDiscovery, exact(feed), "/api/arm/feeddiscovery"),
+                rule(Role::Feed, tenant_feeds.clone(), "/api/arm/feeddiscovery/tenants"),
+                rule(
+                    Role::ConnectionFile,
+                    tenant_feeds.clone(),
+                    "/api/arm/feeddiscovery/tenants",
+                ),
+                rule(Role::Icon, tenant_feeds, "/api/arm/feeddiscovery/tenants"),
             ],
         }
     }
@@ -105,7 +156,13 @@ impl EndpointPolicy {
     /// A policy for a local test server (plain HTTP on 127.0.0.1).
     #[cfg(test)]
     pub fn local_test(port: u16) -> Self {
-        Self::for_hosts("http", "127.0.0.1", "127.0.0.1", port)
+        Self::for_hosts(
+            "http",
+            "127.0.0.1",
+            "127.0.0.1",
+            Host::Exact("127.0.0.1".into()),
+            port,
+        )
     }
 
     /// True when every rule requires HTTPS (the real policy).
@@ -120,7 +177,10 @@ impl EndpointPolicy {
             .iter()
             .find(|r| r.role == Role::FeedDiscovery)
             .expect("discovery rule");
-        let mut url = Url::parse(&format!("{}://{}", r.scheme, r.host)).expect("valid origin");
+        let Host::Exact(host) = &r.host else {
+            unreachable!("discovery host is exact")
+        };
+        let mut url = Url::parse(&format!("{}://{host}", r.scheme)).expect("valid origin");
         url.set_port(Some(r.port)).expect("port settable");
         url.set_path(r.path_prefix);
         url
@@ -163,7 +223,7 @@ impl EndpointPolicy {
                 || path
                     .strip_prefix(r.path_prefix)
                     .is_some_and(|rest| rest.starts_with('/'));
-            host == r.host && port == r.port && prefix_ok
+            r.host.matches(&host) && port == r.port && prefix_ok
         });
         if allowed && (role != Role::Token || is_token_path(path)) {
             Ok(())
@@ -209,6 +269,13 @@ mod tests {
             Ok(())
         );
         assert_eq!(ok(&format!("{TENANT}/pngs/x.png?a=b"), Role::Icon), Ok(()));
+        // Observed after a token renewal; within `*.wvd.microsoft.com`.
+        let regional = TENANT.replace("//rdweb.", "//rdweb-r1.");
+        assert_eq!(ok(&format!("{regional}/webfeed"), Role::Feed), Ok(()));
+        assert_eq!(
+            ok(&format!("{regional}/rdps/x.rdp"), Role::ConnectionFile),
+            Ok(())
+        );
         assert_eq!(
             ok(
                 "https://RDWEB.wvd.microsoft.com:443/api/arm/feeddiscovery",
@@ -276,6 +343,42 @@ mod tests {
         ] {
             assert_eq!(ok(url, Role::FeedDiscovery), Err(want), "{url}");
         }
+    }
+
+    #[test]
+    fn tenant_feed_hosts_are_one_label_under_wvd() {
+        let path = "/api/arm/feeddiscovery/tenants/x/webfeed";
+        for host in [
+            "wvd.microsoft.com",
+            "a.b.wvd.microsoft.com",
+            "-x.wvd.microsoft.com",
+            "rdweb.wvd.microsoft.com.evil.example",
+            "rdwebwvd.microsoft.com",
+            "rdweb.microsoft.com",
+            "x_y.wvd.microsoft.com",
+        ] {
+            assert_eq!(
+                ok(&format!("https://{host}{path}"), Role::Feed),
+                Err(EndpointError::NotAllowed),
+                "{host}"
+            );
+        }
+        // Discovery itself stays on the one reviewed host.
+        assert!(
+            ok(
+                "https://rdweb-r1.wvd.microsoft.com/api/arm/feeddiscovery",
+                Role::FeedDiscovery
+            )
+            .is_err()
+        );
+        // Other paths stay refused on the wider hosts.
+        assert!(
+            ok(
+                "https://rdweb-r1.wvd.microsoft.com/api/arm/DiagnosticEvents/v1",
+                Role::Feed
+            )
+            .is_err()
+        );
     }
 
     #[test]
