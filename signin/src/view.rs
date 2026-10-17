@@ -251,6 +251,12 @@ impl SignInView {
             .as_deref()
             .map(session_jar::load)
             .unwrap_or_default();
+        // Diagnostics (count only): did this sign-in start with the shared
+        // Microsoft session? FreeRDP passes our stderr to the app's log.
+        eprintln!(
+            "cosmic-ext-avd-signin: saved session cookies: {}",
+            stored.len()
+        );
         let Some(manager) = inner.cookies.clone().filter(|_| !stored.is_empty()) else {
             inner.webview.load_uri(&url);
             return;
@@ -274,6 +280,10 @@ impl SignInView {
         let Some(callback) = inner.on_result.borrow_mut().take() else {
             return;
         };
+        eprintln!(
+            "cosmic-ext-avd-signin: sign-in page shown to the user: {}",
+            if inner.window.is_visible() { "yes" } else { "no" }
+        );
         if let Some(id) = inner.timeout.borrow_mut().take() {
             id.remove();
         }
