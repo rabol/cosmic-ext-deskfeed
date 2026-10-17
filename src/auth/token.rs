@@ -97,6 +97,21 @@ struct ErrorResponse {
     error_codes: Vec<u32>,
     #[serde(default)]
     suberror: Option<String>,
+    #[serde(default)]
+    error_description: Option<String>,
+}
+
+/// The first line of Microsoft's error description: the AADSTS text
+/// without the trace and correlation IDs that follow it. Bounded, no
+/// control characters.
+fn description_first_line(d: &str) -> String {
+    d.split(['\r', '\n'])
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(400)
+        .collect()
 }
 
 pub fn token_url(config: &ClientConfig) -> Url {
@@ -184,6 +199,13 @@ fn classify_error(status: u16, body: &[u8]) -> TokenError {
         };
     };
     let aadsts = err.error_codes.first().copied();
+    // Diagnostics for the sign-in frequency policy (AADSTS70043): its text
+    // says when the token was issued and the lifetime the policy allows.
+    if aadsts == Some(70043)
+        && let Some(d) = &err.error_description
+    {
+        eprintln!("token endpoint: {}", description_first_line(d));
+    }
     // AADSTS codes from Microsoft's public error reference.
     let code_is = |codes: &[u32]| aadsts.is_some_and(|c| codes.contains(&c));
     match err.error.as_str() {
@@ -210,6 +232,19 @@ fn classify_error(status: u16, body: &[u8]) -> TokenError {
                 .collect(),
             aadsts,
         },
+    }
+}
+
+#[cfg(test)]
+mod description_tests {
+    use super::*;
+
+    #[test]
+    fn keeps_only_the_first_line() {
+        let d = "AADSTS70043: The refresh token has expired. The token was issued on 2026-10-17T17:55:00Z and the maximum allowed lifetime for this request is 3600.\r\nTrace ID: abc\r\nCorrelation ID: def";
+        let line = description_first_line(d);
+        assert!(line.ends_with("is 3600."));
+        assert!(!line.contains("Trace") && !line.contains("Correlation"));
     }
 }
 
