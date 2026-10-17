@@ -49,6 +49,9 @@ pub struct AppModel {
     /// remember the setting on success or ask again on logon failure.
     pending_logon: HashMap<String, (LogonSetting, Arc<ConnectionFile>)>,
     dialog: Option<PasswordDialog>,
+    /// Why the last attempt for a resource failed, shown at the top of the
+    /// next password dialog.
+    last_failure: HashMap<String, String>,
     logon_labels: Vec<String>,
 }
 
@@ -200,6 +203,7 @@ impl cosmic::Application for AppModel {
             running: HashMap::new(),
             pending_logon: HashMap::new(),
             dialog: None,
+            last_failure: HashMap::new(),
             logon_labels: vec![
                 fl!("logon-automatic"),
                 fl!("logon-empty-domain"),
@@ -269,6 +273,9 @@ impl cosmic::Application for AppModel {
         };
         let space = cosmic::theme::spacing();
         let mut controls = widget::column::with_capacity(6).spacing(space.space_s);
+        if let Some(e) = &d.error {
+            controls = controls.push(widget::text::title4(e.clone()));
+        }
         controls = controls.push(widget::text::body(fl!("password-for", account = account)));
         if d.logon != LOGON_ENTRA {
             controls = controls.push(
@@ -297,9 +304,6 @@ impl cosmic::Application for AppModel {
                 widget::text_input(fl!("domain-placeholder"), d.custom_domain.as_str())
                     .on_input(Message::CustomDomainInput),
             );
-        }
-        if let Some(e) = &d.error {
-            controls = controls.push(widget::text::body(e.clone()));
         }
         controls = controls.push(widget::text::caption(fl!("password-explainer")));
 
@@ -556,6 +560,7 @@ impl AppModel {
         self.running.clear();
         self.connections.clear();
         self.pending_logon.clear();
+        self.last_failure.clear();
         self.dialog = None;
         let mut error = None;
         if let Some(dir) = signin_profile_dir()
@@ -650,6 +655,7 @@ impl AppModel {
             .map(|r| r.title)
             .unwrap_or_default();
         let (logon, custom_domain) = logon_index(&remembered);
+        let error = self.last_failure.remove(&key);
         self.dialog = Some(PasswordDialog {
             key,
             title,
@@ -658,7 +664,7 @@ impl AppModel {
             password_hidden: true,
             logon,
             custom_domain,
-            error: None,
+            error,
         });
         Task::none()
     }
@@ -774,10 +780,17 @@ impl AppModel {
                         self.connections.remove(key);
                     }
                     SessionEnd::LogonFailed => {
-                        self.connections.remove(key);
-                        if let Some((logon, connection)) = pending {
-                            self.reopen_after_logon_failure(key, &logon, connection);
-                        }
+                        // Stop and explain; the user decides whether to try
+                        // again (ADR 0005). No automatic retry or re-prompt.
+                        let tried = pending
+                            .map(|(logon, _)| self.logon_labels[logon_index(&logon).0].clone())
+                            .unwrap_or_default();
+                        let message = fl!("error-logon-failed", setting = tried);
+                        self.connections.insert(
+                            key.to_owned(),
+                            Connection::Failed(fl!("status-logon-failed")),
+                        );
+                        self.last_failure.insert(key.to_owned(), message);
                     }
                     other => {
                         self.connections.insert(
@@ -788,29 +801,6 @@ impl AppModel {
                 }
             }
         }
-    }
-
-    /// Logon failed: ask again, explain, and suggest another setting
-    /// without switching on our own (ADR 0005).
-    fn reopen_after_logon_failure(
-        &mut self,
-        key: &str,
-        logon: &LogonSetting,
-        connection: Arc<ConnectionFile>,
-    ) {
-        let (index, custom_domain) = logon_index(logon);
-        let tried = self.logon_labels[index].clone();
-        let title = self.find_resource(key).map(|r| r.title).unwrap_or_default();
-        self.dialog = Some(PasswordDialog {
-            key: key.to_owned(),
-            title,
-            connection,
-            password: String::new(),
-            password_hidden: true,
-            logon: index,
-            custom_domain,
-            error: Some(fl!("error-logon-failed", setting = tried)),
-        });
     }
 
     fn remember_logon(&mut self, key: &str, logon: LogonSetting) {

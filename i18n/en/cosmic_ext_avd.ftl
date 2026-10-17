@@ -49,6 +49,7 @@ disconnect = Disconnect
 status-preparing = Preparing…
 status-connecting = Connecting…
 status-connected = Connected
+status-logon-failed = Wrong user name or password. Select Connect to try again.
 connect-to = Connect to { $title }
 password-for = Windows password for { $account }
 windows-password = Windows password
