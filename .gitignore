@@ -12,3 +12,7 @@ debian/*
 !debian/install
 !debian/rules
 !debian/source
+# Never commit tenant data or research output
+*.rdp
+*.log
+research/out/

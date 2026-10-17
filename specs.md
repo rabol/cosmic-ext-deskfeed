@@ -80,6 +80,8 @@ Before substantial UI work, prove the complete sign-in → discovery → connect
 7. Reproduce the reference app's session failures on COSMIC and record the symptoms and logs. Compare `sdl-freerdp` on native Wayland, `sdl-freerdp` on XWayland, and `xfreerdp` on XWayland for stability, input, display changes, scaling, audio, clipboard, and RemoteApp. Choose the default backend from this evidence.
 8. Produce a compatibility matrix describing the configurations actually tested and the unsupported cases. Include Conditional Access failures and distinguish missing assignments from unsupported authentication.
 
+Note (2026-10-17, [ADR 0006](docs/adr/0006-build-app-alongside-compatibility-work.md)): the owner decided to build the app alongside this investigation. Remaining questions are answered with the app itself rather than research scripts; the completion criterion below still applies before release.
+
 Completion criterion: end-to-end tests with both identity modes (or documented evidence that one is unavailable), a stable multi-hour session on COSMIC with the chosen backend, documented limitations, and a reproducible backend configuration. Unresolved service access, authentication, or session stability is a release blocker. Do not replace discovery with a local connection-file importer and call it feature parity.
 
 ## 5. User experience

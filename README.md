@@ -3,7 +3,11 @@
 Azure Virtual Desktop and Windows 365 client for the COSMIC™ desktop.
 
 > Unofficial community project. Not affiliated with or endorsed by Microsoft or System76.
-> Early development: see [specs.md](./specs.md) for the design and roadmap.
+> Early development: see [specs.md](./specs.md) for the design and roadmap,
+> [docs/milestone-1.md](./docs/milestone-1.md) for current progress, and
+> [docs/adr](./docs/adr/README.md) for decisions.
+>
+> This app uses Microsoft's public Remote Desktop client identity for interoperability. It is not a Microsoft product.
 
 ## Installation
 
