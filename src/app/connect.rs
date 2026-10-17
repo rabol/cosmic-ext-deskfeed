@@ -101,6 +101,18 @@ impl AppModel {
 
     /// Step 1 of connecting: download and filter the connection file.
     pub(super) fn prepare_connection(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
+        // A required dependency is missing or too old (spec §8: check the
+        // backend before launch). Check again, so a fixed one counts on
+        // the next try.
+        if let Some(checks) = &self.deps
+            && !deps::required_ok(checks)
+        {
+            self.connections.insert(
+                key.to_owned(),
+                Connection::Failed(fl!("error-deps-missing")),
+            );
+            return self.check_dependencies();
+        }
         if self.quit != Quit::No
             || self.running.contains_key(key)
             || self.launching.contains_key(key)

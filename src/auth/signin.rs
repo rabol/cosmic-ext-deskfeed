@@ -143,7 +143,7 @@ pub fn find_helper() -> Option<PathBuf> {
         dir.join("../libexec/cosmic-ext-deskfeed").join(HELPER_NAME),
     ]
     .into_iter()
-    .find(|p| p.is_file())
+    .find(|p| crate::sessions::launcher::is_executable(p))
 }
 
 #[derive(Deserialize)]

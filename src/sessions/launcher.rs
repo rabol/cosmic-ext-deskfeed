@@ -231,8 +231,15 @@ pub fn find_freerdp() -> Option<PathBuf> {
     FREERDP_BINARIES.iter().find_map(|name| {
         std::env::split_paths(&path)
             .map(|dir| dir.join(name))
-            .find(|p| p.is_file())
+            .find(|p| is_executable(p))
     })
+}
+
+/// A regular file someone may execute; a non-executable file of the same
+/// name doesn't hide a usable one later in `PATH`.
+pub fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
 /// The argument lines for `/args-from`. `rdp_path` must end in `.rdp`.
@@ -790,6 +797,21 @@ mod tests {
         assert!(!args(&s).iter().any(|x| x.starts_with("/wm-class:")));
         s.window_title = "\n".into();
         assert!(!args(&s).iter().any(|x| x.starts_with("/title:")));
+    }
+
+    #[test]
+    fn only_executable_files_count() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("avd-exec-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("sdl-freerdp3");
+        fs::write(&file, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!is_executable(&file));
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(is_executable(&file));
+        assert!(!is_executable(&dir));
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
