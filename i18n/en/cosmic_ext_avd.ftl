@@ -7,3 +7,6 @@ view = View
 welcome = Welcome to COSMIC! ✨
 page-id = Page { $num }
 git-description = Git commit {$hash} on {$date}
+
+# Sign-in
+sign-in-window-title = Sign in to your work account

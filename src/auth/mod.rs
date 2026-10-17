@@ -4,4 +4,5 @@
 
 pub mod attempt;
 pub mod id_token;
+pub mod signin;
 pub mod token;
