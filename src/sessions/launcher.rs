@@ -35,6 +35,12 @@ const FREERDP_BINARIES: &[&str] = &["sdl-freerdp3", "sdl-freerdp"];
 const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
+/// FreeRDP's SDL3 display channel logger; at DEBUG it reports when the
+/// channel is ready (`client/SDL/SDL3/sdl_disp.cpp`, `DisplayControlCaps`).
+/// Its lines hold only monitor counts and area factors.
+const DISPLAY_LOGGER: &str = "com.freerdp.client.sdl.disp";
+/// Logged by that channel, in a windowed session only, once it is ready.
+const DISPLAY_READY_MARKER: &str = "DisplayControlCapsPdu: setting the window as resizable";
 
 /// Environment every child process (FreeRDP, the sign-in helper) gets;
 /// everything else is dropped. See [`pass_environment`].
@@ -204,7 +210,13 @@ pub enum SessionEnd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
     Connected,
-    Ended { end: SessionEnd, log: Vec<String> },
+    /// The display channel is ready in a windowed session: from now on a
+    /// window event makes FreeRDP send the window's size (workspace.rs).
+    DisplayReady,
+    Ended {
+        end: SessionEnd,
+        log: Vec<String>,
+    },
 }
 
 /// Finds a FreeRDP client in `PATH`.
@@ -496,7 +508,12 @@ fn spawn_freerdp(
     // 3.32.2 `libfreerdp/core/rdp.c`). An environment variable, because
     // `/log-filters:` comes too late for loggers that already exist
     // (`winpr/libwinpr/utils/wlog/wlog.c` caches the level on creation).
-    cmd.env("WLOG_FILTER", format!("{STATE_LOGGER}:DEBUG"));
+    // The display channel logger too (`WLOG_FILTER` is a comma-separated
+    // list, `winpr/libwinpr/utils/wlog/wlog.c`).
+    cmd.env(
+        "WLOG_FILTER",
+        format!("{STATE_LOGGER}:DEBUG,{DISPLAY_LOGGER}:DEBUG"),
+    );
     // SAFETY: only async-signal-safe calls (dup2, fcntl) between fork and
     // exec. The pipe's read end becomes fd 3 without close-on-exec.
     unsafe {
@@ -570,6 +587,9 @@ fn supervise(
                     }
                     if log.lock().expect("not poisoned").push(&line) {
                         events(SessionEvent::Connected);
+                    }
+                    if line.contains(DISPLAY_READY_MARKER) {
+                        events(SessionEvent::DisplayReady);
                     }
                 }
             })
@@ -880,7 +900,9 @@ mod tests {
                  grep -q drivestoredirect \"$first\" && echo DRIVES >> \"$out\"\n\
                  env | grep -q AVD_TEST_SECRET && echo LEAKED_ENV >> \"$out\"\n\
                  env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
+                 env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG,com.freerdp.client.sdl.disp:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
                  echo '[INFO][x] - Loading Dynamic Virtual Channel rdpgfx'\n\
+                 echo '[DEBUG][com.freerdp.client.sdl.disp] - [DisplayControlCaps]: DisplayControlCapsPdu: setting the window as resizable'\n\
                  exit 0\n",
                 out = out.display()
             ),
@@ -899,6 +921,10 @@ mod tests {
             rx.recv_timeout(Duration::from_secs(10)).unwrap(),
             SessionEvent::Connected
         );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+            SessionEvent::DisplayReady
+        );
         let SessionEvent::Ended { end, .. } = rx.recv_timeout(Duration::from_secs(10)).unwrap()
         else {
             panic!("expected end")
@@ -916,6 +942,7 @@ mod tests {
         assert!(got.contains("MODE:600"), "{got}");
         assert!(got.contains("DIRMODE:700"), "{got}");
         assert!(got.contains("PROFILE_OK"), "{got}");
+        assert!(got.contains("FILTER_OK"), "{got}");
         assert!(!got.contains("DRIVES"));
         assert!(!got.contains("LEAKED_ENV"));
         // The connection file and its folder are gone.
@@ -955,7 +982,7 @@ mod tests {
                         assert_eq!(log.len(), 1);
                     }
                 }
-                SessionEvent::Connected => panic!("unexpected Connected"),
+                other => panic!("unexpected {other:?}"),
             }
         }
         fs::remove_dir_all(dir).unwrap();

@@ -76,9 +76,8 @@ pub struct AppModel {
     /// Connection state per resource key (keys include the account).
     connections: HashMap<String, Connection>,
     running: HashMap<String, Running>,
-    /// FreeRDP starting (in the background): resource key → account, and
-    /// whether it is to be stopped as soon as it has started.
-    launching: HashMap<String, (String, bool)>,
+    /// FreeRDP starting (in the background), per resource key.
+    launching: HashMap<String, Launching>,
     quit: Quit,
     /// Logon setting and connection file of sessions not yet connected, to
     /// remember the setting on success or ask again on logon failure.
@@ -442,6 +441,7 @@ impl cosmic::Application for AppModel {
             | Message::Session(..)
             | Message::Disconnect(..)
             | Message::WorkspaceMoved(..)
+            | Message::WindowRefitted(..)
             | Message::QuitRequested
             | Message::QuitConfirm
             | Message::QuitCancel

@@ -80,16 +80,23 @@ impl AppModel {
             Message::ReadyToQuit => return cosmic::iced::exit(),
             Message::Session(id, epoch, key, event) => {
                 if self.account(&id).is_some_and(|a| a.epoch == epoch) {
+                    if event == SessionEvent::DisplayReady {
+                        return self.refit(&key);
+                    }
                     self.session_event(&key, event);
                 }
             }
             Message::Disconnect(key) => {
                 if let Some(r) = self.running.get(&key) {
                     r.session.disconnect();
-                } else if let Some((_, stop)) = self.launching.get_mut(&key) {
-                    *stop = true;
+                } else if let Some(l) = self.launching.get_mut(&key) {
+                    l.stop = true;
                 }
             }
+            Message::WindowRefitted(result) => match result {
+                Ok(()) => crate::app_log!("window size: sent to the remote desktop"),
+                Err(e) => crate::app_log!("window size: not refitted ({e})"),
+            },
             Message::WorkspaceMoved(key, result) => {
                 self.movers.remove(&key);
                 // Not worth interrupting the user: the desktop opened, only
@@ -289,8 +296,15 @@ impl AppModel {
             .insert(key.to_owned(), Connection::Connecting);
         self.pending_logon
             .insert(key.to_owned(), (logon, connection.clone()));
-        self.launching
-            .insert(key.to_owned(), (account.to_owned(), false));
+        let title = launcher::safe_title(&window_title);
+        self.launching.insert(
+            key.to_owned(),
+            Launching {
+                account: account.to_owned(),
+                stop: false,
+                refit: (!settings.fullscreen).then(|| title.clone()),
+            },
+        );
         // Starting FreeRDP writes files and hands over the arguments: not on
         // the UI thread. Its events follow once it has started.
         let (tx, rx) = mpsc::unbounded();
@@ -324,7 +338,6 @@ impl AppModel {
         }
         let stop = Arc::new(AtomicBool::new(false));
         self.movers.insert(key.to_owned(), stop.clone());
-        let title = launcher::safe_title(&window_title);
         // The window appears after authentication: wait as long as the
         // connection may take, plus the sign-in page.
         let wait = std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 180);
@@ -358,10 +371,15 @@ impl AppModel {
         key: String,
         result: Result<launcher::Session, String>,
     ) -> Task<cosmic::Action<Message>> {
-        let (owner, stop) = self
-            .launching
-            .remove(&key)
-            .unwrap_or_else(|| (account.to_owned(), true));
+        let Launching {
+            account: owner,
+            stop,
+            refit,
+        } = self.launching.remove(&key).unwrap_or_else(|| Launching {
+            account: account.to_owned(),
+            stop: true,
+            refit: None,
+        });
         let current = self.account(account).is_some_and(|a| a.epoch == epoch);
         match result {
             Ok(session) => {
@@ -375,6 +393,7 @@ impl AppModel {
                     Running {
                         account: owner,
                         session,
+                        refit,
                     },
                 );
             }
@@ -394,6 +413,26 @@ impl AppModel {
             return self.continue_quit();
         }
         Task::none()
+    }
+
+    /// The display channel of a windowed session is ready: maximize and
+    /// restore its window once, so FreeRDP sends the window's size
+    /// (workspace.rs).
+    pub(super) fn refit(&self, key: &str) -> Task<cosmic::Action<Message>> {
+        let Some(title) = self.running.get(key).and_then(|r| r.refit.clone()) else {
+            return Task::none();
+        };
+        cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                crate::workspace::refit_window(<AppModel as cosmic::Application>::APP_ID, &title)
+            })
+            .await;
+            Message::WindowRefitted(match result {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err("task".to_owned()),
+            })
+        })
     }
 
     /// Quitting: once nothing is starting any more, ends every session and
@@ -456,6 +495,8 @@ impl AppModel {
                     self.remember_logon(key, logon);
                 }
             }
+            // Handled before this (`refit`).
+            SessionEvent::DisplayReady => {}
             SessionEvent::Ended { end, log } => {
                 self.running.remove(key);
                 self.launching.remove(key);

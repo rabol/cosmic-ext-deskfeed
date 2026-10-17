@@ -105,6 +105,18 @@ pub struct ResourceView {
 pub(super) struct Running {
     pub(super) account: String,
     pub(super) session: launcher::Session,
+    /// Window title for [`crate::workspace::refit_window`]; `None` in full
+    /// screen.
+    pub(super) refit: Option<String>,
+}
+
+/// A FreeRDP start in progress.
+pub(super) struct Launching {
+    pub(super) account: String,
+    /// Stop it as soon as it has started (disconnected or signed out
+    /// meanwhile).
+    pub(super) stop: bool,
+    pub(super) refit: Option<String>,
 }
 
 /// Quitting the app.
@@ -220,6 +232,8 @@ pub enum Message {
     DesktopTimeout(String, Option<u32>),
     /// Resource key; outcome of "open on a new workspace" (log text).
     WorkspaceMoved(String, Result<(), String>),
+    /// Outcome of fitting the remote desktop to its window (log text).
+    WindowRefitted(Result<(), String>),
     /// The window's close button or the desktop asked the app to close.
     QuitRequested,
     QuitConfirm,

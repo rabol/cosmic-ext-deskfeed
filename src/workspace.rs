@@ -12,6 +12,15 @@
 //! version 4). cosmic-comp offers these protocols only to unsandboxed
 //! clients (`src/state.rs`), which is one reason the app is native only.
 //!
+//! [`refit_window`] works around a FreeRDP 3.32.2 behaviour: in a window,
+//! the SDL3 client sends its size to Windows only on a window event after
+//! the display channel is ready (`client/SDL/SDL3/sdl_disp.cpp`:
+//! `OnActivated` returns early on the first activation, and
+//! `DisplayControlCaps` only makes the window resizable). Under COSMIC
+//! auto-tiling the window gets its tile size before that, so the remote
+//! desktop kept its first size. Maximizing and restoring the window once
+//! the channel is ready gives FreeRDP those events.
+//!
 //! Blocking, with its own short-lived Wayland connection; call it from
 //! `spawn_blocking`. Uses cosmic-client-toolkit as re-exported by libcosmic.
 
@@ -21,7 +30,10 @@ use std::time::{Duration, Instant};
 
 use cosmic::cctk::{
     self,
-    cosmic_protocols::toplevel_management::v1::client::zcosmic_toplevel_manager_v1,
+    cosmic_protocols::{
+        toplevel_info::v1::client::zcosmic_toplevel_handle_v1,
+        toplevel_management::v1::client::zcosmic_toplevel_manager_v1,
+    },
     sctk::{
         self,
         output::{OutputHandler, OutputState},
@@ -43,6 +55,8 @@ use cosmic::cctk::{
 const POLL: Duration = Duration::from_millis(200);
 /// How long to wait for COSMIC to create a requested workspace.
 const CREATE_WAIT: Duration = Duration::from_secs(3);
+/// How long to wait for COSMIC to report the window maximized.
+const REFIT_WAIT: Duration = Duration::from_secs(2);
 
 struct State {
     registry: RegistryState,
@@ -50,8 +64,10 @@ struct State {
     info: ToplevelInfoState,
     manager: ToplevelManagerState,
     workspaces: WorkspaceState,
-    can_move: bool,
+    capabilities: Vec<WEnum<Capability>>,
 }
+
+type Capability = zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1;
 
 /// Why the window wasn't moved; for the log only.
 #[derive(Debug)]
@@ -128,7 +144,7 @@ pub fn move_to_new_workspace(
         info,
         manager,
         workspaces,
-        can_move: false,
+        capabilities: Vec::new(),
     };
     let roundtrip = |queue: &mut cctk::wayland_client::EventQueue<State>, state: &mut State| {
         queue
@@ -138,7 +154,10 @@ pub fn move_to_new_workspace(
     };
     roundtrip(&mut queue, &mut state)?;
     roundtrip(&mut queue, &mut state)?;
-    if !state.can_move {
+    if !state
+        .capabilities
+        .contains(&WEnum::Value(Capability::MoveToExtWorkspace))
+    {
         return Err(MoveError::Unsupported("move capability"));
     }
 
@@ -209,6 +228,94 @@ pub fn move_to_new_workspace(
         .move_to_ext_workspace(toplevel, &target, &output);
     roundtrip(&mut queue, &mut state)?;
     Ok(())
+}
+
+/// Maximizes the window with `app_id` and `title`, waits until COSMIC
+/// reports it maximized, then restores it, so FreeRDP sends the window's
+/// real size (see the module notes). Leaves maximized or full-screen
+/// windows alone.
+pub fn refit_window(app_id: &str, title: &str) -> Result<(), MoveError> {
+    let conn = Connection::connect_to_env().map_err(|e| MoveError::NoWayland(e.to_string()))?;
+    let (globals, mut queue) =
+        registry_queue_init::<State>(&conn).map_err(|e| MoveError::NoWayland(e.to_string()))?;
+    let qh = queue.handle();
+    let registry = RegistryState::new(&globals);
+    let info = ToplevelInfoState::try_new(&registry, &qh)
+        .ok_or(MoveError::Unsupported("toplevel info"))?;
+    let manager = ToplevelManagerState::try_new(&registry, &qh)
+        .ok_or(MoveError::Unsupported("toplevel management"))?;
+    let workspaces = WorkspaceState::new(&registry, &qh);
+    let outputs = OutputState::new(&globals, &qh);
+    let mut state = State {
+        registry,
+        outputs,
+        info,
+        manager,
+        workspaces,
+        capabilities: Vec::new(),
+    };
+    let mut roundtrip = |state: &mut State| {
+        queue
+            .roundtrip(state)
+            .map(|_| ())
+            .map_err(|e| MoveError::NoWayland(e.to_string()))
+    };
+    roundtrip(&mut state)?;
+    roundtrip(&mut state)?;
+    if !state
+        .capabilities
+        .contains(&WEnum::Value(Capability::Maximize))
+    {
+        return Err(MoveError::Unsupported("maximize capability"));
+    }
+    let find = |state: &State| {
+        state
+            .info
+            .toplevels()
+            .find(|t| t.app_id == app_id && t.title == title && t.cosmic_toplevel.is_some())
+            .cloned()
+    };
+    let maximized = |t: &ToplevelInfo| {
+        t.state
+            .contains(&zcosmic_toplevel_handle_v1::State::Maximized)
+    };
+    // The window's details arrive in steps; FreeRDP's window exists by
+    // now, so this is short.
+    let until = Instant::now() + REFIT_WAIT;
+    let window = loop {
+        if let Some(w) = find(&state) {
+            break w;
+        }
+        if Instant::now() > until {
+            return Err(MoveError::WindowNotFound);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        roundtrip(&mut state)?;
+    };
+    if maximized(&window) || is_fullscreen(&window) {
+        return Ok(());
+    }
+    let toplevel = window.cosmic_toplevel.ok_or(MoveError::WindowNotFound)?;
+    state.manager.manager.set_maximized(&toplevel);
+    let until = Instant::now() + REFIT_WAIT;
+    loop {
+        roundtrip(&mut state)?;
+        if find(&state).is_some_and(|t| maximized(&t)) {
+            break;
+        }
+        if Instant::now() > until {
+            break; // restore anyway, so the window isn't left maximized
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    state.manager.manager.unset_maximized(&toplevel);
+    roundtrip(&mut state)?;
+    Ok(())
+}
+
+fn is_fullscreen(t: &ToplevelInfo) -> bool {
+    t.state
+        .contains(&zcosmic_toplevel_handle_v1::State::Fullscreen)
 }
 
 /// The workspace group holding the window's workspace.
@@ -296,13 +403,9 @@ impl ToplevelManagerHandler for State {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        capabilities: Vec<
-            WEnum<zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1>,
-        >,
+        capabilities: Vec<WEnum<Capability>>,
     ) {
-        self.can_move = capabilities.contains(&WEnum::Value(
-            zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1::MoveToExtWorkspace,
-        ));
+        self.capabilities = capabilities;
     }
 }
 
@@ -318,3 +421,18 @@ sctk::delegate_registry!(State);
 cctk::delegate_toplevel_info!(State);
 cctk::delegate_toplevel_manager!(State);
 cctk::delegate_workspace!(State);
+
+#[cfg(test)]
+mod tests {
+    /// Against the running COSMIC session: a window with this app ID and
+    /// title must be open (for example a small GTK test window).
+    #[test]
+    #[ignore = "needs a COSMIC session and a test window"]
+    fn refit_a_real_window() {
+        super::refit_window(
+            &std::env::var("REFIT_APP_ID").unwrap(),
+            &std::env::var("REFIT_TITLE").unwrap(),
+        )
+        .unwrap();
+    }
+}

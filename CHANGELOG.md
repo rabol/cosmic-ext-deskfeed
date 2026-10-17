@@ -26,6 +26,7 @@ First version (0.1.0), not yet released.
 - Quitting with desktops open asks first ("Disconnect and quit"), then ends every FreeRDP process, including anything it started, before the app exits. This also applies to closing from the dock or a keyboard shortcut.
 - Signing out ends all of the account's sessions, including desktops that a refresh removed from the list.
 - FreeRDP is started in the background, so the window never waits for it.
+- Remote desktops in a window take the window's size under COSMIC auto-tiling: once connected, the app maximizes and restores the window once, which makes FreeRDP send its size.
 - Installation with `just install`: desktop entry, icons, AppStream metadata.
 
 ### Known limitations

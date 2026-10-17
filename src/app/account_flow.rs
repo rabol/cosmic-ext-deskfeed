@@ -492,7 +492,7 @@ impl AppModel {
         keys.extend(
             self.launching
                 .iter()
-                .filter(|(_, (owner, _))| owner == id)
+                .filter(|(_, l)| l.account == id)
                 .map(|(k, _)| k.clone()),
         );
         for key in keys {
@@ -500,8 +500,8 @@ impl AppModel {
                 r.session.disconnect();
             }
             // Stopped as soon as it has started (`launched`).
-            if let Some((_, stop)) = self.launching.get_mut(&key) {
-                *stop = true;
+            if let Some(l) = self.launching.get_mut(&key) {
+                l.stop = true;
             }
             if let Some(stop) = self.movers.remove(&key) {
                 stop.store(true, Ordering::SeqCst);
