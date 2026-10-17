@@ -1,0 +1,16 @@
+[package]
+name = "cosmic-ext-avd-signin"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Sign-in-only web view helper for AVD Client (see docs/adr/0007-sign-in-web-view.md)"
+repository = "https://github.com/rabol/cosmic-ext-avd"
+publish = false
+
+[dependencies]
+# Only this helper links GTK and WebKit (ADR 0007).
+gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
+webkit6 = { version = "0.6", features = ["v2_52"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2.5"

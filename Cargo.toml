@@ -6,6 +6,9 @@ license = "MIT"
 description = "Azure Virtual Desktop and Windows 365 client for the COSMIC™ desktop"
 repository = "https://github.com/rabol/cosmic-ext-avd"
 
+[workspace]
+members = ["signin"]
+
 [dependencies]
 # Already in the dependency tree through libcosmic (ADR 0003, ADR 0008).
 base64 = "0.22"

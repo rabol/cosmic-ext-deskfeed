@@ -26,6 +26,14 @@ Options considered:
 - The same helper serves FreeRDP's `/azure:auth-helper` requests, forwarded by the app ([ADR 0004](0004-freerdp-version-and-sign-in-helper.md)).
 - Native builds require the distro's `webkitgtk-6.0` package. The Flatpak runtime decision (bundle WebKitGTK or use a runtime that has it) is made during packaging (spec §11).
 
+## Implementation notes (2026-10-17)
+
+- Crate `signin/` (`cosmic-ext-avd-signin`), installed to `libexec/cosmic-ext-avd/`. Uses `gtk4` 0.11 (feature `v4_18`) and `webkit6` 0.6.1 (feature `v2_52`) against system GTK 4.24 and WebKitGTK 2.54.1. Adds 38 packages to `Cargo.lock` (658 → 696); none are linked into the main app.
+- Protocol: the app writes one JSON request line (`url`, `title`, `silent_first`, `timeout_ms`) to the helper's stdin and reads one JSON reply line (`ok` with `code` and `state`; `error` with short codes; `cancelled`; `timeout`; `failed`). Closing stdin cancels; the helper then exits, so it never outlives the app.
+- The redirect is caught in the navigation policy, before the request is sent, so Microsoft's `nativeclient` warning page never loads.
+- `silent_first` keeps the window hidden and shows it only when a page has loaded and sign-in has not finished 1.5 s later, so renewals with valid cookies stay invisible.
+- `glib` 0.22 no longer offers a Unix fd watch, so a small thread watches stdin for EOF.
+
 ## Consequences
 
 - One large system dependency, isolated in one small process.

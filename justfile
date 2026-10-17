@@ -1,5 +1,7 @@
 # Name of the application's binary.
 name := 'cosmic-ext-avd'
+# The sign-in web view helper (ADR 0007).
+signin-name := 'cosmic-ext-avd-signin'
 # The unique ID of the application.
 appid := 'io.github.rabol.cosmic-ext-avd'
 
@@ -21,6 +23,8 @@ icon-svg := appid + '.svg'
 base-dir := absolute_path(clean(rootdir / prefix))
 appdata-dst := base-dir / 'share' / 'appdata' / appdata
 bin-dst := base-dir / 'bin' / name
+# Helpers are not meant to be run directly, so they go to libexec.
+signin-dst := base-dir / 'libexec' / name / signin-name
 desktop-dst := base-dir / 'share' / 'applications' / desktop
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
 icon-svg-dst := icons-dst / 'scalable' / 'apps'
@@ -41,7 +45,7 @@ clean-dist: clean clean-vendor
 
 # Compiles with debug profile
 build-debug *args:
-    cargo build --locked {{args}}
+    cargo build --locked --workspace {{args}}
 
 # Compiles with release profile
 build-release *args: (build-debug '--release' args)
@@ -51,10 +55,14 @@ build-vendored *args: vendor-extract (build-release '--frozen --offline' args)
 
 # Runs a clippy check
 check *args:
-    cargo clippy --all-features --locked {{args}} -- -W clippy::pedantic
+    cargo clippy --all-features --locked --workspace {{args}} -- -W clippy::pedantic
 
 # Runs a clippy check with JSON message format
 check-json: (check '--message-format=json')
+
+# Runs all tests
+test *args:
+    cargo test --locked --workspace {{args}}
 
 # Run the application for testing purposes
 run *args:
@@ -63,13 +71,14 @@ run *args:
 # Installs files
 install:
     install -Dm0755 {{ cargo-target-dir / 'release' / name }} {{bin-dst}}
+    install -Dm0755 {{ cargo-target-dir / 'release' / signin-name }} {{signin-dst}}
     install -Dm0644 {{ 'target' / 'xdgen' / 'app.desktop' }} {{desktop-dst}}
     install -Dm0644 {{ 'target' / 'xdgen' / 'app.metainfo.xml' }} {{appdata-dst}}
     install -Dm0644 {{ 'resources' / 'icons' / 'hicolor' / 'scalable' / 'apps' / 'icon.svg' }} {{icon-svg-dst}}
 
 # Uninstalls installed files
 uninstall:
-    rm {{bin-dst}} {{desktop-dst}} {{icon-svg-dst}}
+    rm {{bin-dst}} {{signin-dst}} {{desktop-dst}} {{icon-svg-dst}}
 
 # Vendor dependencies locally
 vendor:
