@@ -160,7 +160,13 @@ mod tests {
 
     #[test]
     fn tokens_and_line_breaks_are_removed() {
-        let jwt = concat!("eyJhbGciOiJSUzI1NiJ9", ".", "eyJzdWIiOiIxMjM0NTY3ODkwIn0", ".", "c2lnbmF0dXJlLXNpZ25hdHVyZQ");
+        let jwt = concat!(
+            "eyJhbGciOiJSUzI1NiJ9",
+            ".",
+            "eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+            ".",
+            "c2lnbmF0dXJlLXNpZ25hdHVyZQ"
+        );
         let out = redact(&format!("bearer:{jwt} then\nnext"));
         assert!(!out.contains("eyJ"));
         assert!(out.contains("<redacted>") && out.contains("then next"));
