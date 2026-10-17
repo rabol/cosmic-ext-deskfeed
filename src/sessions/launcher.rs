@@ -35,6 +35,7 @@ const FREERDP_BINARIES: &[&str] = &["sdl-freerdp3", "sdl-freerdp"];
 const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
+const ACTIVATION_TIMEOUT_MS: u32 = 60_000;
 
 const ENV_ALLOWLIST: &[&str] = &[
     "WAYLAND_DISPLAY",
@@ -183,6 +184,13 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
     args.extend([
         "/dynamic-resolution".to_owned(),
         "/log-level:info".to_owned(),
+        // FreeRDP waits `TcpAckTimeout` (default 9000 ms) for the session
+        // host to finish activation, including the Entra exchange
+        // (`connection.c` `rdp_client_wait_for_activation`). The owner's
+        // host didn't answer within 9 s twice (2026-10-17); 60 s measures
+        // how long it really takes. `/timeout` is FreeRDP's documented
+        // setting for this ("use if you encounter timeout failures").
+        format!("/timeout:{ACTIVATION_TIMEOUT_MS}"),
     ]);
     if args.iter().any(|a| a.contains(['\n', '\r', '\0'])) {
         return Err(LaunchError::Io("bad argument".into()));
@@ -437,7 +445,7 @@ fn supervise(
                 for line in BufReader::new(stream).lines().map_while(Result::ok) {
                     // Our sign-in helper's status lines (FreeRDP passes its
                     // stderr through); they hold no codes or tokens.
-                    if line.starts_with("cosmic-ext-avd-signin: ") {
+                    if line.starts_with("cosmic-ext-avd-signin: ") || is_state_change(&line) {
                         eprintln!("{line}");
                     }
                     if log.lock().expect("not poisoned").push(&line) {
@@ -477,6 +485,11 @@ fn supervise(
     Ok(Session { child, pgid })
 }
 
+/// A FreeRDP connection step ("STATE_A --> STATE_B"); no secrets.
+fn is_state_change(line: &str) -> bool {
+    line.contains(&format!("[DEBUG][{STATE_LOGGER}]")) && line.contains(" --> ")
+}
+
 #[derive(Default)]
 struct Log {
     lines: Vec<String>,
@@ -491,9 +504,7 @@ impl Log {
         if line.contains("LOGON_FAILURE") {
             self.logon_failure = true;
         }
-        let state_change =
-            line.contains(&format!("[DEBUG][{STATE_LOGGER}]")) && line.contains(" --> ");
-        if line.contains("[ERROR]") || line.contains("[WARN]") || state_change {
+        if line.contains("[ERROR]") || line.contains("[WARN]") || is_state_change(line) {
             if self.lines.len() == MAX_LOG_LINES {
                 self.lines.remove(0);
             }
