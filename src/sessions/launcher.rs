@@ -473,7 +473,7 @@ fn supervise(
                     // Our sign-in helper's status lines (FreeRDP passes its
                     // stderr through); they hold no codes or tokens.
                     if line.starts_with("cosmic-ext-avd-signin: ") || is_state_change(&line) {
-                        eprintln!("{line}");
+                        crate::app_log!("{line}");
                     }
                     if log.lock().expect("not poisoned").push(&line) {
                         events(SessionEvent::Connected);

@@ -6,6 +6,7 @@ mod auth;
 mod config;
 mod deps;
 mod i18n;
+mod log;
 mod secrets;
 mod service;
 mod settings;

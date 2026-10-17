@@ -206,7 +206,7 @@ fn classify_error(status: u16, body: &[u8]) -> TokenError {
     if aadsts == Some(70043)
         && let Some(d) = &err.error_description
     {
-        eprintln!("token endpoint: {}", description_first_line(d));
+        crate::app_log!("token endpoint: {}", description_first_line(d));
     }
     // AADSTS codes from Microsoft's public error reference.
     let code_is = |codes: &[u32]| aadsts.is_some_and(|c| codes.contains(&c));

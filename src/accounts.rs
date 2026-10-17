@@ -168,18 +168,18 @@ pub fn save(account: &SignedIn, started: u64) -> Result<(), String> {
 
 fn save_locked(account: &SignedIn, started: u64) -> Result<(), String> {
     if sign_out_count(&account_id(&account.identity)) != started {
-        eprintln!("saved sign-in: not stored (signed out meanwhile)");
+        crate::app_log!("saved sign-in: not stored (signed out meanwhile)");
         return Ok(());
     }
     let Some(refresh_token) = &account.tokens.refresh_token else {
-        eprintln!("saved sign-in: not stored (no refresh token in the response)");
+        crate::app_log!("saved sign-in: not stored (no refresh token in the response)");
         return Err(fl!("notice-not-saved", detail = "no refresh token"));
     };
     let result = secrets::save(&config(), &account.identity, refresh_token);
     // Diagnostics: outcome and error kind only, never tokens or IDs.
     match &result {
-        Ok(()) => eprintln!("saved sign-in: stored"),
-        Err(e) => eprintln!("saved sign-in: not stored ({e})"),
+        Ok(()) => crate::app_log!("saved sign-in: stored"),
+        Err(e) => crate::app_log!("saved sign-in: not stored ({e})"),
     }
     result.map_err(|e| fl!("notice-not-saved", detail = keyring_detail(&e)))
 }
@@ -190,7 +190,7 @@ pub fn delete(identity: &Identity) -> Result<(), String> {
     note_sign_out(&account_id(identity));
     let _renewal = RENEWAL.lock();
     let deleted = secrets::delete(&config(), identity);
-    eprintln!("saved sign-in: deleted (sign-out): {deleted:?}");
+    crate::app_log!("saved sign-in: deleted (sign-out): {deleted:?}");
     deleted.map_err(|_| fl!("error-sign-out-incomplete"))
 }
 
@@ -222,11 +222,11 @@ pub fn load_saved() -> Result<Vec<Stored>, String> {
     let _renewal = RENEWAL.lock();
     match secrets::load_all(&config()) {
         Ok(all) => {
-            eprintln!("saved sign-in: {} found", all.len());
+            crate::app_log!("saved sign-in: {} found", all.len());
             Ok(all)
         }
         Err(e) => {
-            eprintln!("saved sign-in: can't load ({e})");
+            crate::app_log!("saved sign-in: can't load ({e})");
             Err(fl!("error-keyring-load", detail = keyring_detail(&e)))
         }
     }
@@ -252,7 +252,7 @@ pub fn restore(http: &Http, stored: &Stored) -> Restore {
     let _renewal = RENEWAL.lock();
     let renewed = token::refresh(http, &config, &stored.refresh_token);
     if let Err(e) = &renewed {
-        eprintln!("saved sign-in: renewal failed ({})", token_error_kind(e));
+        crate::app_log!("saved sign-in: renewal failed ({})", token_error_kind(e));
     }
     let tokens = match renewed {
         Ok(tokens) => tokens,
@@ -260,7 +260,7 @@ pub fn restore(http: &Http, stored: &Stored) -> Restore {
         Err(TokenError::InvalidGrant { aadsts }) => {
             // Revoked or expired for good: forget it.
             let deleted = secrets::delete(&config, &stored.identity);
-            eprintln!("saved sign-in: deleted (invalid_grant): {deleted:?}");
+            crate::app_log!("saved sign-in: deleted (invalid_grant): {deleted:?}");
             // AADSTS70043 "BadTokenDueToSignInFrequency": the organization's
             // Conditional Access asks for a new sign-in after a set time
             // (Microsoft Entra error code reference).
@@ -294,7 +294,7 @@ pub fn restore(http: &Http, stored: &Stored) -> Restore {
         .refresh_token
         .as_ref()
         .is_some_and(|t| t.expose() != stored.refresh_token.expose());
-    eprintln!(
+    crate::app_log!(
         "saved sign-in: renewed (refresh token {})",
         if rotated { "rotated" } else { "unchanged" }
     );

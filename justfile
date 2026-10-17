@@ -21,13 +21,14 @@ icon-svg := appid + '.svg'
 
 # Install destinations
 base-dir := absolute_path(clean(rootdir / prefix))
-appdata-dst := base-dir / 'share' / 'appdata' / appdata
+appdata-dst := base-dir / 'share' / 'metainfo' / appdata
 bin-dst := base-dir / 'bin' / name
 # Helpers are not meant to be run directly, so they go to libexec.
-signin-dst := base-dir / 'libexec' / name / signin-name
+signin-dir := base-dir / 'libexec' / name
+signin-dst := signin-dir / signin-name
 desktop-dst := base-dir / 'share' / 'applications' / desktop
 icons-dst := base-dir / 'share' / 'icons' / 'hicolor'
-icon-svg-dst := icons-dst / 'scalable' / 'apps'
+icon-svg-dst := icons-dst / 'scalable' / 'apps' / icon-svg
 
 # Default recipe which runs `just build-release`
 default: build-release
@@ -78,7 +79,8 @@ install:
 
 # Uninstalls installed files
 uninstall:
-    rm {{bin-dst}} {{signin-dst}} {{desktop-dst}} {{icon-svg-dst}}
+    rm -f {{bin-dst}} {{signin-dst}} {{desktop-dst}} {{appdata-dst}} {{icon-svg-dst}}
+    rmdir --ignore-fail-on-non-empty {{signin-dir}} 2>/dev/null || true
 
 # Vendor dependencies locally
 vendor:

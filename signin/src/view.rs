@@ -282,7 +282,11 @@ impl SignInView {
         };
         eprintln!(
             "cosmic-ext-avd-signin: sign-in page shown to the user: {}",
-            if inner.window.is_visible() { "yes" } else { "no" }
+            if inner.window.is_visible() {
+                "yes"
+            } else {
+                "no"
+            }
         );
         if let Some(id) = inner.timeout.borrow_mut().take() {
             id.remove();

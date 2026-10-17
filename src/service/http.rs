@@ -166,7 +166,7 @@ impl Http {
     ) -> Result<Response, HttpError> {
         if let Err(e) = self.policy.check(url, role) {
             // Diagnostics for the endpoint rules; IDs and the query removed.
-            eprintln!("refused {role:?} URL ({e:?}): {}", redacted(url));
+            crate::app_log!("refused {role:?} URL ({e:?}): {}", redacted(url));
             return Err(e.into());
         }
         if token.is_some() && !role.sends_avd_token() {

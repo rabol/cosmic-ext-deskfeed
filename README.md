@@ -22,6 +22,17 @@ Native packages only; there is no Flatpak ([ADR 0010](./docs/adr/0010-native-onl
 
 ## Installation
 
+```sh
+just build-release     # as your user
+sudo just install      # copies the built files to /usr
+```
+
+This installs the app (`/usr/bin/cosmic-ext-avd`), its sign-in helper (`/usr/libexec/cosmic-ext-avd/`), the desktop entry, the icon and the AppStream metadata. Start **AVD Client** from the COSMIC launcher. `sudo just uninstall` removes them again; your accounts and settings stay in your home folder.
+
+The app writes a log to `~/.local/state/cosmic-ext-avd/app.log` (rotated at 1 MiB, private to you, no passwords or tokens). **View → Open log folder** opens it.
+
+### Development commands
+
 A [justfile](./justfile) is included by default for the [casey/just][just] command runner.
 
 - `just` builds the application with the default `just build-release` recipe

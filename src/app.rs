@@ -266,6 +266,7 @@ pub enum Message {
     Disconnect(String),
     CheckDependencies,
     DependenciesChecked(Vec<Check>),
+    OpenLogFolder,
     OpenAccountSettings(String),
     OpenDesktopSettings(String),
     AccountToggle(String, Toggle, bool),
@@ -314,6 +315,7 @@ impl cosmic::Application for AppModel {
         core: cosmic::Core,
         _flags: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
+        crate::app_log!("AVD Client {} started", env!("CARGO_PKG_VERSION"));
         launcher::clean_stale_runtime_dirs();
         accounts::clean_unfinished_profiles();
         let about = About::default()
@@ -401,6 +403,7 @@ impl cosmic::Application for AppModel {
                     &self.key_binds,
                     vec![
                         menu::Item::Button(fl!("dependencies"), None, MenuAction::Dependencies),
+                        menu::Item::Button(fl!("open-log-folder"), None, MenuAction::OpenLogFolder),
                         menu::Item::Button(fl!("about"), None, MenuAction::About),
                     ],
                 ),
@@ -571,7 +574,7 @@ impl cosmic::Application for AppModel {
             Message::DependenciesChecked(checks) => {
                 for c in &checks {
                     if !c.status.is_ok() {
-                        eprintln!("dependency {:?}: {:?}", c.dependency, c.status);
+                        crate::app_log!("dependency {:?}: {:?}", c.dependency, c.status);
                     }
                 }
                 self.deps = Some(checks);
@@ -587,10 +590,19 @@ impl cosmic::Application for AppModel {
             Message::UpdateConfig(config) => self.config = config,
             Message::LaunchUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
-                    eprintln!("failed to open link: {err}");
+                    crate::app_log!("failed to open link: {err}");
                 }
             }
             Message::DismissNotice => self.notice = None,
+            Message::OpenLogFolder => {
+                if let Some(dir) = crate::log::dir() {
+                    // Make sure it exists even before the first line.
+                    crate::app_log!("log folder opened");
+                    if let Err(err) = open::that_detached(&dir) {
+                        crate::app_log!("failed to open the log folder: {err}");
+                    }
+                }
+            }
             Message::SavedLoaded(result) => return self.saved_loaded(result),
             Message::Restored(id, generation, outcome) => {
                 return self.restored(&id, generation, outcome);
@@ -726,7 +738,7 @@ impl cosmic::Application for AppModel {
                 // Not worth interrupting the user: the desktop opened, only
                 // not on a new workspace.
                 if let Err(e) = result {
-                    eprintln!("open on a new workspace: not moved ({e})");
+                    crate::app_log!("open on a new workspace: not moved ({e})");
                 }
             }
         }
@@ -1629,7 +1641,7 @@ impl AppModel {
             app_id: <Self as cosmic::Application>::APP_ID.to_owned(),
         };
         // No secrets here: the setting and, for a custom domain, its name.
-        eprintln!("Starting FreeRDP with logon setting {logon:?}");
+        crate::app_log!("Starting FreeRDP with logon setting {logon:?}");
         let (tx, rx) = mpsc::unbounded();
         let started = launcher::launch(&spec, move |e| {
             let _ = tx.unbounded_send(e);
@@ -1707,9 +1719,9 @@ impl AppModel {
                 }
                 let pending = self.pending_logon.remove(key);
                 if !log.is_empty() && end != SessionEnd::Closed {
-                    eprintln!("FreeRDP ended ({end:?}); last log lines:");
+                    crate::app_log!("FreeRDP ended ({end:?}); last log lines:");
                     for line in &log {
-                        eprintln!("  {line}");
+                        crate::app_log!("  {line}");
                     }
                 }
                 // Only a session that never got connected says anything
@@ -1821,6 +1833,7 @@ pub enum MenuAction {
     Dependencies,
     AddAccount,
     SignOut,
+    OpenLogFolder,
 }
 
 impl menu::action::MenuAction for MenuAction {
@@ -1832,6 +1845,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::Dependencies => Message::ToggleContextPage(ContextPage::Dependencies),
             MenuAction::AddAccount => Message::AddAccount,
             MenuAction::SignOut => Message::SignOutSelected,
+            MenuAction::OpenLogFolder => Message::OpenLogFolder,
         }
     }
 }

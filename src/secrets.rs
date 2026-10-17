@@ -267,7 +267,7 @@ pub fn load_all(config: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
                     accounts.push(stored);
                 }
             }
-            Err(e) => eprintln!("saved sign-in: skipped an item ({e})"),
+            Err(e) => crate::app_log!("saved sign-in: skipped an item ({e})"),
         }
     }
     Ok(accounts)

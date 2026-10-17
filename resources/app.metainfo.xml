@@ -5,9 +5,24 @@
   <project_license>MIT</project_license>
   <name>AVD Client</name>
   <summary>Azure Virtual Desktop and Windows 365 client for the COSMIC™ desktop</summary>
-  <icon type="remote" width="64" height="64" scale="1">
-    https://github.com/rabol/cosmic-ext-avd/raw/main/resources/icons/hicolor/scalable/apps/icon.svg
-  </icon>
+  <description>
+    <p>
+      Sign in with one or more work or school accounts, see the desktops your
+      organization assigned to you, and connect to them. Connections use
+      FreeRDP; settings per account and per desktop cover full screen,
+      monitors, sound, microphone, clipboard and opening on a new workspace.
+    </p>
+    <p>
+      Unofficial community app. It is not a Microsoft product; for
+      compatibility it signs in with Microsoft's public Remote Desktop client
+      identity.
+    </p>
+  </description>
+  <developer id="io.github.rabol">
+    <name>Steen Rabol</name>
+  </developer>
+  <icon type="stock">io.github.rabol.cosmic-ext-avd</icon>
+  <url type="homepage">https://github.com/rabol/cosmic-ext-avd</url>
   <url type="vcs-browser">https://github.com/rabol/cosmic-ext-avd</url>
   <launchable type="desktop-id">io.github.rabol.cosmic-ext-avd.desktop</launchable>
   <provides>
