@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -42,8 +42,12 @@ mod model;
 mod settings_ui;
 mod views;
 
+// One type split across files: the submodules share the parent's items.
+#[allow(clippy::wildcard_imports)]
 use errors::*;
+#[allow(clippy::wildcard_imports)]
 use model::*;
+#[allow(clippy::wildcard_imports)]
 use views::*;
 
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");

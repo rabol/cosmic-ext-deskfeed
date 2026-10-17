@@ -91,6 +91,8 @@ impl ConnectionSettings {
 
 /// The settings a connection actually uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Each setting really is on or off; a bitflag type would only hide that.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Effective {
     pub timeout_secs: u32,
     pub fullscreen: bool,

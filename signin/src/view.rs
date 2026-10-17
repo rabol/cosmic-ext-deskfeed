@@ -239,12 +239,12 @@ impl SignInView {
         if show == Show::Now {
             inner.window.present();
         }
-        self.restore_then_load(url.to_owned());
+        self.restore_then_load(url);
         true
     }
 
     /// Loads the shared session cookies into this web view, then `url`.
-    fn restore_then_load(&self, url: String) {
+    fn restore_then_load(&self, url: &str) {
         let inner = &self.0;
         let stored = inner
             .jar
@@ -258,12 +258,12 @@ impl SignInView {
             stored.len()
         );
         let Some(manager) = inner.cookies.clone().filter(|_| !stored.is_empty()) else {
-            inner.webview.load_uri(&url);
+            inner.webview.load_uri(url);
             return;
         };
         let pending = Rc::new(Cell::new(stored.len()));
         for cookie in &stored {
-            let (view, pending, url) = (self.clone(), pending.clone(), url.clone());
+            let (view, pending, url) = (self.clone(), pending.clone(), url.to_owned());
             manager.add_cookie(&cookie.to_soup(), None::<&gio::Cancellable>, move |_| {
                 pending.set(pending.get() - 1);
                 // Only if this sign-in is still running (not timed out).

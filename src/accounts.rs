@@ -145,8 +145,7 @@ static SIGN_OUTS: LazyLock<Mutex<HashMap<String, u64>>> =
 pub fn sign_out_count(id: &str) -> u64 {
     SIGN_OUTS
         .lock()
-        .map(|m| m.get(id).copied().unwrap_or(0))
-        .unwrap_or(0)
+        .map_or(0, |m| m.get(id).copied().unwrap_or(0))
 }
 
 fn note_sign_out(id: &str) {

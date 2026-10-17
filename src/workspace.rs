@@ -163,9 +163,10 @@ pub fn move_to_new_workspace(
         roundtrip(&mut queue, &mut state)?;
     };
 
-    let (group, target) = match empty_workspace(&state, &window) {
-        Some(found) => found,
-        None => {
+    let (group, target) = if let Some(found) = empty_workspace(&state, &window) {
+        found
+    } else {
+        {
             // None free: ask COSMIC for one, if the group allows it.
             let group = group_of(&state, &window).ok_or(MoveError::NoWorkspace)?;
             if !group

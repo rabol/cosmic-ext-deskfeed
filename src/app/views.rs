@@ -2,6 +2,7 @@
 
 //! Page layouts: welcome / add account, account pages, desktop lists, dependencies.
 
+#[allow(clippy::wildcard_imports)] // see app/mod.rs
 use super::*;
 
 impl AppModel {

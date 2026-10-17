@@ -2,6 +2,7 @@
 
 //! Account life cycle: restore from the keyring, add, sign in again, load desktops, sign out.
 
+#[allow(clippy::wildcard_imports)] // see app/mod.rs
 use super::*;
 
 impl AppModel {
@@ -35,7 +36,7 @@ impl AppModel {
                 }
             }
             Message::SignInFinished(origin, generation, profile, result) => {
-                return self.sign_in_finished(origin, generation, profile, result);
+                return self.sign_in_finished(origin.as_deref(), generation, &profile, result);
             }
             Message::Saved(id, generation, result) => {
                 if let Some(a) = self.account_mut(&id)
@@ -263,12 +264,12 @@ impl AppModel {
 
     pub(super) fn sign_in_finished(
         &mut self,
-        origin: Option<String>,
+        origin: Option<&str>,
         generation: u64,
-        profile: PathBuf,
+        profile: &Path,
         result: Result<Arc<SignedIn>, SignInFailure>,
     ) -> Task<cosmic::Action<Message>> {
-        let current = match &origin {
+        let current = match origin {
             None => self
                 .adding
                 .as_ref()
@@ -281,7 +282,7 @@ impl AppModel {
         let signed_in = match result {
             Ok(s) => s,
             Err(SignInFailure(error)) => {
-                match &origin {
+                match origin {
                     None => {
                         self.adding = error.map(|e| Adding {
                             generation,
@@ -299,14 +300,14 @@ impl AppModel {
             }
         };
         let id = accounts::account_id(&signed_in.identity);
-        match decide::after_sign_in(origin.as_deref(), &id) {
+        match decide::after_sign_in(origin, &id) {
             decide::AfterSignIn::AdoptProfile => {
                 self.adding = None;
-                accounts::adopt_profile(&profile, &id);
+                accounts::adopt_profile(profile, &id);
             }
             decide::AfterSignIn::ResetOther(old) => {
                 // The profile now holds this account's cookies.
-                accounts::adopt_profile(&profile, &id);
+                accounts::adopt_profile(profile, &id);
                 if let Some(a) = self.account_mut(&old) {
                     a.state = AccountState::NeedsSignIn { error: None };
                 }

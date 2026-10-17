@@ -9,6 +9,9 @@ use crate::settings::ConnectionSettings;
 
 #[derive(Debug, Default, Clone, CosmicConfigEntry, Eq, PartialEq)]
 #[version = 1]
+// The field names are the keys stored on disk; renaming them would lose
+// users' settings.
+#[allow(clippy::struct_field_names)]
 pub struct Config {
     /// Logon setting that last worked, per resource. Keys are opaque hashes
     /// of account, tenant and resource ID (spec §7: titles are never

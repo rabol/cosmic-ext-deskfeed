@@ -2,6 +2,7 @@
 
 //! User-facing texts for sign-in, feed and session errors.
 
+#[allow(clippy::wildcard_imports)] // see app/mod.rs
 use super::*;
 
 pub(super) fn describe_sign_in_error(e: SignInError) -> SignInFailure {

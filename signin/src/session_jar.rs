@@ -116,7 +116,7 @@ impl StoredCookie {
             name: c.name()?.into(),
             value: c.value()?.into(),
             domain: c.domain()?.into(),
-            path: c.path().map(Into::into).unwrap_or_else(|| "/".into()),
+            path: c.path().map_or_else(|| "/".into(), Into::into),
             secure: c.is_secure(),
             http_only: c.is_http_only(),
             same_site,
@@ -187,10 +187,10 @@ mod tests {
     #[test]
     fn damaged_or_missing_jar_is_empty() {
         let dir = tmp();
-        assert!(load(&dir).is_empty());
+        assert_eq!(load(&dir), Vec::new());
         crate::view::private_dir(&dir).unwrap();
         fs::write(dir.join(FILE), "not json").unwrap();
-        assert!(load(&dir).is_empty());
+        assert_eq!(load(&dir), Vec::new());
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -133,10 +133,12 @@ mod tests {
     #[test]
     fn timestamps_are_utc_iso() {
         assert_eq!(timestamp(UNIX_EPOCH), "1970-01-01T00:00:00Z");
-        // 2026-10-17T18:18:10Z
+        // 2026-10-17T18:18:10Z, as Unix seconds (what the code converts).
+        #[allow(clippy::duration_suboptimal_units)]
         let t = UNIX_EPOCH + Duration::from_secs(1_792_261_090);
         assert_eq!(timestamp(t), "2026-10-17T18:18:10Z");
         // Leap day.
+        #[allow(clippy::duration_suboptimal_units)]
         let t = UNIX_EPOCH + Duration::from_secs(951_782_400);
         assert_eq!(timestamp(t), "2000-02-29T00:00:00Z");
     }

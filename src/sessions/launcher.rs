@@ -512,7 +512,7 @@ fn supervise(
     Ok(Session { child, pgid })
 }
 
-/// A FreeRDP connection step ("STATE_A --> STATE_B"); no secrets.
+/// A FreeRDP connection step (`STATE_A --> STATE_B`); no secrets.
 fn is_state_change(line: &str) -> bool {
     line.contains(&format!("[DEBUG][{STATE_LOGGER}]")) && line.contains(" --> ")
 }
