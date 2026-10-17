@@ -32,7 +32,7 @@ const COLLECTION: &str = "org.freedesktop.Secret.Collection";
 const ITEM: &str = "org.freedesktop.Secret.Item";
 const PROMPT: &str = "org.freedesktop.Secret.Prompt";
 /// Identifies our items; the app ID.
-const APPLICATION: &str = "io.github.rabol.cosmic-ext-avd";
+const APPLICATION: &str = "io.github.rabol.cosmic-ext-deskfeed";
 const KIND: &str = "refresh-token";
 const PAYLOAD_VERSION: u32 = 1;
 const MAX_PAYLOAD: usize = 64 * 1024;
@@ -284,8 +284,8 @@ pub fn save(
     let collection = keyring.default_collection()?;
     let attributes = account_attributes(config, identity);
     let label = match identity.username.as_deref() {
-        Some(user) => format!("AVD Client sign-in ({user})"),
-        None => "AVD Client sign-in".to_owned(),
+        Some(user) => format!("Deskfeed sign-in ({user})"),
+        None => "Deskfeed sign-in".to_owned(),
     };
     let properties: HashMap<&str, Value<'_>> = HashMap::from([
         ("org.freedesktop.Secret.Item.Label", Value::from(label)),

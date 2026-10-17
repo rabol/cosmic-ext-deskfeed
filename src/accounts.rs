@@ -24,7 +24,7 @@ use crate::service::http::Http;
 
 /// Folder of the RAM cookie folders; shared with the helper
 /// (`signin/src/session_jar.rs`).
-const JAR_DIR: &str = "cosmic-ext-avd-web";
+const JAR_DIR: &str = "cosmic-ext-deskfeed-web";
 /// The profile name used before multiple accounts existed.
 const LEGACY_PROFILE: &str = "default";
 
@@ -45,7 +45,7 @@ pub fn account_id(identity: &Identity) -> String {
 }
 
 fn profiles_root() -> Option<PathBuf> {
-    Some(dirs::data_dir()?.join("cosmic-ext-avd").join("signin"))
+    Some(dirs::data_dir()?.join("cosmic-ext-deskfeed").join("signin"))
 }
 
 fn jars_root() -> Option<PathBuf> {

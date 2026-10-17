@@ -3,8 +3,8 @@
 //! The app's log (spec §12): one private, bounded, rotating file, so
 //! problems can be looked at when the app was started from the launcher.
 //!
-//! - `$XDG_STATE_HOME/cosmic-ext-avd/app.log` (usually
-//!   `~/.local/state/cosmic-ext-avd/`), folder 0700, file 0600.
+//! - `$XDG_STATE_HOME/cosmic-ext-deskfeed/app.log` (usually
+//!   `~/.local/state/cosmic-ext-deskfeed/`), folder 0700, file 0600.
 //! - Rotated at 1 MiB; one older file (`app.log.1`) is kept.
 //! - Lines also go to stderr, for runs from a terminal.
 //! - Callers never log secrets; as a last guard, anything shaped like a JWT
@@ -34,7 +34,7 @@ static OUT: Mutex<Option<File>> = Mutex::new(None);
 
 /// The folder holding the log files.
 pub fn dir() -> Option<PathBuf> {
-    Some(dirs::state_dir()?.join("cosmic-ext-avd"))
+    Some(dirs::state_dir()?.join("cosmic-ext-deskfeed"))
 }
 
 pub fn write(message: &str) {

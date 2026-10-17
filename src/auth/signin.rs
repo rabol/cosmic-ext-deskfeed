@@ -21,7 +21,7 @@ use super::id_token::{self, IdTokenError, Identity};
 use super::token::{self, TokenError, TokenSet};
 use crate::service::http::Http;
 
-const HELPER_NAME: &str = "cosmic-ext-avd-signin";
+const HELPER_NAME: &str = "cosmic-ext-deskfeed-signin";
 const MAX_REPLY_LEN: u64 = 16 * 1024;
 
 /// Environment passed to the helper; everything else is dropped.
@@ -110,13 +110,13 @@ impl std::fmt::Debug for Cancel {
 }
 
 /// Where the helper is installed: next to the app (development builds) or
-/// in `<prefix>/libexec/cosmic-ext-avd/` (installed builds).
+/// in `<prefix>/libexec/cosmic-ext-deskfeed/` (installed builds).
 pub fn find_helper() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
     [
         dir.join(HELPER_NAME),
-        dir.join("../libexec/cosmic-ext-avd").join(HELPER_NAME),
+        dir.join("../libexec/cosmic-ext-deskfeed").join(HELPER_NAME),
     ]
     .into_iter()
     .find(|p| p.is_file())

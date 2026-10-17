@@ -953,7 +953,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cosmic-ext-avd"
+name = "cosmic-ext-deskfeed"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
@@ -979,7 +979,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cosmic-ext-avd-signin"
+name = "cosmic-ext-deskfeed-signin"
 version = "0.1.0"
 dependencies = [
  "gtk4",

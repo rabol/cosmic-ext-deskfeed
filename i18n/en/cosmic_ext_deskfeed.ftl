@@ -1,5 +1,5 @@
-app-title = AVD Client
-app-comment = Azure Virtual Desktop and Windows 365 client for the COSMIC™ desktop
+app-title = Deskfeed
+app-comment = Your work desktops on COSMIC™, working with Azure Virtual Desktop and Windows 365
 app-keywords = AVD;Azure;Virtual Desktop;Windows 365;Remote Desktop;RDP;
 about = About
 repository = Repository
@@ -25,7 +25,7 @@ keyring-malformed = the saved data couldn't be read.
 cancel = Cancel
 refresh = Refresh
 connect = Connect
-unofficial-notice = AVD Client is an unofficial community app for Azure Virtual Desktop and Windows 365. It is not a Microsoft product. For compatibility it signs in with Microsoft's public Remote Desktop client identity.
+unofficial-notice = Deskfeed is an unofficial community app that works with Azure Virtual Desktop and Windows 365. It is not a Microsoft product. For compatibility it signs in with Microsoft's public Remote Desktop client identity.
 
 # Resources
 loading-desktops = Loading your desktops…
@@ -37,7 +37,7 @@ kind-remoteapp = App (not supported yet)
 kind-other = Unknown resource type (not supported)
 
 # Errors
-error-helper-missing = The sign-in window component (cosmic-ext-avd-signin) is not installed.
+error-helper-missing = The sign-in window component (cosmic-ext-deskfeed-signin) is not installed.
 error-no-data-dir = Couldn't find a folder to store sign-in data.
 error-no-display = The sign-in window couldn't open.
 error-sign-in-timeout = Sign-in took too long and was stopped. Try again.
@@ -104,7 +104,7 @@ dep-freerdp-hint = Connects to your desktops. Install FreeRDP 3.32.2 or newer wi
 dep-freerdp-entra = FreeRDP Microsoft Entra support
 dep-freerdp-entra-hint = Needed for Entra sign-in to desktops. FreeRDP must be built with WITH_AAD=ON (Arch Linux's freerdp is).
 dep-signin = Sign-in window
-dep-signin-hint = Shows Microsoft's sign-in pages. Part of AVD Client; needs WebKitGTK 6 (Arch Linux: webkitgtk-6.0).
+dep-signin-hint = Shows Microsoft's sign-in pages. Part of Deskfeed; needs WebKitGTK 6 (Arch Linux: webkitgtk-6.0).
 dep-keyring = Keyring (Secret Service)
 dep-keyring-hint = Keeps you signed in between starts. Without it you sign in each time. Install and start a Secret Service such as oo7 or GNOME Keyring.
 dep-runtime = User runtime folder

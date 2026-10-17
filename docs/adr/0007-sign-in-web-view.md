@@ -21,14 +21,14 @@ Options considered:
 
 ## Decision
 
-- Use **WebKitGTK 6** in a separate binary, `cosmic-ext-avd-signin`, a Cargo workspace member. The main app does not link GTK or WebKit.
+- Use **WebKitGTK 6** in a separate binary, `cosmic-ext-deskfeed-signin`, a Cargo workspace member. The main app does not link GTK or WebKit.
 - The helper follows spec §6: HTTPS only, starts at `login.microsoftonline.com`, shows the current host, blocks pop-ups, downloads and file access, no script bridge, stops at the `nativeclient` redirect, and returns only `code`, `state` and error fields over a private pipe. One cookie store per account in the app's private data directory, deleted on sign-out.
 - The same helper serves FreeRDP's `/azure:auth-helper` requests, forwarded by the app ([ADR 0004](0004-freerdp-version-and-sign-in-helper.md)).
 - Requires the distro's `webkitgtk-6.0` package (native only, [ADR 0010](0010-native-only-and-dependency-check.md)); the startup dependency check tests that the helper starts.
 
 ## Implementation notes (2026-10-17)
 
-- Crate `signin/` (`cosmic-ext-avd-signin`), installed to `libexec/cosmic-ext-avd/`. Uses `gtk4` 0.11 (feature `v4_18`) and `webkit6` 0.6.1 (feature `v2_52`) against system GTK 4.24 and WebKitGTK 2.54.1. Adds 38 packages to `Cargo.lock` (658 → 696); none are linked into the main app.
+- Crate `signin/` (`cosmic-ext-deskfeed-signin`), installed to `libexec/cosmic-ext-deskfeed/`. Uses `gtk4` 0.11 (feature `v4_18`) and `webkit6` 0.6.1 (feature `v2_52`) against system GTK 4.24 and WebKitGTK 2.54.1. Adds 38 packages to `Cargo.lock` (658 → 696); none are linked into the main app.
 - Protocol: the app writes one JSON request line (`url`, `title`, `silent_first`, `timeout_ms`) to the helper's stdin and reads one JSON reply line (`ok` with `code` and `state`; `error` with short codes; `cancelled`; `timeout`; `failed`). Closing stdin cancels; the helper then exits, so it never outlives the app.
 - The redirect is caught in the navigation policy, before the request is sent, so Microsoft's `nativeclient` warning page never loads.
 - `silent_first` keeps the window hidden and shows it only when a page has loaded and sign-in has not finished 1.5 s later, so renewals with valid cookies stay invisible.

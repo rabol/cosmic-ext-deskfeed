@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use crate::protocol::{self, RedirectTarget, Reply};
 use crate::view::{self, Show, SignInView};
 
-const PROFILE_ENV: &str = "COSMIC_EXT_AVD_SIGNIN_PROFILE";
+const PROFILE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_PROFILE";
 const MAX_LINE: usize = 64 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 180_000;
 const MAX_TIMEOUT_MS: u64 = 15 * 60 * 1000;
@@ -166,7 +166,7 @@ pub fn navigate_response(id: u64, redirect_uri: &str, reply: Reply) -> String {
 pub fn run(args: &[String]) -> ExitCode {
     let (Some(in_fd), Some(out_fd)) = (fd_arg(args, "--cmdInFd"), fd_arg(args, "--cmdOutFd"))
     else {
-        eprintln!("cosmic-ext-avd-signin: missing --cmdInFd/--cmdOutFd");
+        eprintln!("cosmic-ext-deskfeed-signin: missing --cmdInFd/--cmdOutFd");
         return ExitCode::from(2);
     };
     // SAFETY: FreeRDP passes us the two pipe ends for our exclusive use.
@@ -240,7 +240,7 @@ fn handle(msg: &Incoming, view: &SignInView, send: &Arc<impl Fn(String) + 'stati
             *id,
             &json!({
                 "protocol_version": 1,
-                "helper": concat!("cosmic-ext-avd-signin/", env!("CARGO_PKG_VERSION")),
+                "helper": concat!("cosmic-ext-deskfeed-signin/", env!("CARGO_PKG_VERSION")),
             }),
         )),
         Incoming::Navigate {
@@ -271,7 +271,7 @@ fn handle(msg: &Incoming, view: &SignInView, send: &Arc<impl Fn(String) + 'stati
                                 Reply::Error { error, .. } => format!("error {error}"),
                                 other => format!("{other:?}"),
                             };
-                            eprintln!("cosmic-ext-avd-signin: silent token request (prompt=none): {outcome}");
+                            eprintln!("cosmic-ext-deskfeed-signin: silent token request (prompt=none): {outcome}");
                             if protocol::needs_interaction(&reply) {
                                 view2.navigate(&url, target2, Show::IfNeeded, timeout, respond);
                             } else {

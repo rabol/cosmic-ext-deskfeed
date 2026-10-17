@@ -115,7 +115,7 @@ impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
     type Flags = ();
     type Message = Message;
-    const APP_ID: &'static str = "io.github.rabol.cosmic-ext-avd";
+    const APP_ID: &'static str = "io.github.rabol.cosmic-ext-deskfeed";
 
     fn core(&self) -> &cosmic::Core {
         &self.core
@@ -129,7 +129,7 @@ impl cosmic::Application for AppModel {
         core: cosmic::Core,
         _flags: Self::Flags,
     ) -> (Self, Task<cosmic::Action<Self::Message>>) {
-        crate::app_log!("AVD Client {} started", env!("CARGO_PKG_VERSION"));
+        crate::app_log!("Deskfeed {} started", env!("CARGO_PKG_VERSION"));
         launcher::clean_stale_runtime_dirs();
         accounts::clean_unfinished_profiles();
         let about = About::default()

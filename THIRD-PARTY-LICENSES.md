@@ -1,6 +1,6 @@
 # Third-party software
 
-AVD Client is MIT-licensed ([LICENSE](./LICENSE)). This file lists the software it is built with or runs with, and their licenses.
+Deskfeed is MIT-licensed ([LICENSE](./LICENSE)). This file lists the software it is built with or runs with, and their licenses.
 
 ## System software (not part of this repository)
 
@@ -13,7 +13,7 @@ AVD Client is MIT-licensed ([LICENSE](./LICENSE)). This file lists the software 
 
 ## Rust crates (511)
 
-The crates compiled into `cosmic-ext-avd` and `cosmic-ext-avd-signin` for Linux, from `Cargo.lock` (generated 2026-10-17 with `cargo tree` and `cargo metadata`). License expressions are as each crate declares them.
+The crates compiled into `cosmic-ext-deskfeed` and `cosmic-ext-deskfeed-signin` for Linux, from `Cargo.lock` (generated 2026-10-17 with `cargo tree` and `cargo metadata`). License expressions are as each crate declares them.
 
 Summary: MIT OR Apache-2.0: 260, MIT: 148, Unicode-3.0: 18, Apache-2.0: 15, MIT OR Apache-2.0 OR Zlib: 10, MPL-2.0: 7, ISC: 5, Apache-2.0 WITH LLVM-exception OR MIT OR Apache-2.0: 5, BSD-3-Clause: 5, Unlicense OR MIT: 4, CC0-1.0: 3, BSD-2-Clause: 3, Zlib OR MIT OR Apache-2.0: 3, Zlib: 3, Apache-2.0/MIT: 2, MIT OR Zlib OR Apache-2.0: 2, BSD-3-Clause OR Apache-2.0: 2, Apache-2.0 OR ISC OR MIT: 2, Unlicense/MIT: 2, BSD-2-Clause OR MIT OR Apache-2.0: 2, 0BSD OR MIT OR Apache-2.0: 1, Unlicense (License.md): 1, MIT OR LGPL-3.0-or-later: 1, Apache-2.0 AND MIT: 1, Apache-2.0 / MIT: 1, Apache-2.0 AND ISC: 1, Apache-2.0 OR GPL-2.0-only: 1, Apache-2.0 WITH LLVM-exception: 1, (MIT OR Apache-2.0) AND Unicode-3.0: 1, GPL-3.0-only: 1
 

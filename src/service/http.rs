@@ -145,7 +145,7 @@ impl Http {
             .http_status_as_error(false)
             .timeout_connect(Some(CONNECT_TIMEOUT))
             .timeout_global(Some(TOTAL_TIMEOUT))
-            .user_agent(concat!("cosmic-ext-avd/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("cosmic-ext-deskfeed/", env!("CARGO_PKG_VERSION")))
             .build();
         Self {
             agent: Agent::new_with_config(config),

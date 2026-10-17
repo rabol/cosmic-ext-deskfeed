@@ -9,7 +9,7 @@
 //!
 //! The helper therefore saves the session cookies (those without an expiry
 //! date) after each sign-in and loads them before the next one. They go to
-//! `$XDG_RUNTIME_DIR/cosmic-ext-avd-web/<profile name>/cookies.json`:
+//! `$XDG_RUNTIME_DIR/cosmic-ext-deskfeed-web/<profile name>/cookies.json`:
 //! RAM-only, private to the user (folder 0700, file 0600), gone at logout,
 //! and removed by the app on sign-out. Persistent cookies stay in the
 //! profile's own cookie database as before.
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use webkit6::soup;
 
 /// Shared with the app (`src/auth/signin.rs`), which removes it on sign-out.
-const JAR_DIR: &str = "cosmic-ext-avd-web";
+const JAR_DIR: &str = "cosmic-ext-deskfeed-web";
 const FILE: &str = "cookies.json";
 const MAX_FILE: u64 = 512 * 1024;
 const MAX_COOKIES: usize = 300;
@@ -211,7 +211,7 @@ mod tests {
     fn jar_path_uses_runtime_dir_and_profile_name() {
         // Only checks the shape; XDG_RUNTIME_DIR is set in normal sessions.
         if let Some(p) = jar_dir(Path::new("/home/u/.local/share/x/signin/default")) {
-            assert!(p.ends_with("cosmic-ext-avd-web/default"));
+            assert!(p.ends_with("cosmic-ext-deskfeed-web/default"));
         }
     }
 }

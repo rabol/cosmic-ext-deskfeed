@@ -17,7 +17,7 @@ First version (0.1.0), not yet released.
 - Settings per account with per-desktop overrides: time to wait, full screen, all monitors, open on a new COSMIC workspace, sound, microphone, clipboard.
 - "Open on a new workspace" through COSMIC's window and workspace protocols.
 - Dependency check at startup and under View → Dependencies.
-- Log file under `~/.local/state/cosmic-ext-avd/` with View → Open log folder.
+- Log file under `~/.local/state/cosmic-ext-deskfeed/` with View → Open log folder.
 - Installation with `just install`: desktop entry, icons, AppStream metadata.
 
 ### Known limitations

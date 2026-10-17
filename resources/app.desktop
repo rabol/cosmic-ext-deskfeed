@@ -1,9 +1,9 @@
 [Desktop Entry]
-Name=AVD Client
-Comment=Azure Virtual Desktop and Windows 365 client for the COSMIC™ desktop
+Name=Deskfeed
+Comment=Your work desktops on COSMIC™, working with Azure Virtual Desktop and Windows 365
 Type=Application
-Icon=io.github.rabol.cosmic-ext-avd
-Exec=cosmic-ext-avd
+Icon=io.github.rabol.cosmic-ext-deskfeed
+Exec=cosmic-ext-deskfeed
 Terminal=false
 StartupNotify=true
 Categories=Network;RemoteAccess;

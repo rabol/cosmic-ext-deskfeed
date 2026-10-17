@@ -40,7 +40,7 @@ fi
 umask 077
 base="$HOME/.var/app/$app_id/cache"
 mkdir -p "$base"
-dir="$(mktemp -d "$base/cosmic-ext-avd-askpass.XXXXXX")"
+dir="$(mktemp -d "$base/cosmic-ext-deskfeed-askpass.XXXXXX")"
 fifo="$dir/pw"
 helper="$dir/askpass.sh"
 mkfifo -m 600 "$fifo"

@@ -98,7 +98,7 @@ fi
 rt="${XDG_RUNTIME_DIR:-}"
 [[ -d "$rt" ]] || { echo "XDG_RUNTIME_DIR is not set" >&2; exit 2; }
 umask 077
-logdir="$(mktemp -d "$rt/cosmic-ext-avd-research.XXXXXX")"
+logdir="$(mktemp -d "$rt/cosmic-ext-deskfeed-research.XXXXXX")"
 cleanup() { [[ $keep_log -eq 1 ]] || rm -rf -- "$logdir"; }
 trap cleanup EXIT
 

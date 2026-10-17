@@ -1,6 +1,6 @@
 # Security policy
 
-AVD Client handles work sign-ins, so security reports are welcome and taken seriously.
+Deskfeed handles work sign-ins, so security reports are welcome and taken seriously.
 
 ## Reporting a vulnerability
 
@@ -16,7 +16,7 @@ Only the latest release and the `main` branch get security fixes while the proje
 
 ## Scope
 
-In scope: this repository's code: the app, the sign-in helper (`cosmic-ext-avd-signin`), how they store and pass credentials, which addresses receive tokens, and the files they write.
+In scope: this repository's code: the app, the sign-in helper (`cosmic-ext-deskfeed-signin`), how they store and pass credentials, which addresses receive tokens, and the files they write.
 
 Out of scope: vulnerabilities in FreeRDP, WebKitGTK, GTK, libcosmic, the Secret Service implementation, or Microsoft's services. Please report those to their projects; we're happy to help coordinate.
 

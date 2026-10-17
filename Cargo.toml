@@ -1,11 +1,11 @@
 [package]
-name = "cosmic-ext-avd"
+name = "cosmic-ext-deskfeed"
 version = "0.1.0"
 edition = "2024"
 authors = ["Steen Rabol <cosmic-ext-avd@rabol.dev>"]
 license = "MIT"
-description = "Azure Virtual Desktop and Windows 365 client for the COSMIC™ desktop"
-repository = "https://github.com/rabol/cosmic-ext-avd"
+description = "Your work desktops on COSMIC™, working with Azure Virtual Desktop and Windows 365"
+repository = "https://github.com/rabol/cosmic-ext-deskfeed"
 
 [workspace]
 members = ["signin"]

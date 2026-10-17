@@ -37,7 +37,7 @@ The reference session log shows: helper detection failed (`aad_auth_helper_detec
 ## Decision (proposed)
 
 1. Target FreeRDP **3.32.2** as the first supported version, using the distro `sdl-freerdp3` for native development builds.
-2. Integrate Entra token requests through **FreeRDP's own helper protocol** (`/azure:auth-helper:<path>`), with a small COSMIC AVD helper binary that forwards each `navigate` to the running app over a private, authenticated channel. No FreeRDP patch and no terminal scraping.
+2. Integrate Entra token requests through **FreeRDP's own helper protocol** (`/azure:auth-helper:<path>`), with a small Deskfeed helper binary that forwards each `navigate` to the running app over a private, authenticated channel. No FreeRDP patch and no terminal scraping.
 3. Pass the complete FreeRDP argument list through `/args-from:fd:<n>`.
 4. Keep `sso-mib` as a later optional capability. The distro build doesn't include it, so it needs our own FreeRDP build (likely only in Flatpak).
 
@@ -50,6 +50,6 @@ The reference session log shows: helper detection failed (`aad_auth_helper_detec
 
 ## Consequences
 
-- If the helper protocol works, COSMIC AVD needs no FreeRDP patch for Entra.
+- If the helper protocol works, Deskfeed needs no FreeRDP patch for Entra.
 - Because FreeRDP restarts the helper for each token, the app must hold the sign-in state, and the helper must find and authenticate to the app each time.
 - The helper protocol is new in FreeRDP 3.x and may change; pin the version and recheck on upgrades.

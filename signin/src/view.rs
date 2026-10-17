@@ -254,7 +254,7 @@ impl SignInView {
         // Diagnostics (count only): did this sign-in start with the shared
         // Microsoft session? FreeRDP passes our stderr to the app's log.
         eprintln!(
-            "cosmic-ext-avd-signin: saved session cookies: {}",
+            "cosmic-ext-deskfeed-signin: saved session cookies: {}",
             stored.len()
         );
         let Some(manager) = inner.cookies.clone().filter(|_| !stored.is_empty()) else {
@@ -281,7 +281,7 @@ impl SignInView {
             return;
         };
         eprintln!(
-            "cosmic-ext-avd-signin: sign-in page shown to the user: {}",
+            "cosmic-ext-deskfeed-signin: sign-in page shown to the user: {}",
             if inner.window.is_visible() {
                 "yes"
             } else {

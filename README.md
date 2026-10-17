@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="resources/icons/hicolor/256x256/apps/icon.png" width="128" height="128" alt="AVD Client icon">
+  <img src="resources/icons/hicolor/256x256/apps/icon.png" width="128" height="128" alt="Deskfeed icon">
 </p>
 
-# AVD Client for the COSMIC™ desktop
+# Deskfeed
 
-A native COSMIC app for **Azure Virtual Desktop** and **Windows 365**: sign in with your work or school account, see the desktops your organization assigned to you, and connect to them.
+Your work desktops on the COSMIC™ desktop. A native COSMIC app that **works with Azure Virtual Desktop and Windows 365**: sign in with your work or school account, see the desktops your organization assigned to you, and connect to them.
 
 > **Unofficial community project.** Not affiliated with or endorsed by Microsoft or System76. For compatibility it signs in with Microsoft's public Remote Desktop client identity, the same one FreeRDP uses. It is not a Microsoft product.
 
@@ -38,13 +38,13 @@ See [Dependencies](#dependencies) for every library the app is built from.
 ## Installation
 
 ```sh
-git clone https://github.com/rabol/cosmic-ext-avd.git
-cd cosmic-ext-avd
+git clone https://github.com/rabol/cosmic-ext-deskfeed.git
+cd cosmic-ext-deskfeed
 just build-release     # as your user
 sudo just install      # copies the built files to /usr
 ```
 
-This installs the app (`/usr/bin/cosmic-ext-avd`), its sign-in helper (`/usr/libexec/cosmic-ext-avd/`), the desktop entry, the icons and the AppStream metadata. Start **AVD Client** from the COSMIC launcher.
+This installs the app (`/usr/bin/cosmic-ext-deskfeed`), its sign-in helper (`/usr/libexec/cosmic-ext-deskfeed/`), the desktop entry, the icons and the AppStream metadata. Start **Deskfeed** from the COSMIC launcher.
 
 `sudo just uninstall` removes them again. Your accounts and settings stay in your home folder.
 
@@ -73,7 +73,7 @@ If something doesn't work, **View → Dependencies** shows what's missing, and *
 - Passwords and tokens reach FreeRDP through a private pipe, never through the command line or environment.
 - Your account's tokens are only sent to the Microsoft addresses the app was built for (`login.microsoftonline.com`, `*.wvd.microsoft.com`), always over HTTPS.
 - The Microsoft sign-in window is a separate, locked-down program: HTTPS only, no pop-ups or downloads, and it only hands back the sign-in result.
-- The log (`~/.local/state/cosmic-ext-avd/app.log`, readable only by you, at most about 2 MiB) contains no passwords or tokens.
+- The log (`~/.local/state/cosmic-ext-deskfeed/app.log`, readable only by you, at most about 2 MiB) contains no passwords or tokens.
 - No telemetry.
 
 Design details: [specs.md](./specs.md) and the [architecture decision records](./docs/adr/README.md).
@@ -96,7 +96,7 @@ just run              # run a release build
 | `src/accounts.rs`, `src/secrets.rs` | Per-account storage; the Secret Service (keyring) |
 | `src/settings.rs`, `src/workspace.rs` | Connection settings; "open on a new workspace" |
 | `src/deps.rs`, `src/log.rs` | Dependency check; the log file |
-| `signin/` | `cosmic-ext-avd-signin`, the sign-in window ([why a separate program](./docs/adr/0007-sign-in-web-view.md)) |
+| `signin/` | `cosmic-ext-deskfeed-signin`, the sign-in window ([why a separate program](./docs/adr/0007-sign-in-web-view.md)) |
 | `docs/` | Progress notes and architecture decision records |
 
 Dependencies are kept to a minimum on purpose ([ADR 0003](./docs/adr/0003-minimal-dependencies.md)); each new one needs a reason in an ADR.
@@ -112,7 +112,7 @@ Vendor the dependencies and build offline; use `rootdir` and `prefix` to choose 
 ```sh
 just vendor
 just build-vendored
-just rootdir=debian/cosmic-ext-avd prefix=/usr install
+just rootdir=debian/cosmic-ext-deskfeed prefix=/usr install
 ```
 
 ## Dependencies
@@ -123,7 +123,7 @@ Kept to a minimum on purpose; each one has a reason ([ADR 0003](./docs/adr/0003-
 
 **Build tools:** Rust (edition 2024) with Cargo, and `just`.
 
-**Rust crates used directly by the app** (`cosmic-ext-avd`):
+**Rust crates used directly by the app** (`cosmic-ext-deskfeed`):
 
 | Crate | Used for |
 |---|---|
@@ -141,7 +141,7 @@ Kept to a minimum on purpose; each one has a reason ([ADR 0003](./docs/adr/0003-
 | `open` | Opening links and the log folder |
 | `xdgen` (build only) | Generating the desktop entry and AppStream metadata |
 
-**Rust crates used by the sign-in window** (`cosmic-ext-avd-signin`, [ADR 0007](./docs/adr/0007-sign-in-web-view.md)): `gtk4` and `webkit6` (the web view), `serde`, `serde_json`, `url`. Only this helper links GTK and WebKit.
+**Rust crates used by the sign-in window** (`cosmic-ext-deskfeed-signin`, [ADR 0007](./docs/adr/0007-sign-in-web-view.md)): `gtk4` and `webkit6` (the web view), `serde`, `serde_json`, `url`. Only this helper links GTK and WebKit.
 
 Most of the crates in `Cargo.lock` (696 in total) come in through libcosmic. The crates this project adds beyond libcosmic's own dependency tree are `ureq`, `rustls` and `ring` (with rustls's certificate-verifier crates) for HTTPS, `open` (from the COSMIC app template), and `gtk4` and `webkit6` in the sign-in helper. All other crates in the table were already part of libcosmic's tree (checked with `cargo tree`).
 
@@ -151,7 +151,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md). Please report security problems privat
 
 ## Contact
 
-**cosmic-ext-avd@rabol.dev**. For bugs and ideas, please prefer [GitHub issues](https://github.com/rabol/cosmic-ext-avd/issues); never include your organization's tenant details.
+**cosmic-ext-avd@rabol.dev**. For bugs and ideas, please prefer [GitHub issues](https://github.com/rabol/cosmic-ext-deskfeed/issues); never include your organization's tenant details.
 
 ## License
 

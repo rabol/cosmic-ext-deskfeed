@@ -1,11 +1,11 @@
 [package]
-name = "cosmic-ext-avd-signin"
+name = "cosmic-ext-deskfeed-signin"
 version = "0.1.0"
 edition = "2024"
 authors = ["Steen Rabol <cosmic-ext-avd@rabol.dev>"]
 license = "MIT"
-description = "Sign-in-only web view helper for AVD Client (see docs/adr/0007-sign-in-web-view.md)"
-repository = "https://github.com/rabol/cosmic-ext-avd"
+description = "Sign-in-only web view helper for Deskfeed (see docs/adr/0007-sign-in-web-view.md)"
+repository = "https://github.com/rabol/cosmic-ext-deskfeed"
 publish = false
 
 [dependencies]

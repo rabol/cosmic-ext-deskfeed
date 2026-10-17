@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 
-//! `cosmic-ext-avd-signin`: the sign-in-only web view (spec §6, ADR 0007).
+//! `cosmic-ext-deskfeed-signin`: the sign-in-only web view (spec §6, ADR 0007).
 //!
 //! Two modes:
 //!
-//! - **App mode:** `cosmic-ext-avd-signin --profile <dir>`, one JSON request
+//! - **App mode:** `cosmic-ext-deskfeed-signin --profile <dir>`, one JSON request
 //!   line on stdin, one JSON reply line on stdout. Closing stdin cancels.
 //! - **FreeRDP mode:** started by FreeRDP through `/azure:auth-helper:<path>`
 //!   with `--cmdInFd=…` and `--cmdOutFd=…`, speaking FreeRDP's helper
 //!   protocol (ADR 0004). The profile comes from the environment variable
-//!   `COSMIC_EXT_AVD_SIGNIN_PROFILE`, which the app sets for FreeRDP, so the
+//!   `COSMIC_EXT_DESKFEED_SIGNIN_PROFILE`, which the app sets for FreeRDP, so the
 //!   account's sign-in cookies make these requests silent when possible.
 
 mod freerdp;
@@ -43,7 +43,7 @@ fn main() -> ExitCode {
         return freerdp::run(&args);
     }
     let Some(profile) = profile_arg(&args) else {
-        eprintln!("usage: cosmic-ext-avd-signin --profile <dir>");
+        eprintln!("usage: cosmic-ext-deskfeed-signin --profile <dir>");
         return ExitCode::from(2);
     };
     let Some(request) = read_request() else {

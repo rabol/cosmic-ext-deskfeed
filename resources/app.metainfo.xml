@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.rabol.cosmic-ext-avd</id>
+  <id>io.github.rabol.cosmic-ext-deskfeed</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <name>AVD Client</name>
-  <summary>Azure Virtual Desktop and Windows 365 client for the COSMIC™ desktop</summary>
+  <name>Deskfeed</name>
+  <summary>Your work desktops on COSMIC™, working with Azure Virtual Desktop and Windows 365</summary>
   <description>
     <p>
       Sign in with one or more work or school accounts, see the desktops your
@@ -22,14 +22,14 @@
     <name>Steen Rabol</name>
   </developer>
   <update_contact>cosmic-ext-avd@rabol.dev</update_contact>
-  <icon type="stock">io.github.rabol.cosmic-ext-avd</icon>
-  <url type="homepage">https://github.com/rabol/cosmic-ext-avd</url>
-  <url type="vcs-browser">https://github.com/rabol/cosmic-ext-avd</url>
-  <launchable type="desktop-id">io.github.rabol.cosmic-ext-avd.desktop</launchable>
+  <icon type="stock">io.github.rabol.cosmic-ext-deskfeed</icon>
+  <url type="homepage">https://github.com/rabol/cosmic-ext-deskfeed</url>
+  <url type="vcs-browser">https://github.com/rabol/cosmic-ext-deskfeed</url>
+  <launchable type="desktop-id">io.github.rabol.cosmic-ext-deskfeed.desktop</launchable>
   <provides>
     <id>com.system76.CosmicApplication</id>
     <binaries>
-      <binary>cosmic-ext-avd</binary>
+      <binary>cosmic-ext-deskfeed</binary>
     </binaries>
   </provides>
   <requires>

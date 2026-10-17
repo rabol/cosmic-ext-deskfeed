@@ -6,7 +6,7 @@
 //!   (`/args-from:fd:3`), so nothing sensitive is on the command line or in
 //!   the environment.
 //! - The filtered connection file is written to a private runtime folder
-//!   (`$XDG_RUNTIME_DIR/cosmic-ext-avd/<random>`, mode 0700, file 0600) and
+//!   (`$XDG_RUNTIME_DIR/cosmic-ext-deskfeed/<random>`, mode 0700, file 0600) and
 //!   removed when the session ends.
 //! - FreeRDP gets an environment allowlist, runs in its own process group,
 //!   and uses our sign-in helper for Entra token requests.
@@ -254,7 +254,7 @@ fn runtime_base() -> Result<PathBuf, LaunchError> {
 
 impl RuntimeDir {
     fn create(base: &Path) -> Result<Self, LaunchError> {
-        let root = base.join("cosmic-ext-avd");
+        let root = base.join("cosmic-ext-deskfeed");
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -286,7 +286,7 @@ impl Drop for RuntimeDir {
 /// Removes session folders left behind by a crash.
 pub fn clean_stale_runtime_dirs() {
     if let Some(base) = std::env::var_os("XDG_RUNTIME_DIR") {
-        let root = PathBuf::from(base).join("cosmic-ext-avd");
+        let root = PathBuf::from(base).join("cosmic-ext-deskfeed");
         if let Ok(entries) = fs::read_dir(&root) {
             for e in entries.flatten() {
                 let _ = fs::remove_dir_all(e.path());
@@ -397,7 +397,7 @@ fn spawn_freerdp(
             cmd.env(key, v);
         }
     }
-    cmd.env("COSMIC_EXT_AVD_SIGNIN_PROFILE", profile);
+    cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_PROFILE", profile);
     // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it
     // stopped. This logger prints no names, passwords or tokens (FreeRDP
     // 3.32.2 `libfreerdp/core/rdp.c`). An environment variable, because
@@ -472,7 +472,7 @@ fn supervise(
                 for line in BufReader::new(stream).lines().map_while(Result::ok) {
                     // Our sign-in helper's status lines (FreeRDP passes its
                     // stderr through); they hold no codes or tokens.
-                    if line.starts_with("cosmic-ext-avd-signin: ") || is_state_change(&line) {
+                    if line.starts_with("cosmic-ext-deskfeed-signin: ") || is_state_change(&line) {
                         crate::app_log!("{line}");
                     }
                     if log.lock().expect("not poisoned").push(&line) {
@@ -573,7 +573,7 @@ mod tests {
             username: Some("anna@example.com".into()),
             password: password.map(|p| Secret::new(p.into())),
             logon,
-            helper: PathBuf::from("/usr/libexec/cosmic-ext-avd/cosmic-ext-avd-signin"),
+            helper: PathBuf::from("/usr/libexec/cosmic-ext-deskfeed/cosmic-ext-deskfeed-signin"),
             profile: PathBuf::from("/tmp/p"),
             gateway_token: None,
             settings: crate::settings::DEFAULTS,
@@ -585,7 +585,7 @@ mod tests {
     fn args(s: &LaunchSpec) -> Vec<String> {
         build_args(
             s,
-            Path::new("/run/user/1000/cosmic-ext-avd/x/connection.rdp"),
+            Path::new("/run/user/1000/cosmic-ext-deskfeed/x/connection.rdp"),
         )
         .unwrap()
     }
@@ -593,7 +593,7 @@ mod tests {
     #[test]
     fn password_host_automatic() {
         let a = args(&spec(LogonSetting::Automatic, Some("p@ss w0rd,;"), false));
-        assert_eq!(a[0], "/run/user/1000/cosmic-ext-avd/x/connection.rdp");
+        assert_eq!(a[0], "/run/user/1000/cosmic-ext-deskfeed/x/connection.rdp");
         assert!(a.contains(&"/gateway:type:arm".into()));
         assert!(a.contains(&"/sec:nla".into()));
         assert!(a.contains(&"/p:p@ss w0rd,;".into()));
@@ -637,11 +637,11 @@ mod tests {
     fn window_title_and_app_id() {
         let mut s = spec(LogonSetting::EntraSignIn, None, false);
         s.window_title = "Standard Desktop – anna@example.com\n/p:x".into();
-        s.app_id = "io.github.rabol.cosmic-ext-avd".into();
+        s.app_id = "io.github.rabol.cosmic-ext-deskfeed".into();
         let a = args(&s);
         // The line break is dropped, so nothing becomes a separate argument.
         assert!(a.contains(&"/title:Standard Desktop – anna@example.com/p:x".into()));
-        assert!(a.contains(&"/wm-class:io.github.rabol.cosmic-ext-avd".into()));
+        assert!(a.contains(&"/wm-class:io.github.rabol.cosmic-ext-deskfeed".into()));
         assert!(!a.iter().any(|x| x == "/p:x"));
         s.app_id = "bad id;x".into();
         assert!(!args(&s).iter().any(|x| x.starts_with("/wm-class:")));
@@ -734,7 +734,7 @@ mod tests {
                  echo \"DIRMODE:$(stat -c %a \"$(dirname \"$first\")\")\" >> \"$out\"\n\
                  grep -q drivestoredirect \"$first\" && echo DRIVES >> \"$out\"\n\
                  env | grep -q AVD_TEST_SECRET && echo LEAKED_ENV >> \"$out\"\n\
-                 env | grep -q '^COSMIC_EXT_AVD_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
+                 env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
                  echo '[INFO][x] - Loading Dynamic Virtual Channel rdpgfx'\n\
                  exit 0\n",
                 out = out.display()
@@ -775,7 +775,7 @@ mod tests {
         assert!(!got.contains("LEAKED_ENV"));
         // The connection file and its folder are gone.
         assert_eq!(
-            fs::read_dir(runtime.join("cosmic-ext-avd"))
+            fs::read_dir(runtime.join("cosmic-ext-deskfeed"))
                 .unwrap()
                 .count(),
             0

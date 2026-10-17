@@ -1,9 +1,9 @@
 # Name of the application's binary.
-name := 'cosmic-ext-avd'
+name := 'cosmic-ext-deskfeed'
 # The sign-in web view helper (ADR 0007).
-signin-name := 'cosmic-ext-avd-signin'
+signin-name := 'cosmic-ext-deskfeed-signin'
 # The unique ID of the application.
-appid := 'io.github.rabol.cosmic-ext-avd'
+appid := 'io.github.rabol.cosmic-ext-deskfeed'
 
 # Path to root file system, which defaults to `/`.
 rootdir := ''
@@ -16,7 +16,7 @@ cargo-target-dir := env('CARGO_TARGET_DIR', 'target')
 appdata := appid + '.metainfo.xml'
 # Application's desktop entry
 desktop := appid + '.desktop'
-# Application's icon: PNGs made from assets/cosmic-ext-avd-logo.png.
+# Application's icon: PNGs made from assets/cosmic-ext-deskfeed-logo.png.
 icon-png := appid + '.png'
 icon-sizes := '16 24 32 48 64 128 256 512'
 
