@@ -23,6 +23,9 @@ First version (0.1.0), not yet released.
 - A password logon chosen for a desktop is used even when the connection file asks for Entra sign-in.
 - Renewed sign-ins are checked like restored ones: a renewed ID token must be valid and name the same account.
 - The "sign-in not saved" notice after a sign-in now appears when the keyring fails.
+- Quitting with desktops open asks first ("Disconnect and quit"), then ends every FreeRDP process, including anything it started, before the app exits. This also applies to closing from the dock or a keyboard shortcut.
+- Signing out ends all of the account's sessions, including desktops that a refresh removed from the list.
+- FreeRDP is started in the background, so the window never waits for it.
 - Installation with `just install`: desktop entry, icons, AppStream metadata.
 
 ### Known limitations

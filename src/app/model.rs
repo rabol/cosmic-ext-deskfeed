@@ -100,6 +100,23 @@ pub struct ResourceView {
     pub(super) connection_file: Option<Url>,
 }
 
+/// A FreeRDP session and the account it belongs to (sign-out ends it even
+/// if its desktop has left the list).
+pub(super) struct Running {
+    pub(super) account: String,
+    pub(super) session: launcher::Session,
+}
+
+/// Quitting the app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Quit {
+    No,
+    /// Desktops are open: asking whether to disconnect them and quit.
+    Asking,
+    /// Ending the sessions; the app exits when they are gone.
+    Stopping,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Connection {
     Preparing,
@@ -185,6 +202,8 @@ pub enum Message {
     CustomDomainInput(String),
     DialogConnect,
     DialogCancel,
+    /// Account ID, epoch, resource key; FreeRDP started, or why not.
+    Launched(String, u64, String, Result<launcher::Session, String>),
     /// Account ID, epoch, resource key, event.
     Session(String, u64, String, SessionEvent),
     Disconnect(String),
@@ -201,6 +220,12 @@ pub enum Message {
     DesktopTimeout(String, Option<u32>),
     /// Resource key; outcome of "open on a new workspace" (log text).
     WorkspaceMoved(String, Result<(), String>),
+    /// The window's close button or the desktop asked the app to close.
+    QuitRequested,
+    QuitConfirm,
+    QuitCancel,
+    /// All sessions have ended: exit.
+    ReadyToQuit,
 }
 
 /// Why a background step for an account failed.

@@ -75,7 +75,11 @@ pub struct AppModel {
     counter: u64,
     /// Connection state per resource key (keys include the account).
     connections: HashMap<String, Connection>,
-    running: HashMap<String, launcher::Session>,
+    running: HashMap<String, Running>,
+    /// FreeRDP starting (in the background): resource key → account, and
+    /// whether it is to be stopped as soon as it has started.
+    launching: HashMap<String, (String, bool)>,
+    quit: Quit,
     /// Logon setting and connection file of sessions not yet connected, to
     /// remember the setting on success or ask again on logon failure.
     pending_logon: HashMap<String, (LogonSetting, Arc<ConnectionFile>)>,
@@ -170,6 +174,8 @@ impl cosmic::Application for AppModel {
             counter: 0,
             connections: HashMap::new(),
             running: HashMap::new(),
+            launching: HashMap::new(),
+            quit: Quit::No,
             pending_logon: HashMap::new(),
             dialog: None,
             last_failure: HashMap::new(),
@@ -310,7 +316,15 @@ impl cosmic::Application for AppModel {
         })
     }
 
+    /// The window's close button.
+    fn on_app_exit(&mut self) -> Option<Self::Message> {
+        Some(Message::QuitRequested)
+    }
+
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
+        if self.quit == Quit::Asking {
+            return Some(self.quit_dialog());
+        }
         let d = self.dialog.as_ref()?;
         let account = self
             .account(&d.account)
@@ -394,6 +408,9 @@ impl cosmic::Application for AppModel {
             // a resume from suspend (the timer itself stops while
             // suspended).
             cosmic::iced::time::every(REFRESH_CHECK).map(|_| Message::RefreshDue),
+            // Closing from the desktop (window menu, keyboard shortcut,
+            // dock); the window's own close button goes to `on_app_exit`.
+            cosmic::iced::window::close_requests().map(|_| Message::QuitRequested),
         ])
     }
 
@@ -421,9 +438,14 @@ impl cosmic::Application for AppModel {
             | Message::CustomDomainInput(..)
             | Message::DialogCancel
             | Message::DialogConnect
+            | Message::Launched(..)
             | Message::Session(..)
             | Message::Disconnect(..)
-            | Message::WorkspaceMoved(..) => self.connection_message(message),
+            | Message::WorkspaceMoved(..)
+            | Message::QuitRequested
+            | Message::QuitConfirm
+            | Message::QuitCancel
+            | Message::ReadyToQuit => self.connection_message(message),
             Message::OpenAccountSettings(..)
             | Message::OpenDesktopSettings(..)
             | Message::AccountToggle(..)

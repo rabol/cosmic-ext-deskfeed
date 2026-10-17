@@ -54,14 +54,40 @@ impl AppModel {
                 }
             }
             Message::DialogConnect => return self.dialog_connect(),
+            Message::Launched(id, epoch, key, result) => {
+                return self.launched(&id, epoch, key, result);
+            }
+            Message::QuitRequested => {
+                if self.quit == Quit::No {
+                    if self.running.is_empty() && self.launching.is_empty() {
+                        self.quit = Quit::Stopping;
+                        return self.continue_quit();
+                    }
+                    self.quit = Quit::Asking;
+                }
+            }
+            Message::QuitCancel => {
+                if self.quit == Quit::Asking {
+                    self.quit = Quit::No;
+                }
+            }
+            Message::QuitConfirm => {
+                if self.quit == Quit::Asking {
+                    self.quit = Quit::Stopping;
+                    return self.continue_quit();
+                }
+            }
+            Message::ReadyToQuit => return cosmic::iced::exit(),
             Message::Session(id, epoch, key, event) => {
                 if self.account(&id).is_some_and(|a| a.epoch == epoch) {
                     self.session_event(&key, event);
                 }
             }
             Message::Disconnect(key) => {
-                if let Some(s) = self.running.get(&key) {
-                    s.disconnect();
+                if let Some(r) = self.running.get(&key) {
+                    r.session.disconnect();
+                } else if let Some((_, stop)) = self.launching.get_mut(&key) {
+                    *stop = true;
                 }
             }
             Message::WorkspaceMoved(key, result) => {
@@ -80,7 +106,9 @@ impl AppModel {
 
     /// Step 1 of connecting: download and filter the connection file.
     pub(super) fn prepare_connection(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
-        if self.running.contains_key(key)
+        if self.quit != Quit::No
+            || self.running.contains_key(key)
+            || self.launching.contains_key(key)
             || matches!(
                 self.connections.get(key),
                 Some(Connection::Preparing | Connection::Connecting)
@@ -257,63 +285,163 @@ impl AppModel {
         };
         // No secrets here: the setting and, for a custom domain, its name.
         crate::app_log!("Starting FreeRDP with logon setting {logon:?}");
+        self.connections
+            .insert(key.to_owned(), Connection::Connecting);
+        self.pending_logon
+            .insert(key.to_owned(), (logon, connection.clone()));
+        self.launching
+            .insert(key.to_owned(), (account.to_owned(), false));
+        // Starting FreeRDP writes files and hands over the arguments: not on
+        // the UI thread. Its events follow once it has started.
         let (tx, rx) = mpsc::unbounded();
-        let started = launcher::launch(&spec, move |e| {
-            let _ = tx.unbounded_send(e);
-        });
-        match started {
-            Ok(session) => {
-                self.running.insert(key.to_owned(), session);
-                self.connections
-                    .insert(key.to_owned(), Connection::Connecting);
-                self.pending_logon
-                    .insert(key.to_owned(), (logon, connection.clone()));
-                let events = {
-                    let (account, key) = (account.to_owned(), key.to_owned());
-                    cosmic::task::stream(
-                        rx.map(move |e| Message::Session(account.clone(), epoch, key.clone(), e)),
-                    )
-                };
-                if !settings.new_workspace {
-                    return events;
-                }
-                let stop = Arc::new(AtomicBool::new(false));
-                self.movers.insert(key.to_owned(), stop.clone());
-                let title = launcher::safe_title(&window_title);
-                // The window appears after authentication: wait as long as
-                // the connection may take, plus the sign-in page.
-                let wait = std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 180);
-                let key = key.to_owned();
-                let mover = cosmic::task::future(async move {
-                    let result = tokio::task::spawn_blocking(move || {
-                        crate::workspace::move_to_new_workspace(
-                            <AppModel as cosmic::Application>::APP_ID,
-                            &title,
-                            wait,
-                            &stop,
-                        )
+        let started = {
+            let (account, key) = (account.to_owned(), key.to_owned());
+            cosmic::task::future(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    launcher::launch(&spec, move |e| {
+                        let _ = tx.unbounded_send(e);
                     })
-                    .await;
-                    let result = match result {
-                        Ok(Ok(())) => Ok(()),
-                        Ok(Err(e)) => Err(e.to_string()),
-                        Err(_) => Err("task".to_owned()),
-                    };
-                    Message::WorkspaceMoved(key, result)
-                });
-                Task::batch([events, mover])
+                    .map_err(|e| match e {
+                        launcher::LaunchError::FreeRdpMissing => fl!("error-freerdp-missing"),
+                        launcher::LaunchError::BadPassword => fl!("error-password-chars"),
+                        other => fl!("error-launch", detail = format!("{other:?}")),
+                    })
+                })
+                .await
+                .unwrap_or_else(|_| Err(fl!("error-generic")));
+                Message::Launched(account, epoch, key, result)
+            })
+        };
+        let events = {
+            let (account, key) = (account.to_owned(), key.to_owned());
+            cosmic::task::stream(
+                rx.map(move |e| Message::Session(account.clone(), epoch, key.clone(), e)),
+            )
+        };
+        let session = started.chain(events);
+        if !settings.new_workspace {
+            return session;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        self.movers.insert(key.to_owned(), stop.clone());
+        let title = launcher::safe_title(&window_title);
+        // The window appears after authentication: wait as long as the
+        // connection may take, plus the sign-in page.
+        let wait = std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 180);
+        let key = key.to_owned();
+        let mover = cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                crate::workspace::move_to_new_workspace(
+                    <AppModel as cosmic::Application>::APP_ID,
+                    &title,
+                    wait,
+                    &stop,
+                )
+            })
+            .await;
+            let result = match result {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err("task".to_owned()),
+            };
+            Message::WorkspaceMoved(key, result)
+        });
+        Task::batch([session, mover])
+    }
+
+    /// FreeRDP has started (or couldn't). A session nobody wants any more
+    /// (disconnected, signed out or quitting meanwhile) is stopped at once.
+    pub(super) fn launched(
+        &mut self,
+        account: &str,
+        epoch: u64,
+        key: String,
+        result: Result<launcher::Session, String>,
+    ) -> Task<cosmic::Action<Message>> {
+        let (owner, stop) = self
+            .launching
+            .remove(&key)
+            .unwrap_or_else(|| (account.to_owned(), true));
+        let current = self.account(account).is_some_and(|a| a.epoch == epoch);
+        match result {
+            Ok(session) => {
+                if self.quit == Quit::Stopping {
+                    // `continue_quit` ends it with the others.
+                } else if stop || !current {
+                    session.disconnect();
+                }
+                self.running.insert(
+                    key,
+                    Running {
+                        account: owner,
+                        session,
+                    },
+                );
             }
-            Err(e) => {
-                let text = match e {
-                    launcher::LaunchError::FreeRdpMissing => fl!("error-freerdp-missing"),
-                    launcher::LaunchError::BadPassword => fl!("error-password-chars"),
-                    other => fl!("error-launch", detail = format!("{other:?}")),
-                };
-                self.connections
-                    .insert(key.to_owned(), Connection::Failed(text));
-                Task::none()
+            Err(text) => {
+                if let Some(stop) = self.movers.remove(&key) {
+                    stop.store(true, Ordering::SeqCst);
+                }
+                self.pending_logon.remove(&key);
+                if current {
+                    self.connections.insert(key, Connection::Failed(text));
+                } else {
+                    self.connections.remove(&key);
+                }
             }
         }
+        if self.quit == Quit::Stopping {
+            return self.continue_quit();
+        }
+        Task::none()
+    }
+
+    /// Quitting: once nothing is starting any more, ends every session and
+    /// sign-in, waits for FreeRDP to be gone, then exits.
+    pub(super) fn continue_quit(&mut self) -> Task<cosmic::Action<Message>> {
+        if !self.launching.is_empty() {
+            return Task::none(); // `launched` calls this again
+        }
+        for stop in self.movers.values() {
+            stop.store(true, Ordering::SeqCst);
+        }
+        if let Some(Adding {
+            cancel: Some(c), ..
+        }) = &self.adding
+        {
+            c.cancel();
+        }
+        for a in &self.accounts {
+            if let AccountState::SigningIn { cancel } = &a.state {
+                cancel.cancel();
+            }
+        }
+        let sessions: Vec<launcher::Session> =
+            self.running.drain().map(|(_, r)| r.session).collect();
+        if !sessions.is_empty() {
+            crate::app_log!("quitting: ending {} session(s)", sessions.len());
+        }
+        cosmic::task::future(async move {
+            let _ = tokio::task::spawn_blocking(move || {
+                launcher::stop_all(&sessions, launcher::STOP_GRACE);
+                launcher::clean_stale_runtime_dirs();
+            })
+            .await;
+            Message::ReadyToQuit
+        })
+    }
+
+    /// Asks before quitting while desktops are open.
+    pub(super) fn quit_dialog(&self) -> Element<'_, Message> {
+        let open = u32::try_from(self.running.len() + self.launching.len()).unwrap_or(u32::MAX);
+        widget::dialog()
+            .title(fl!("quit-title"))
+            .body(fl!("quit-body", count = open))
+            .primary_action(
+                widget::button::destructive(fl!("quit-disconnect")).on_press(Message::QuitConfirm),
+            )
+            .secondary_action(widget::button::standard(fl!("cancel")).on_press(Message::QuitCancel))
+            .into()
     }
 
     pub(super) fn session_event(&mut self, key: &str, event: SessionEvent) {
@@ -330,6 +458,7 @@ impl AppModel {
             }
             SessionEvent::Ended { end, log } => {
                 self.running.remove(key);
+                self.launching.remove(key);
                 if let Some(stop) = self.movers.remove(key) {
                     stop.store(true, Ordering::SeqCst);
                 }

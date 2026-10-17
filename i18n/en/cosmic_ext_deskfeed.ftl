@@ -23,6 +23,12 @@ keyring-unavailable = the system keyring isn't available.
 keyring-dismissed = the keyring stayed locked.
 keyring-malformed = the saved data couldn't be read.
 cancel = Cancel
+quit-title = Quit Deskfeed?
+quit-body = { $count ->
+    [one] A desktop is open. Quitting disconnects it.
+   *[other] { $count } desktops are open. Quitting disconnects them.
+}
+quit-disconnect = Disconnect and quit
 refresh = Refresh
 connect = Connect
 unofficial-notice = Deskfeed is an unofficial community app that works with Azure Virtual Desktop and Windows 365. It is not a Microsoft product. For compatibility it signs in with Microsoft's public Remote Desktop client identity.

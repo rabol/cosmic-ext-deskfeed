@@ -356,37 +356,63 @@ pub fn clean_stale_runtime_dirs() {
     }
 }
 
-/// A running FreeRDP session.
+/// A running FreeRDP session. Clones refer to the same process.
+#[derive(Clone)]
 pub struct Session {
     child: Arc<Mutex<Child>>,
     pgid: i32,
 }
 
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("pgid", &self.pgid)
+            .finish_non_exhaustive()
+    }
+}
+
+/// How long FreeRDP gets to end by itself before it is killed.
+pub const STOP_GRACE: Duration = Duration::from_secs(5);
+
 impl Session {
-    /// Asks FreeRDP to end, then forces it after a grace period. Only this
-    /// session's process group is signalled.
+    /// Asks FreeRDP to end, then forces it after a grace period, in the
+    /// background. Only this session's process group is signalled.
     pub fn disconnect(&self) {
-        let pgid = self.pgid;
-        let child = self.child.clone();
-        std::thread::spawn(move || {
-            // SAFETY: plain syscall; negative pid = our own child's group.
-            unsafe { libc::kill(-pgid, libc::SIGTERM) };
-            for _ in 0..50 {
-                std::thread::sleep(Duration::from_millis(100));
-                if child
-                    .lock()
-                    .expect("not poisoned")
-                    .try_wait()
-                    .ok()
-                    .flatten()
-                    .is_some()
-                {
-                    return;
-                }
-            }
-            // SAFETY: as above.
-            unsafe { libc::kill(-pgid, libc::SIGKILL) };
-        });
+        let this = self.clone();
+        std::thread::spawn(move || stop_all(&[this], STOP_GRACE));
+    }
+
+    fn exited(&self) -> bool {
+        self.child
+            .lock()
+            .expect("not poisoned")
+            .try_wait()
+            .ok()
+            .flatten()
+            .is_some()
+    }
+}
+
+/// Ends sessions and waits for them: SIGTERM to each process group, up to
+/// `grace` for FreeRDP to exit, then SIGKILL to each group, which also
+/// reaches anything FreeRDP started that is still running (the sign-in
+/// helper). Blocks; not for the UI thread.
+pub fn stop_all(sessions: &[Session], grace: Duration) {
+    for s in sessions {
+        // SAFETY: plain syscall; negative pid = our own child's group.
+        unsafe { libc::kill(-s.pgid, libc::SIGTERM) };
+    }
+    let deadline = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < deadline && !sessions.iter().all(Session::exited) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for s in sessions {
+        // The group ID stays reserved while any process is still in the
+        // group, so this can't reach an unrelated process group; an empty
+        // group gives ESRCH, which is fine.
+        // SAFETY: as above.
+        unsafe { libc::kill(-s.pgid, libc::SIGKILL) };
+        let _ = s.child.lock().expect("not poisoned").wait();
     }
 }
 
@@ -932,6 +958,60 @@ mod tests {
                 SessionEvent::Connected => panic!("unexpected Connected"),
             }
         }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A FreeRDP that ignores SIGTERM and leaves a child behind (like the
+    /// sign-in helper) is still ended completely, child included.
+    #[test]
+    fn stopping_ends_the_whole_process_group() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("avd-launch-stop-{}", std::process::id()));
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let out = dir.join("child.txt");
+        let fake = dir.join("fake");
+        fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh
+cat <&3 >/dev/null
+trap '' TERM
+sleep 300 &
+echo $! > '{}'
+sleep 300
+",
+                out.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let s = spec(LogonSetting::Automatic, Some("pw"), false);
+        let session =
+            launch_with(&fake, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
+        let child: i32 = (0..100)
+            .find_map(|_| {
+                std::thread::sleep(Duration::from_millis(50));
+                fs::read_to_string(&out).ok()?.trim().parse().ok()
+            })
+            .expect("fake started its child");
+
+        stop_all(&[session], Duration::from_millis(300));
+
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+            SessionEvent::Ended { .. }
+        ));
+        // The child is gone (or a zombie waiting for init to reap it).
+        let gone = (0..40).any(|_| {
+            let state = fs::read_to_string(format!("/proc/{child}/stat")).ok();
+            if state.is_none_or(|s| s.rsplit(") ").next().is_some_and(|r| r.starts_with('Z'))) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+            false
+        });
+        assert!(gone, "child {child} still running");
         fs::remove_dir_all(dir).unwrap();
     }
 

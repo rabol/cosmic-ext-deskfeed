@@ -480,9 +480,31 @@ impl AppModel {
         if let AccountState::SigningIn { cancel } = &account.state {
             cancel.cancel();
         }
-        for key in account.resource_keys() {
-            if let Some(s) = self.running.remove(&key) {
-                s.disconnect();
+        // Its desktops by the sessions' owner, not only the current list: a
+        // refresh may have removed a desktop that is still connected.
+        let mut keys: HashSet<String> = account.resource_keys().into_iter().collect();
+        keys.extend(
+            self.running
+                .iter()
+                .filter(|(_, r)| r.account == id)
+                .map(|(k, _)| k.clone()),
+        );
+        keys.extend(
+            self.launching
+                .iter()
+                .filter(|(_, (owner, _))| owner == id)
+                .map(|(k, _)| k.clone()),
+        );
+        for key in keys {
+            if let Some(r) = self.running.remove(&key) {
+                r.session.disconnect();
+            }
+            // Stopped as soon as it has started (`launched`).
+            if let Some((_, stop)) = self.launching.get_mut(&key) {
+                *stop = true;
+            }
+            if let Some(stop) = self.movers.remove(&key) {
+                stop.store(true, Ordering::SeqCst);
             }
             self.connections.remove(&key);
             self.pending_logon.remove(&key);
