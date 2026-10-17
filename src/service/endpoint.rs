@@ -25,21 +25,23 @@ pub enum Role {
     ConnectionFile,
     /// A resource icon.
     Icon,
+    /// Microsoft's ID token signing keys (JWKS). No bearer token.
+    SigningKeys,
 }
 
 impl Role {
     /// Roles whose requests carry the AVD bearer token.
     pub fn sends_avd_token(self) -> bool {
-        !matches!(self, Self::Token)
+        !matches!(self, Self::Token | Self::SigningKeys)
     }
 
     /// Largest accepted response body.
     pub fn max_body(self) -> u64 {
         match self {
             Self::Token => 64 * 1024,
+            Self::SigningKeys | Self::ConnectionFile => 256 * 1024,
             Self::FeedDiscovery | Self::Icon => 1024 * 1024,
             Self::Feed => 4 * 1024 * 1024,
-            Self::ConnectionFile => 256 * 1024,
         }
     }
 }
@@ -91,6 +93,7 @@ impl EndpointPolicy {
                 // Token endpoints are /{tenant}/oauth2/v2.0/token; checked in
                 // `check` because the tenant segment varies.
                 rule(Role::Token, login, "/"),
+                rule(Role::SigningKeys, login, "/common/discovery/v2.0/keys"),
                 rule(Role::FeedDiscovery, feed, "/api/arm/feeddiscovery"),
                 rule(Role::Feed, feed, "/api/arm/feeddiscovery/tenants"),
                 rule(Role::ConnectionFile, feed, "/api/arm/feeddiscovery/tenants"),
