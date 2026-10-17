@@ -33,6 +33,7 @@ const FREERDP_BINARIES: &[&str] = &["sdl-freerdp3", "sdl-freerdp"];
 /// Log line FreeRDP writes once the session is set up.
 const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
 const MAX_LOG_LINES: usize = 60;
+const STATE_LOGGER: &str = "com.freerdp.core.rdp";
 
 const ENV_ALLOWLIST: &[&str] = &[
     "WAYLAND_DISPLAY",
@@ -346,6 +347,12 @@ fn spawn_freerdp(
         }
     }
     cmd.env("COSMIC_EXT_AVD_SIGNIN_PROFILE", profile);
+    // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it
+    // stopped. This logger prints no names, passwords or tokens (FreeRDP
+    // 3.32.2 `libfreerdp/core/rdp.c`). An environment variable, because
+    // `/log-filters:` comes too late for loggers that already exist
+    // (`winpr/libwinpr/utils/wlog/wlog.c` caches the level on creation).
+    cmd.env("WLOG_FILTER", format!("{STATE_LOGGER}:DEBUG"));
     // SAFETY: only async-signal-safe calls (dup2, fcntl) between fork and
     // exec. The pipe's read end becomes fd 3 without close-on-exec.
     unsafe {
@@ -457,13 +464,15 @@ struct Log {
 }
 
 impl Log {
-    /// Keeps warnings and errors (bounded). Returns `true` the first time
+    /// Keeps warnings, errors and connection steps (bounded). Returns `true` the first time
     /// the connected marker appears.
     fn push(&mut self, line: &str) -> bool {
         if line.contains("LOGON_FAILURE") {
             self.logon_failure = true;
         }
-        if line.contains("[ERROR]") || line.contains("[WARN]") {
+        let state_change =
+            line.contains(&format!("[DEBUG][{STATE_LOGGER}]")) && line.contains(" --> ");
+        if line.contains("[ERROR]") || line.contains("[WARN]") || state_change {
             if self.lines.len() == MAX_LOG_LINES {
                 self.lines.remove(0);
             }
@@ -605,6 +614,9 @@ mod tests {
         log.push("[ERROR][com.freerdp.core.rdstls] - RDSTLS_RESULT_LOGON_FAILURE [0x0000052E]");
         assert!(log.logon_failure);
         assert_eq!(log.lines.len(), 1);
+        log.push("[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_NEGO --> CONNECTION_STATE_AAD");
+        log.push("[DEBUG][com.freerdp.core.rdp] - [rdp_recv_pdu]: recv Data PDU, length: 12");
+        assert_eq!(log.lines.len(), 2);
         for i in 0..100 {
             log.push(&format!("[WARN] line {i}"));
         }
