@@ -35,7 +35,7 @@ const FREERDP_BINARIES: &[&str] = &["sdl-freerdp3", "sdl-freerdp"];
 const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
-const ACTIVATION_TIMEOUT_MS: u32 = 60_000;
+const ACTIVATION_TIMEOUT_MS: u32 = 120_000;
 
 const ENV_ALLOWLIST: &[&str] = &[
     "WAYLAND_DISPLAY",
@@ -186,10 +186,11 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
         "/log-level:info".to_owned(),
         // FreeRDP waits `TcpAckTimeout` (default 9000 ms) for the session
         // host to finish activation, including the Entra exchange
-        // (`connection.c` `rdp_client_wait_for_activation`). The owner's
-        // host didn't answer within 9 s twice (2026-10-17); 60 s measures
-        // how long it really takes. `/timeout` is FreeRDP's documented
-        // setting for this ("use if you encounter timeout failures").
+        // (`connection.c` `rdp_client_wait_for_activation`). Measured on the
+        // owner's host (2026-10-17), the Entra exchange alone took 0.45 s,
+        // 24.3 s and 49.8 s, so 9 s fails and 60 s is too close. `/timeout`
+        // is FreeRDP's documented setting for this ("use if you encounter
+        // timeout failures"); its maximum is 600 s.
         format!("/timeout:{ACTIVATION_TIMEOUT_MS}"),
     ]);
     if args.iter().any(|a| a.contains(['\n', '\r', '\0'])) {
