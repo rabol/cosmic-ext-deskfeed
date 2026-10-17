@@ -52,20 +52,23 @@ pub enum RequestError {
     BadStartUrl,
 }
 
+/// An HTTPS URL on the Microsoft sign-in host, without port or user info.
+pub fn valid_start_url(s: &str) -> Option<Url> {
+    let url = Url::parse(s).ok()?;
+    (url.scheme() == "https"
+        && url.host_str().map(str::to_ascii_lowercase).as_deref() == Some(LOGIN_HOST)
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none())
+    .then_some(url)
+}
+
 pub fn parse_request(line: &str) -> Result<ValidRequest, RequestError> {
     if line.len() > MAX_REQUEST_LEN {
         return Err(RequestError::TooLong);
     }
     let req: Request = serde_json::from_str(line).map_err(|_| RequestError::Json)?;
-    let url = Url::parse(&req.url).map_err(|_| RequestError::BadStartUrl)?;
-    if url.scheme() != "https"
-        || url.host_str().map(str::to_ascii_lowercase).as_deref() != Some(LOGIN_HOST)
-        || url.port().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return Err(RequestError::BadStartUrl);
-    }
+    let url = valid_start_url(&req.url).ok_or(RequestError::BadStartUrl)?;
     let timeout_ms = match req.timeout_ms {
         0 => 5 * 60 * 1000,
         t => t.min(MAX_TIMEOUT_MS),
@@ -94,11 +97,76 @@ pub enum Navigation {
     Finished(Reply),
 }
 
+#[cfg(test)]
 pub fn decide(uri: &str) -> Navigation {
+    decide_for(uri, &RedirectTarget::NativeClient)
+}
+
+/// The redirect a sign-in waits for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RedirectTarget {
+    /// `https://login.microsoftonline.com/<tenant>/oauth2/nativeclient`.
+    NativeClient,
+    /// `ms-appx-web://Microsoft.AAD.BrokerPlugin/<client id>`, which FreeRDP
+    /// uses for the AVD gateway token in GUI clients.
+    Broker { client_id: String },
+}
+
+impl RedirectTarget {
+    /// Accepts only the two redirects FreeRDP 3.32.2 uses with Microsoft's
+    /// public client. Anything else is refused, so a helper request can't
+    /// be turned into "send me the code for some other site".
+    pub fn from_freerdp(redirect_uri: &str) -> Option<Self> {
+        let url = Url::parse(redirect_uri.trim()).ok()?;
+        if url.query().is_some() || url.fragment().is_some() {
+            return None;
+        }
+        if url.scheme() == "https" {
+            return is_native_client(&url).then_some(Self::NativeClient);
+        }
+        if url.scheme().eq_ignore_ascii_case(BROKER_SCHEME)
+            && url
+                .host_str()
+                .is_some_and(|h| h.eq_ignore_ascii_case(BROKER_HOST))
+        {
+            let id = url.path().trim_start_matches('/');
+            if !id.is_empty()
+                && id.len() <= 64
+                && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+            {
+                return Some(Self::Broker {
+                    client_id: id.to_ascii_lowercase(),
+                });
+            }
+        }
+        None
+    }
+
+    fn matches(&self, url: &Url) -> bool {
+        match self {
+            Self::NativeClient => is_native_client(url),
+            Self::Broker { client_id } => {
+                url.scheme().eq_ignore_ascii_case(BROKER_SCHEME)
+                    && url
+                        .host_str()
+                        .is_some_and(|h| h.eq_ignore_ascii_case(BROKER_HOST))
+                    && url
+                        .path()
+                        .trim_start_matches('/')
+                        .eq_ignore_ascii_case(client_id)
+            }
+        }
+    }
+}
+
+pub const BROKER_SCHEME: &str = "ms-appx-web";
+const BROKER_HOST: &str = "microsoft.aad.brokerplugin";
+
+pub fn decide_for(uri: &str, target: &RedirectTarget) -> Navigation {
     let Ok(url) = Url::parse(uri) else {
         return Navigation::Block;
     };
-    if is_native_client(&url) {
+    if target.matches(&url) {
         return Navigation::Finished(reply_from_redirect(&url));
     }
     // Any HTTPS host is allowed, because federated identity providers
@@ -110,13 +178,26 @@ pub fn decide(uri: &str) -> Navigation {
     }
 }
 
+/// `https://login.microsoftonline.com/<tenant>/oauth2/nativeclient`, where
+/// `<tenant>` is one plain path segment (FreeRDP may use `common` or the
+/// tenant ID).
 fn is_native_client(url: &Url) -> bool {
-    url.scheme() == "https"
-        && url.host_str().map(str::to_ascii_lowercase).as_deref() == Some(LOGIN_HOST)
-        && url.port().is_none()
-        && url
-            .path()
-            .eq_ignore_ascii_case("/common/oauth2/nativeclient")
+    if url.scheme() != "https"
+        || url.host_str().map(str::to_ascii_lowercase).as_deref() != Some(LOGIN_HOST)
+        || url.port().is_some()
+        || !url.username().is_empty()
+    {
+        return false;
+    }
+    let mut parts = url.path().split('/');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(""), Some(tenant), Some(a), Some(b), None)
+            if !tenant.is_empty()
+                && tenant.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.'))
+                && a.eq_ignore_ascii_case("oauth2")
+                && b.eq_ignore_ascii_case("nativeclient")
+    )
 }
 
 /// The single line the helper writes to stdout.
@@ -333,5 +414,82 @@ mod tests {
                 "{q}"
             );
         }
+    }
+
+    #[test]
+    fn freerdp_redirect_targets() {
+        assert_eq!(
+            RedirectTarget::from_freerdp(
+                "https://login.microsoftonline.com/common/oauth2/nativeclient"
+            ),
+            Some(RedirectTarget::NativeClient)
+        );
+        assert_eq!(
+            RedirectTarget::from_freerdp(
+                "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/oauth2/nativeclient"
+            ),
+            Some(RedirectTarget::NativeClient)
+        );
+        assert_eq!(
+            RedirectTarget::from_freerdp(
+                "ms-appx-web://Microsoft.AAD.BrokerPlugin/a85cf173-4192-42f8-81fa-777a763e6e2c"
+            ),
+            Some(RedirectTarget::Broker {
+                client_id: "a85cf173-4192-42f8-81fa-777a763e6e2c".into()
+            })
+        );
+        for bad in [
+            "https://evil.example/cb",
+            "https://login.microsoftonline.com/common/oauth2/authorize",
+            "https://login.microsoftonline.com/a/b/oauth2/nativeclient",
+            "https://login.microsoftonline.com/common/oauth2/nativeclient?x=1",
+            "ms-appx-web://evil.example/a85cf173",
+            "ms-appx-web://Microsoft.AAD.BrokerPlugin/",
+            "ms-appx-web://Microsoft.AAD.BrokerPlugin/../../x",
+            "http://localhost:1234/",
+        ] {
+            assert_eq!(RedirectTarget::from_freerdp(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn broker_redirect_is_caught() {
+        let target = RedirectTarget::from_freerdp(
+            "ms-appx-web://Microsoft.AAD.BrokerPlugin/a85cf173-4192-42f8-81fa-777a763e6e2c",
+        )
+        .unwrap();
+        assert_eq!(
+            decide_for(
+                "ms-appx-web://microsoft.aad.brokerplugin/A85CF173-4192-42F8-81FA-777A763E6E2C?code=c1&state=s1",
+                &target
+            ),
+            Navigation::Finished(Reply::Ok {
+                code: "c1".into(),
+                state: "s1".into()
+            })
+        );
+        // Another broker client ID is not ours.
+        assert_eq!(
+            decide_for(
+                "ms-appx-web://Microsoft.AAD.BrokerPlugin/other?code=c&state=s",
+                &target
+            ),
+            Navigation::Block
+        );
+        // With the broker target, the nativeclient page is ordinary navigation.
+        assert_eq!(
+            decide_for(&format!("{NATIVE_CLIENT}?code=c&state=s"), &target),
+            Navigation::Allow
+        );
+    }
+
+    #[test]
+    fn tenant_specific_nativeclient_matches() {
+        assert!(matches!(
+            decide(
+                "https://login.microsoftonline.com/organizations/oauth2/nativeclient?code=c&state=s"
+            ),
+            Navigation::Finished(Reply::Ok { .. })
+        ));
     }
 }
