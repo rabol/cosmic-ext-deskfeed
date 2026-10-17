@@ -64,8 +64,7 @@ pub fn load(dir: &Path) -> Vec<StoredCookie> {
         return Vec::new();
     };
     let mut text = String::new();
-    if file.take(MAX_FILE + 1).read_to_string(&mut text).is_err() || text.len() as u64 > MAX_FILE
-    {
+    if file.take(MAX_FILE + 1).read_to_string(&mut text).is_err() || text.len() as u64 > MAX_FILE {
         return Vec::new();
     }
     let mut cookies: Vec<StoredCookie> = serde_json::from_str(&text).unwrap_or_default();

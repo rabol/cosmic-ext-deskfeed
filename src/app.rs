@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use base64::Engine as _;
 use cosmic::app::context_drawer;
@@ -17,7 +18,7 @@ use url::Url;
 
 use crate::auth::attempt::ClientConfig;
 use crate::auth::signin::{self, Cancel, SignInError, SignedIn};
-use crate::auth::token::{Secret, TokenError};
+use crate::auth::token::{self, Secret, TokenError};
 use crate::config::Config;
 use crate::fl;
 use crate::service::discovery::{self, FetchError};
@@ -130,7 +131,13 @@ pub enum Message {
     Discovered(u64, Result<Vec<WorkspaceView>, String>),
     SignOut,
     Connect(String),
-    ConnectionFileReady(u64, String, Result<Arc<ConnectionFile>, String>),
+    /// The connection file, and the account with renewed tokens if they
+    /// had to be renewed first.
+    ConnectionFileReady(
+        u64,
+        String,
+        Result<(Arc<ConnectionFile>, Arc<SignedIn>), String>,
+    ),
     PasswordInput(PasswordText),
     TogglePasswordVisible,
     LogonSelected(usize),
@@ -399,6 +406,14 @@ impl cosmic::Application for AppModel {
             Message::Connect(key) => return self.prepare_connection(&key),
             Message::ConnectionFileReady(generation, key, result) => {
                 if generation == self.generation {
+                    let result = result.map(|(connection, renewed)| {
+                        if let Session::Ready { account, .. } = &mut self.session
+                            && !Arc::ptr_eq(account, &renewed)
+                        {
+                            *account = renewed;
+                        }
+                        connection
+                    });
                     return self.connection_file_ready(key, result);
                 }
             }
@@ -617,6 +632,9 @@ impl AppModel {
         let key = key.to_owned();
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
+                // The access token also goes to FreeRDP, so it must stay
+                // valid through the connection.
+                let account = renew_if_needed(&http, account)?;
                 let resp = http
                     .get(
                         &url,
@@ -625,7 +643,7 @@ impl AppModel {
                     )
                     .map_err(|e| describe_fetch_error(&FetchError::Http(e)))?;
                 ConnectionFile::parse(&resp.body)
-                    .map(Arc::new)
+                    .map(|c| (Arc::new(c), account))
                     .map_err(|e| fl!("error-bad-connection-file", detail = format!("{e:?}")))
             })
             .await
@@ -652,8 +670,8 @@ impl AppModel {
         // Entra sign-in first: it needs no password, so trying it can't
         // count toward an account lockout. Password logon only when the
         // user chose it, or after Entra sign-in failed for this desktop.
-        let entra_first = connection.entra_sso()
-            || matches!(remembered, None | Some(LogonSetting::EntraSignIn));
+        let entra_first =
+            connection.entra_sso() || matches!(remembered, None | Some(LogonSetting::EntraSignIn));
         if entra_first && !self.entra_failed.contains(&key) {
             return self.launch(&key, &connection, LogonSetting::EntraSignIn, None);
         }
@@ -738,6 +756,8 @@ impl AppModel {
             logon: logon.clone(),
             helper,
             profile,
+            gateway_token: (!account.tokens.needs_refresh(Instant::now()))
+                .then(|| account.tokens.access_token.clone()),
         };
         // No secrets here: the setting and, for a custom domain, its name.
         eprintln!("Starting FreeRDP with logon setting {logon:?}");
@@ -795,8 +815,8 @@ impl AppModel {
                     matches!(self.connections.get(key), Some(Connection::Connected));
                 // Once Entra sign-in has worked for a desktop, a failure is
                 // more likely temporary; keep using it.
-                let worked_before = self.config.logon_settings.get(key)
-                    == Some(&LogonSetting::EntraSignIn);
+                let worked_before =
+                    self.config.logon_settings.get(key) == Some(&LogonSetting::EntraSignIn);
                 let was_entra = !was_connected
                     && !worked_before
                     && matches!(pending, Some((LogonSetting::EntraSignIn, _)));
@@ -849,6 +869,25 @@ impl AppModel {
         if let Some(handler) = &self.config_handler {
             let _ = self.config.set_logon_settings(handler, map);
         }
+    }
+}
+
+/// Renews the tokens when the access token expires within the margin.
+/// Blocking.
+fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, String> {
+    if !account.tokens.needs_refresh(Instant::now()) {
+        return Ok(account);
+    }
+    let Some(refresh_token) = &account.tokens.refresh_token else {
+        return Err(fl!("error-session-expired"));
+    };
+    match token::refresh(http, &ClientConfig::public_remote_desktop(), refresh_token) {
+        Ok(tokens) => Ok(Arc::new(SignedIn {
+            identity: account.identity.clone(),
+            tokens,
+        })),
+        Err(TokenError::Transient(_)) => Err(fl!("error-generic")),
+        Err(_) => Err(fl!("error-session-expired")),
     }
 }
 

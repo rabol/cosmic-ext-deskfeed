@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use super::rdpfile::ConnectionFile;
 use crate::auth::token::Secret;
+use crate::service::http::BearerToken;
 
 /// FreeRDP clients we know, in order of preference (ADR 0004).
 const FREERDP_BINARIES: &[&str] = &["sdl-freerdp3", "sdl-freerdp"];
@@ -89,6 +90,11 @@ pub struct LaunchSpec {
     pub helper: PathBuf,
     /// The account's sign-in web view profile, for silent token requests.
     pub profile: PathBuf,
+    /// The app's own access token for the AVD service. FreeRDP asks for
+    /// exactly this token (same client ID and scope, FreeRDP 3.32.2
+    /// `libfreerdp/core/settings.c`) and skips its own request when one is
+    /// given (`gateway/arm.c`), which saves the user a sign-in prompt.
+    pub gateway_token: Option<BearerToken>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,10 +143,20 @@ pub fn find_freerdp() -> Option<PathBuf> {
 
 /// The argument lines for `/args-from`. `rdp_path` must end in `.rdp`.
 fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchError> {
-    let mut args = vec![
-        rdp_path.to_string_lossy().into_owned(),
-        "/gateway:type:arm".to_owned(),
-    ];
+    let gateway = match spec.gateway_token.as_ref().map(BearerToken::expose) {
+        // A JWT: base64url parts and dots. Anything else could break the
+        // comma-separated option, so FreeRDP then fetches its own token.
+        Some(t)
+            if !t.is_empty()
+                && t.len() <= 16 * 1024
+                && t.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) =>
+        {
+            format!("/gateway:type:arm,bearer:{t}")
+        }
+        _ => "/gateway:type:arm".to_owned(),
+    };
+    let mut args = vec![rdp_path.to_string_lossy().into_owned(), gateway];
     let entra = spec.connection.entra_sso() || spec.logon == LogonSetting::EntraSignIn;
     args.push(if entra { "/sec:aad" } else { "/sec:nla" }.to_owned());
     args.push(format!("/azure:auth-helper:{}", spec.helper.display()));
@@ -516,6 +532,7 @@ mod tests {
             logon,
             helper: PathBuf::from("/usr/libexec/cosmic-ext-avd/cosmic-ext-avd-signin"),
             profile: PathBuf::from("/tmp/p"),
+            gateway_token: None,
         }
     }
 
@@ -567,6 +584,17 @@ mod tests {
                 !a.iter()
                     .any(|x| x.starts_with("/p:") || x.starts_with("/d:"))
             );
+        }
+    }
+
+    #[test]
+    fn gateway_token_only_when_well_formed() {
+        let mut s = spec(LogonSetting::EntraSignIn, None, false);
+        s.gateway_token = Some(BearerToken::new("eyJ0.eyJh-b_c.sig".into()));
+        assert_eq!(args(&s)[1], "/gateway:type:arm,bearer:eyJ0.eyJh-b_c.sig");
+        for bad in ["a,type:rpc", "a b", "", "a:b"] {
+            s.gateway_token = Some(BearerToken::new(bad.into()));
+            assert_eq!(args(&s)[1], "/gateway:type:arm", "{bad:?}");
         }
     }
 
@@ -783,6 +811,7 @@ mod tests {
             logon: LogonSetting::EmptyDomain,
             helper: PathBuf::from("/nonexistent/helper"),
             profile: dir.join("profile"),
+            gateway_token: None,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         let freerdp = find_freerdp().expect("sdl-freerdp3 installed");

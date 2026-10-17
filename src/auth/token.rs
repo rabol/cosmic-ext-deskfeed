@@ -16,10 +16,8 @@ use crate::service::endpoint::Role;
 use crate::service::http::{BearerToken, Http, HttpError};
 
 /// Renew this long before the access token expires.
-#[allow(dead_code)] // Token renewal is wired up next.
 const EXPIRY_MARGIN: Duration = Duration::from_mins(5);
 
-#[allow(dead_code)] // `expires_at` is used by token renewal, next.
 pub struct TokenSet {
     pub access_token: BearerToken,
     pub refresh_token: Option<Secret>,
@@ -37,7 +35,6 @@ impl fmt::Debug for TokenSet {
     }
 }
 
-#[allow(dead_code)] // Token renewal is wired up next.
 impl TokenSet {
     pub fn needs_refresh(&self, now: Instant) -> bool {
         now + EXPIRY_MARGIN >= self.expires_at
@@ -127,7 +124,6 @@ pub fn exchange_code(
     request(http, config, &form, None)
 }
 
-#[allow(dead_code)] // Token renewal is wired up next.
 /// Refreshes the tokens. Microsoft may rotate the refresh token; the caller
 /// must store the new one (if any) and only then forget the old one.
 pub fn refresh(

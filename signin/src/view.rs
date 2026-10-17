@@ -13,12 +13,12 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
-use gtk::{gio, glib};
 use gtk::prelude::*;
+use gtk::{gio, glib};
 use webkit6::prelude::*;
 use webkit6::{
-    CookieManager, CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkSession, PolicyDecision,
-    PolicyDecisionType, ResponsePolicyDecision, Settings, WebView,
+    CookieManager, CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkSession,
+    PolicyDecision, PolicyDecisionType, ResponsePolicyDecision, Settings, WebView,
 };
 
 use crate::protocol::{self, BROKER_SCHEME, Navigation, RedirectTarget, Reply};
@@ -234,7 +234,11 @@ impl SignInView {
     /// Loads the shared session cookies into this web view, then `url`.
     fn restore_then_load(&self, url: String) {
         let inner = &self.0;
-        let stored = inner.jar.as_deref().map(session_jar::load).unwrap_or_default();
+        let stored = inner
+            .jar
+            .as_deref()
+            .map(session_jar::load)
+            .unwrap_or_default();
         let Some(manager) = inner.cookies.clone().filter(|_| !stored.is_empty()) else {
             inner.webview.load_uri(&url);
             return;

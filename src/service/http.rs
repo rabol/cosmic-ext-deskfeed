@@ -39,6 +39,11 @@ impl BearerToken {
     pub fn new(token: String) -> Self {
         Self(token)
     }
+
+    /// The token, for handing to FreeRDP over its private argument pipe.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
 }
 
 impl fmt::Debug for BearerToken {
