@@ -90,7 +90,8 @@ pub enum CallbackError {
 enum State {
     Pending,
     Completed,
-    Cancelled,
+    /// Its lifetime ran out before a callback arrived.
+    Expired,
 }
 
 pub struct Attempt {
@@ -133,11 +134,6 @@ impl Attempt {
         })
     }
 
-    #[allow(dead_code)]
-    pub fn config(&self) -> &ClientConfig {
-        &self.config
-    }
-
     /// The URL the sign-in web view opens.
     ///
     /// `login_hint` pre-selects the account on later sign-ins, so a browser
@@ -172,12 +168,6 @@ impl Attempt {
         same_endpoint(url, &self.config.redirect_uri)
     }
 
-    #[allow(dead_code)] // Used when the app cancels a pending attempt.
-    pub fn cancel(&mut self) {
-        if self.status == State::Pending {
-            self.status = State::Cancelled;
-        }
-    }
 
     /// Validates the callback URL and, on success, ends the attempt.
     /// Any callback, valid or not, after the first one is rejected.
@@ -194,7 +184,7 @@ impl Attempt {
             return Err(CallbackError::NotPending);
         }
         if now.duration_since(self.started) > self.lifetime {
-            self.status = State::Cancelled;
+            self.status = State::Expired;
             return Err(CallbackError::Expired);
         }
         // From here on the attempt is used up, whatever the outcome: a
@@ -496,12 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_and_expired_attempts_reject_callbacks() {
-        let mut a = attempt();
-        let cb = callback(&a, &format!("code=abc&state={}", a.state));
-        a.cancel();
-        assert_eq!(a.complete(&cb).unwrap_err(), CallbackError::NotPending);
-
+    fn expired_attempts_reject_callbacks() {
         let mut a = Attempt::with_lifetime(
             ClientConfig::public_remote_desktop(),
             Duration::from_secs(1),

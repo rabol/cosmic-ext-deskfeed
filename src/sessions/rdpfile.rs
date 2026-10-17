@@ -143,10 +143,6 @@ impl ConnectionFile {
         self.int("enablerdsaadauth") == Some(1)
     }
 
-    pub fn is_remote_app(&self) -> bool {
-        self.int("remoteapplicationmode") == Some(1)
-    }
-
     /// Serialized for FreeRDP: kept properties, then device defaults.
     pub fn to_freerdp_text(&self) -> String {
         let mut out = String::new();
@@ -299,11 +295,10 @@ mod tests {
         let bytes = std::fs::read(std::env::var("AVD_RDP_FILE").unwrap()).unwrap();
         let f = ConnectionFile::parse(&bytes).unwrap();
         println!(
-            "kept {} properties, dropped {}, entra_sso={}, remote_app={}",
+            "kept {} properties, dropped {}, entra_sso={}",
             f.props.len(),
             f.dropped,
-            f.entra_sso(),
-            f.is_remote_app()
+            f.entra_sso()
         );
     }
 }

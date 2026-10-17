@@ -5,4 +5,3 @@
 
 pub mod launcher;
 pub mod rdpfile;
-pub mod username;

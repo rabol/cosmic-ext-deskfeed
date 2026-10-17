@@ -53,10 +53,7 @@ impl fmt::Debug for BearerToken {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)] // Status and type are for callers that need them (icons).
 pub struct Response {
-    pub status: u16,
-    pub content_type: Option<String>,
     pub body: Vec<u8>,
 }
 
@@ -230,11 +227,6 @@ fn finish(mut resp: ureq::http::Response<ureq::Body>, role: Role) -> Result<Resp
     if (300..400).contains(&status) {
         return Err(HttpError::Redirected { status });
     }
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned);
     let body = resp
         .body_mut()
         .with_config()
@@ -243,11 +235,7 @@ fn finish(mut resp: ureq::http::Response<ureq::Body>, role: Role) -> Result<Resp
     if status >= 400 {
         return Err(HttpError::Status { status, body });
     }
-    Ok(Response {
-        status,
-        content_type,
-        body,
-    })
+    Ok(Response { body })
 }
 
 #[cfg(test)]
@@ -341,7 +329,6 @@ mod tests {
             .get(&server.url(FEED), Role::Feed, Some(&token()))
             .unwrap();
         assert_eq!(resp.body, b"<x/>");
-        assert_eq!(resp.content_type.as_deref(), Some("text/xml"));
         let reqs = server.requests();
         assert_eq!(reqs.len(), 1);
         let req = reqs[0].to_ascii_lowercase();

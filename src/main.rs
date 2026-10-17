@@ -11,8 +11,6 @@ mod secrets;
 mod service;
 mod settings;
 mod workspace;
-// Not wired into the UI yet; the password dialog will use it (ADR 0005).
-#[allow(dead_code)]
 mod sessions;
 
 fn main() -> cosmic::iced::Result {

@@ -45,7 +45,6 @@ impl TokenSet {
 #[derive(Clone, PartialEq, Eq)]
 pub struct Secret(String);
 
-#[allow(dead_code)] // Token renewal is wired up next.
 impl Secret {
     pub fn new(s: String) -> Self {
         Self(s)
