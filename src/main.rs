@@ -7,6 +7,7 @@ mod bounded_lines;
 mod cache;
 mod config;
 mod deps;
+mod display;
 mod i18n;
 mod log;
 mod secrets;

@@ -366,6 +366,8 @@ impl AppModel {
             let (account, key) = (account.to_owned(), key.to_owned());
             cosmic::task::future(async move {
                 let result = tokio::task::spawn_blocking(move || {
+                    let mut spec = spec;
+                    spec.settings.scale = crate::display::resolve_percent(spec.settings.scale);
                     launcher::launch(&spec, move |e| {
                         let _ = tx.unbounded_send(e);
                     })

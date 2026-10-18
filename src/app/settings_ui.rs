@@ -45,6 +45,18 @@ impl AppModel {
             Message::AppNumber(n, value) => {
                 self.edit_settings(Level::App, "", |s| s.set_number(n, Some(value)));
             }
+            Message::AppChoice(c, i) => {
+                let value = c.options().get(i).copied();
+                self.edit_settings(Level::App, "", |s| s.set_choice(c, value));
+            }
+            Message::AccountChoice(id, c, i) => {
+                let value = i.checked_sub(1).and_then(|i| c.options().get(i).copied());
+                self.edit_settings(Level::Account, &id, |s| s.set_choice(c, value));
+            }
+            Message::DesktopChoice(key, c, i) => {
+                let value = i.checked_sub(1).and_then(|i| c.options().get(i).copied());
+                self.edit_settings(Level::Desktop, &key, |s| s.set_choice(c, value));
+            }
             Message::AppLogSize(mib) => {
                 let (min, max, _) = crate::log::MAX_SIZE_MIB;
                 let mib = mib.clamp(min, max);
@@ -165,6 +177,17 @@ impl AppModel {
                 }))
                 .into()
         };
+        let choice = |c: Choice| -> Element<'_, Message> {
+            let (name, description) = choice_text(c);
+            let labels: Vec<String> = c.options().iter().map(|&v| choice_label(c, v)).collect();
+            let selected = c.options().iter().position(|&v| v == current.choice(c));
+            widget::settings::item::builder(name)
+                .description(description)
+                .control(widget::dropdown(labels, selected, move |i| {
+                    Message::AppChoice(c, i)
+                }))
+                .into()
+        };
         let (min, max, default) = crate::log::MAX_SIZE_MIB;
         let mib = self.config.log_max_mib.unwrap_or(default).clamp(min, max);
         let diagnostics = widget::settings::section()
@@ -187,6 +210,7 @@ impl AppModel {
             true,
             number,
             toggle,
+            choice,
             Some(diagnostics.into()),
         )
     }
@@ -204,14 +228,17 @@ impl AppModel {
             labels: (&self.follow_app_on, &self.follow_app_off),
             reset_label: fl!("use-app-setting"),
             follow_value: |value| fl!("follow-app-value", value = value),
+            follow_choice: |value| fl!("follow-app-choice", value = value),
         };
         let id_toggle = id.to_owned();
         let id_number = id.to_owned();
+        let id_choice = id.to_owned();
         rows.view(
             fl!("account-settings-hint"),
             true,
             move |t, i| Message::AccountToggle(id_toggle.clone(), t, i),
             move |n, v| Message::AccountNumber(id_number.clone(), n, v),
+            move |c, i| Message::AccountChoice(id_choice.clone(), c, i),
         )
     }
 
@@ -231,14 +258,17 @@ impl AppModel {
             labels: (&self.follow_account_on, &self.follow_account_off),
             reset_label: fl!("use-account-setting"),
             follow_value: |value| fl!("follow-account-value", value = value),
+            follow_choice: |value| fl!("follow-account-choice", value = value),
         };
         let key_toggle = key.to_owned();
         let key_number = key.to_owned();
+        let key_choice = key.to_owned();
         rows.view(
             fl!("desktop-settings-hint", account = account.label()),
             false,
             move |t, i| Message::DesktopToggle(key_toggle.clone(), t, i),
             move |n, v| Message::DesktopNumber(key_number.clone(), n, v),
+            move |c, i| Message::DesktopChoice(key_choice.clone(), c, i),
         )
     }
 }
@@ -255,6 +285,8 @@ struct OverrideRows<'a, F: Fn(String) -> String> {
     reset_label: String,
     /// "The app setting is …" for a number's description.
     follow_value: F,
+    /// "App setting (…)" as a choice's first entry.
+    follow_choice: fn(String) -> String,
 }
 
 impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
@@ -264,6 +296,7 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
         account_level: bool,
         on_toggle: impl Fn(Toggle, usize) -> Message + Clone + Send + Sync + 'static,
         on_number: impl Fn(Number, Option<u32>) -> Message + Clone + 'static,
+        on_choice: impl Fn(Choice, usize) -> Message + Clone + Send + Sync + 'static,
     ) -> Element<'a, Message> {
         let Self {
             inherited,
@@ -271,6 +304,7 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
             labels,
             reset_label,
             follow_value,
+            follow_choice,
         } = self;
         let current = inherited.with(Some(&own));
         let number = |n: Number| -> Element<'a, Message> {
@@ -310,7 +344,24 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
                 }))
                 .into()
         };
-        settings_column(hint, account_level, number, toggle, None)
+        let choice = |c: Choice| -> Element<'a, Message> {
+            let (name, description) = choice_text(c);
+            // First the level above's value, then the options.
+            let mut labels = vec![follow_choice(choice_label(c, inherited.choice(c)))];
+            labels.extend(c.options().iter().map(|&v| choice_label(c, v)));
+            let selected = own
+                .choice(c)
+                .and_then(|v| c.options().iter().position(|&o| o == v))
+                .map_or(0, |i| i + 1);
+            let on_choice = on_choice.clone();
+            widget::settings::item::builder(name)
+                .description(description)
+                .control(widget::dropdown(labels, Some(selected), move |i| {
+                    on_choice(c, i)
+                }))
+                .into()
+        };
+        settings_column(hint, account_level, number, toggle, choice, None)
     }
 }
 
@@ -321,6 +372,7 @@ fn settings_column<'a>(
     account_level: bool,
     number: impl Fn(Number) -> Element<'a, Message>,
     toggle: impl Fn(Toggle) -> Element<'a, Message>,
+    choice: impl Fn(Choice) -> Element<'a, Message>,
     last: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let mut column = vec![widget::text::body(hint).into()];
@@ -341,6 +393,7 @@ fn settings_column<'a>(
         .add(number(Number::ReconnectAttempts));
     let display = widget::settings::section()
         .title(fl!("settings-display"))
+        .add(choice(Choice::Scale))
         .add(toggle(Toggle::Fullscreen))
         .add(toggle(Toggle::AllMonitors))
         .add(toggle(Toggle::NewWorkspace));
@@ -371,6 +424,21 @@ fn number_spin<'a>(
         max,
         on_change,
     )
+}
+
+/// Name and description of a choice.
+fn choice_text(c: Choice) -> (String, String) {
+    match c {
+        Choice::Scale => (fl!("setting-scale"), fl!("setting-scale-desc")),
+    }
+}
+
+/// One option of a choice.
+fn choice_label(c: Choice, value: u32) -> String {
+    match (c, value) {
+        (Choice::Scale, 0) => fl!("scale-automatic"),
+        (Choice::Scale, v) => fl!("percent", value = v),
+    }
 }
 
 /// A number with its unit.

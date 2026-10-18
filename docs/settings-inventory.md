@@ -28,7 +28,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Printers, smart cards, serial ports, location, WebAuthn | off (forced in the `.rdp`) | A, Ac, C | `sessions/rdpfile.rs` `DEVICE_DEFAULTS` | Later: each needs FreeRDP research and a real-session test before it can be offered (spec §9) |
 | Drives, USB devices | off (feed's lists dropped) | A, Ac, C | `sessions/rdpfile.rs` | Later, as above |
 | Microsoft cloud (public, government, China) | public Azure | Ac | `service/endpoint.rs`, `service/http.rs` | Later: needs each cloud's endpoints and client registration |
-| Display scaling | not set | A, Ac, C | — | Roadmap item 5: derived from the monitor first, then an override |
+| Display scaling | Automatic (the X11 scale from XSETTINGS); 100–300 % | A, Ac, C | `settings.rs` `Choice::Scale`, `display.rs` | Done (ADR 0015) |
 | Light/dark theme | follows the desktop | A | — | Roadmap item 12 |
 
 ## Fixed on purpose

@@ -281,6 +281,12 @@ pub enum Message {
     OpenDesktopSettings(String),
     AppToggle(Toggle, bool),
     AppNumber(Number, u32),
+    /// Index into `Choice::options`.
+    AppChoice(Choice, usize),
+    /// 0 follows the app's setting, then `Choice::options` from 1.
+    AccountChoice(String, Choice, usize),
+    /// 0 follows the account's setting, then `Choice::options` from 1.
+    DesktopChoice(String, Choice, usize),
     /// Log rotation size in MiB.
     AppLogSize(u32),
     /// Account override: 0 follows the app's setting, 1 on, 2 off.

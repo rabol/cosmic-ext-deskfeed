@@ -33,7 +33,7 @@ use crate::service::http::{Http, HttpError};
 use crate::service::icons;
 use crate::sessions::launcher::{self, LaunchSpec, LogonSetting, SessionEnd, SessionEvent};
 use crate::sessions::rdpfile::{CameraPolicy, ConnectionFile, RdpError};
-use crate::settings::{self, ConnectionSettings, Number, Toggle};
+use crate::settings::{self, Choice, ConnectionSettings, Number, Toggle};
 
 mod account_flow;
 mod connect;
@@ -492,6 +492,9 @@ impl cosmic::Application for AppModel {
             | Message::AppToggle(..)
             | Message::AppNumber(..)
             | Message::AppLogSize(..)
+            | Message::AppChoice(..)
+            | Message::AccountChoice(..)
+            | Message::DesktopChoice(..)
             | Message::AccountToggle(..)
             | Message::AccountNumber(..)
             | Message::DesktopToggle(..)

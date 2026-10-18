@@ -136,7 +136,10 @@ static UINT sf_disp_monitor_layout(DispServerContext* disp,
 		return CHANNEL_RC_OK;
 	const UINT32 w = pdu->Monitors[0].Width;
 	const UINT32 h = pdu->Monitors[0].Height;
-	WLog_INFO(TAG, "DESKFEED-TEST monitor layout %" PRIu32 "x%" PRIu32, w, h);
+	WLog_INFO(TAG,
+	          "DESKFEED-TEST monitor layout %" PRIu32 "x%" PRIu32 ", desktop scale %" PRIu32
+	          " %%, device scale %" PRIu32 " %%",
+	          w, h, pdu->Monitors[0].DesktopScaleFactor, pdu->Monitors[0].DeviceScaleFactor);
 	if ((w == 0) || (h == 0) || (w > 0xFFFF) || (h > 0xFFFF))
 		return CHANNEL_RC_OK;
 	(void)__atomic_exchange_n(&context->pending_size, (LONG)((w << 16) | h), __ATOMIC_SEQ_CST);
@@ -886,6 +889,11 @@ static BOOL tf_peer_activate(freerdp_peer* client)
 
 	struct server_info* info = client->ContextExtra;
 	WINPR_ASSERT(info);
+
+	/* Deskfeed test addition: the scale the client sent when connecting
+	 * (TS_UD_CS_CORE desktopScaleFactor). */
+	WLog_INFO(TAG, "DESKFEED-TEST client desktop scale %" PRIu32 " %%",
+	          freerdp_settings_get_uint32(settings, FreeRDP_DesktopScaleFactor));
 
 	context->activated = TRUE;
 	// PACKET_COMPR_TYPE_8K;

@@ -974,6 +974,7 @@ dependencies = [
  "tokio",
  "ureq",
  "url",
+ "x11rb",
  "xdgen",
  "zbus",
 ]

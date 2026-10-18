@@ -45,6 +45,31 @@ pub struct ConnectionSettings {
     pub reconnect: Option<bool>,
     #[serde(default)]
     pub reconnect_attempts: Option<u32>,
+    /// Windows' display scaling in percent; `Some(0)` follows the monitor.
+    #[serde(default)]
+    pub scale: Option<u32>,
+}
+
+/// Settings chosen from a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Choice {
+    /// Windows' display scaling (ADR 0015).
+    Scale,
+}
+
+impl Choice {
+    /// The values offered. For `Scale`, 0 is "follow the monitor", the
+    /// rest are Windows' own steps.
+    pub fn options(self) -> &'static [u32] {
+        match self {
+            Self::Scale => &[0, 100, 125, 150, 175, 200, 250, 300],
+        }
+    }
+
+    /// A value from the config, if it is one of the options.
+    pub fn valid(self, value: u32) -> Option<u32> {
+        self.options().contains(&value).then_some(value)
+    }
 }
 
 /// The on/off settings.
@@ -171,6 +196,20 @@ impl ConnectionSettings {
         *slot = value.map(|v| n.clamp(v));
     }
 
+    pub fn choice(&self, c: Choice) -> Option<u32> {
+        match c {
+            Choice::Scale => self.scale,
+        }
+    }
+
+    /// Sets a choice; `None` inherits, a value that isn't offered too.
+    pub fn set_choice(&mut self, c: Choice, value: Option<u32>) {
+        let slot = match c {
+            Choice::Scale => &mut self.scale,
+        };
+        *slot = value.and_then(|v| c.valid(v));
+    }
+
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
@@ -194,12 +233,15 @@ pub struct Effective {
     pub offline_days: u32,
     pub reconnect: bool,
     pub reconnect_attempts: u32,
+    /// Percent, or 0 to follow the monitor (`display::x11_scale`).
+    pub scale: u32,
 }
 
 /// Built-in defaults. 120 s: measured Entra exchanges took up to 49.8 s
 /// (docs/milestone-1.md). Microphone, camera and clipboard off (spec §9).
 /// Lists refresh hourly; signing in may take 5 min (MFA included); the
-/// offline list is kept 30 days; a lost connection is retried 5 times.
+/// offline list is kept 30 days; a lost connection is retried 5 times;
+/// Windows' scaling follows the monitor (spec §3: derived, not fixed).
 pub const DEFAULTS: Effective = Effective {
     timeout_secs: 120,
     fullscreen: false,
@@ -214,6 +256,7 @@ pub const DEFAULTS: Effective = Effective {
     offline_days: 30,
     reconnect: true,
     reconnect_attempts: 5,
+    scale: 0,
 };
 
 impl Effective {
@@ -235,6 +278,16 @@ impl Effective {
             offline_days: number(Number::OfflineDays, self.offline_days),
             reconnect: s.reconnect.unwrap_or(self.reconnect),
             reconnect_attempts: number(Number::ReconnectAttempts, self.reconnect_attempts),
+            scale: s
+                .scale
+                .and_then(|v| Choice::Scale.valid(v))
+                .unwrap_or(self.scale),
+        }
+    }
+
+    pub fn choice(&self, c: Choice) -> u32 {
+        match c {
+            Choice::Scale => self.scale,
         }
     }
 
@@ -265,6 +318,10 @@ impl Effective {
     /// done by the app, not FreeRDP.
     pub fn freerdp_args(&self) -> Vec<String> {
         let mut args = vec![format!("/timeout:{}", self.timeout_secs * 1000)];
+        // The desktop scale Windows uses (MS-RDPBCGR desktopScaleFactor,
+        // 100–500 %). `scale` is resolved before launch; 0 left over means
+        // the monitor's scale wasn't known.
+        args.push(format!("/scale-desktop:{}", self.scale.clamp(100, 500)));
         // `f` is a FreeRDP *flag*: any prefix, `-f` included, turns it on
         // (WinPR `cmdline.c`, COMMAND_LINE_VALUE_FLAG). So windowed means
         // leaving it out; `rdpfile.rs` drops `screen mode id` so the feed
@@ -388,6 +445,7 @@ mod tests {
     fn defaults_keep_devices_private() {
         let a = DEFAULTS.freerdp_args();
         assert!(a.contains(&"/timeout:120000".into()));
+        assert!(a.contains(&"/scale-desktop:100".into()));
         assert!(!a.iter().any(|x| x.ends_with('f') && x.len() == 2));
         assert!(a.contains(&"-multimon".into()));
         assert!(a.contains(&"-clipboard".into()));
@@ -430,5 +488,32 @@ mod tests {
             s.set_toggle(t, None);
         }
         assert!(s.is_empty());
+    }
+
+    #[test]
+    fn scale_levels_and_odd_values() {
+        let app = ConnectionSettings {
+            scale: Some(150),
+            ..Default::default()
+        };
+        let desktop = ConnectionSettings {
+            scale: Some(0),
+            ..Default::default()
+        };
+        assert_eq!(effective(Some(&app), None, None).scale, 150);
+        // The desktop goes back to following the monitor.
+        assert_eq!(effective(Some(&app), None, Some(&desktop)).scale, 0);
+        // A hand-edited value that isn't offered is ignored.
+        let odd = ConnectionSettings {
+            scale: Some(137),
+            ..Default::default()
+        };
+        assert_eq!(effective(Some(&app), Some(&odd), None).scale, 150);
+        let mut s = ConnectionSettings::default();
+        s.set_choice(Choice::Scale, Some(999));
+        assert!(s.is_empty());
+        let mut e = DEFAULTS;
+        e.scale = 125;
+        assert!(e.freerdp_args().contains(&"/scale-desktop:125".into()));
     }
 }

@@ -45,7 +45,7 @@
  
  #include "sfreerdp.h"
  
-@@ -105,13 +107,69 @@
+@@ -105,13 +107,72 @@
  		sf_peer_ainput_uninit(context);
  #endif
  
@@ -78,7 +78,10 @@
 +		return CHANNEL_RC_OK;
 +	const UINT32 w = pdu->Monitors[0].Width;
 +	const UINT32 h = pdu->Monitors[0].Height;
-+	WLog_INFO(TAG, "DESKFEED-TEST monitor layout %" PRIu32 "x%" PRIu32, w, h);
++	WLog_INFO(TAG,
++	          "DESKFEED-TEST monitor layout %" PRIu32 "x%" PRIu32 ", desktop scale %" PRIu32
++	          " %%, device scale %" PRIu32 " %%",
++	          w, h, pdu->Monitors[0].DesktopScaleFactor, pdu->Monitors[0].DeviceScaleFactor);
 +	if ((w == 0) || (h == 0) || (w > 0xFFFF) || (h > 0xFFFF))
 +		return CHANNEL_RC_OK;
 +	(void)__atomic_exchange_n(&context->pending_size, (LONG)((w << 16) | h), __ATOMIC_SEQ_CST);
@@ -115,7 +118,7 @@
  WINPR_ATTR_NODISCARD
  static BOOL test_peer_context_new(freerdp_peer* client, rdpContext* ctx)
  {
-@@ -151,6 +209,18 @@
+@@ -151,6 +212,18 @@
  	if (!context->vcm || context->vcm == INVALID_HANDLE_VALUE)
  		goto fail;
  
@@ -134,7 +137,7 @@
  	return TRUE;
  fail:
  	test_peer_context_free(client, ctx);
-@@ -794,6 +864,10 @@
+@@ -794,6 +867,10 @@
  	sf_peer_ainput_init(context);
  #endif
  
@@ -145,7 +148,19 @@
  	/* Return FALSE here would stop the execution of the peer main loop. */
  	return TRUE;
  }
-@@ -1263,7 +1337,9 @@
+@@ -813,6 +890,11 @@
+ 	struct server_info* info = client->ContextExtra;
+ 	WINPR_ASSERT(info);
+ 
++	/* Deskfeed test addition: the scale the client sent when connecting
++	 * (TS_UD_CS_CORE desktopScaleFactor). */
++	WLog_INFO(TAG, "DESKFEED-TEST client desktop scale %" PRIu32 " %%",
++	          freerdp_settings_get_uint32(settings, FreeRDP_DesktopScaleFactor));
++
+ 	context->activated = TRUE;
+ 	// PACKET_COMPR_TYPE_8K;
+ 	// PACKET_COMPR_TYPE_64K;
+@@ -1263,7 +1345,9 @@
  
  		HANDLE channelHandle = WTSVirtualChannelManagerGetEventHandle(context->vcm);
  		handles[count++] = channelHandle;
@@ -156,7 +171,7 @@
  
  		if (status == WAIT_FAILED)
  		{
-@@ -1275,9 +1351,20 @@
+@@ -1275,9 +1359,20 @@
  		if (client->CheckFileDescriptor(client) != TRUE)
  			break;
  
@@ -178,7 +193,7 @@
  		/* Handle dynamic virtual channel initializations */
  		if (WTSVirtualChannelManagerIsChannelJoined(context->vcm, DRDYNVC_SVC_CHANNEL_NAME))
  		{
-@@ -1291,6 +1378,37 @@
+@@ -1291,6 +1386,37 @@
  
  				case DRDYNVC_STATE_READY:
  
