@@ -461,14 +461,15 @@ fn launch_with(
     let rdp_path = write_connection_file(&dir, &spec.connection)?;
     let args = build_args(spec, &rdp_path)?;
     let (read_end, write_end) = pipe()?;
-    let mut child = spawn_freerdp(freerdp, &spec.profile, &read_end)?;
+    let (terminal, output) = output_terminal().map_err(|e| io_err(&e))?;
+    let mut child = spawn_freerdp(freerdp, &spec.profile, &read_end, output)?;
     drop(read_end);
     if send_args(write_end, &args).is_err() {
         let _ = child.kill();
         let _ = child.wait();
         return Err(LaunchError::Io("argument pipe".into()));
     }
-    supervise(child, dir, Arc::new(events))
+    supervise(child, terminal, dir, Arc::new(events))
 }
 
 fn io_err(e: &std::io::Error) -> LaunchError {
@@ -491,17 +492,71 @@ fn write_connection_file(
     Ok(path)
 }
 
+/// A pseudo-terminal for FreeRDP's standard output: (our end, its end).
+///
+/// FreeRDP writes DEBUG and INFO log lines to stdout and the rest to
+/// stderr (FreeRDP 3.32.2 `winpr/libwinpr/utils/wlog/ConsoleAppender.c`,
+/// no setting changes this). The C library holds stdout back in blocks
+/// when it is a pipe, but writes each line when it is a terminal (C11
+/// 7.21.3: stdout is fully buffered only when not interactive; glibc
+/// line-buffers a terminal). Through a pipe the
+/// display-ready line, and with it the window refit, came only when FreeRDP
+/// ended. FreeRDP checks for a terminal only on its input (password prompt,
+/// `libfreerdp/utils/passphrase.c`), which stays `/dev/null`.
+///
+/// Raw mode: no line-ending translation. Not a controlling terminal
+/// (`O_NOCTTY`), so it can't send signals to anyone.
+fn output_terminal() -> std::io::Result<(fs::File, OwnedFd)> {
+    use std::os::fd::FromRawFd;
+    let last = std::io::Error::last_os_error;
+    // SAFETY: plain libc calls on descriptors we own; the name buffer is
+    // NUL-terminated by `ptsname_r` on success.
+    unsafe {
+        let fd = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC);
+        if fd < 0 {
+            return Err(last());
+        }
+        let ours = OwnedFd::from_raw_fd(fd);
+        if libc::grantpt(fd) != 0 || libc::unlockpt(fd) != 0 {
+            return Err(last());
+        }
+        let mut name = [0 as libc::c_char; 128];
+        let err = libc::ptsname_r(fd, name.as_mut_ptr(), name.len());
+        if err != 0 {
+            return Err(std::io::Error::from_raw_os_error(err));
+        }
+        let theirs = libc::open(
+            name.as_ptr(),
+            libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC,
+        );
+        if theirs < 0 {
+            return Err(last());
+        }
+        let theirs = OwnedFd::from_raw_fd(theirs);
+        let mut mode: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(theirs.as_raw_fd(), &raw mut mode) != 0 {
+            return Err(last());
+        }
+        libc::cfmakeraw(&raw mut mode);
+        if libc::tcsetattr(theirs.as_raw_fd(), libc::TCSANOW, &raw const mode) != 0 {
+            return Err(last());
+        }
+        Ok((fs::File::from(ours), theirs))
+    }
+}
+
 fn spawn_freerdp(
     freerdp: &Path,
     profile: &Path,
     args_pipe: &OwnedFd,
+    output: OwnedFd,
 ) -> Result<Child, LaunchError> {
     let read_fd = args_pipe.as_raw_fd();
     let mut cmd = Command::new(freerdp);
     cmd.arg("/args-from:fd:3")
         .env_clear()
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::from(output))
         .stderr(Stdio::piped())
         .process_group(0);
     pass_environment(&mut cmd, &["PULSE_SERVER"]);
@@ -577,11 +632,11 @@ fn send_args(write_end: OwnedFd, args: &[String]) -> std::io::Result<()> {
 /// and reports the end.
 fn supervise(
     mut child: Child,
+    stdout: fs::File,
     dir: RuntimeDir,
     events: Arc<dyn Fn(SessionEvent) + Send + Sync>,
 ) -> Result<Session, LaunchError> {
     let pgid = i32::try_from(child.id()).map_err(|_| LaunchError::Io("pid".into()))?;
-    let stdout = child.stdout.take().expect("piped");
     let stderr = child.stderr.take().expect("piped");
     let child = Arc::new(Mutex::new(child));
     let log = Arc::new(Mutex::new(Log::default()));
@@ -1005,6 +1060,34 @@ mod tests {
                 .count(),
             0
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// FreeRDP's log lines arrive while it runs. `sed` writes through the C
+    /// library like FreeRDP: through a pipe the line would wait in its
+    /// buffer until `sleep` ends.
+    #[test]
+    fn log_lines_arrive_while_freerdp_runs() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("avd-launch-live-{}", std::process::id()));
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let fake = dir.join("fake");
+        fs::write(
+            &fake,
+            "#!/bin/sh\ncat <&3 >/dev/null\n\
+             { echo '[DEBUG][com.freerdp.client.sdl.disp] - DisplayControlCapsPdu: setting the window as resizable'; sleep 5; } | sed -n p\n",
+        )
+        .unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let s = spec(LogonSetting::Automatic, Some("pw"), false);
+        let session =
+            launch_with(&fake, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(3)).unwrap(),
+            SessionEvent::DisplayReady
+        );
+        stop_all(&[session], STOP_GRACE);
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -42,6 +42,9 @@ impl<R: BufRead> Iterator for Lines<R> {
             let chunk = match self.reader.fill_buf() {
                 Ok(chunk) => chunk,
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                // A terminal reports its closing as an error (EIO), not as
+                // the end; keep the line read so far.
+                Err(_) if started => break,
                 Err(_) => return None,
             };
             if chunk.is_empty() {
