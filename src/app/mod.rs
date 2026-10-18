@@ -109,8 +109,10 @@ pub struct AppModel {
     /// Account ID or resource key the settings drawer shows.
     settings_target: Option<String>,
     /// Desktop setting choices when the account's value is on / off.
-    follow_on: Vec<String>,
-    follow_off: Vec<String>,
+    follow_app_on: Vec<String>,
+    follow_app_off: Vec<String>,
+    follow_account_on: Vec<String>,
+    follow_account_off: Vec<String>,
     /// "Open on a new workspace" waits per running session; set to stop.
     movers: HashMap<String, Arc<AtomicBool>>,
 }
@@ -204,8 +206,10 @@ impl cosmic::Application for AppModel {
             ],
             deps: None,
             settings_target: None,
-            follow_on: vec![fl!("follow-account-on"), fl!("on"), fl!("off")],
-            follow_off: vec![fl!("follow-account-off"), fl!("on"), fl!("off")],
+            follow_app_on: vec![fl!("follow-app-on"), fl!("on"), fl!("off")],
+            follow_app_off: vec![fl!("follow-app-off"), fl!("on"), fl!("off")],
+            follow_account_on: vec![fl!("follow-account-on"), fl!("on"), fl!("off")],
+            follow_account_off: vec![fl!("follow-account-off"), fl!("on"), fl!("off")],
             movers: HashMap::new(),
         };
         app.rebuild_nav(&Page::Add);
@@ -246,6 +250,7 @@ impl cosmic::Application for AppModel {
                 menu::items(
                     &self.key_binds,
                     vec![
+                        menu::Item::Button(fl!("settings"), None, MenuAction::Settings),
                         menu::Item::Button(fl!("dependencies"), None, MenuAction::Dependencies),
                         menu::Item::Button(fl!("open-log-folder"), None, MenuAction::OpenLogFolder),
                         menu::Item::Button(fl!("about"), None, MenuAction::About),
@@ -303,6 +308,11 @@ impl cosmic::Application for AppModel {
                 }
                 b
             }),
+            ContextPage::AppSettings => context_drawer::context_drawer(
+                self.app_settings_view(),
+                Message::ToggleContextPage(ContextPage::AppSettings),
+            )
+            .title(fl!("settings")),
             ContextPage::AccountSettings => {
                 let id = self.settings_target.clone().unwrap_or_default();
                 let title = self.account(&id).map(Account::label).unwrap_or_default();
@@ -466,6 +476,8 @@ impl cosmic::Application for AppModel {
             | Message::ReadyToQuit => self.connection_message(message),
             Message::OpenAccountSettings(..)
             | Message::OpenDesktopSettings(..)
+            | Message::AppToggle(..)
+            | Message::AppTimeout(..)
             | Message::AccountToggle(..)
             | Message::AccountTimeout(..)
             | Message::DesktopToggle(..)
@@ -606,6 +618,7 @@ pub enum ContextPage {
     #[default]
     About,
     Dependencies,
+    AppSettings,
     AccountSettings,
     DesktopSettings,
 }
@@ -613,6 +626,7 @@ pub enum ContextPage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MenuAction {
     About,
+    Settings,
     Dependencies,
     AddAccount,
     SignOut,
@@ -625,6 +639,7 @@ impl menu::action::MenuAction for MenuAction {
     fn message(&self) -> Self::Message {
         match self {
             MenuAction::About => Message::ToggleContextPage(ContextPage::About),
+            MenuAction::Settings => Message::ToggleContextPage(ContextPage::AppSettings),
             MenuAction::Dependencies => Message::ToggleContextPage(ContextPage::Dependencies),
             MenuAction::AddAccount => Message::AddAccount,
             MenuAction::SignOut => Message::SignOutSelected,

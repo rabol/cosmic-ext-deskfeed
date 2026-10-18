@@ -245,8 +245,11 @@ pub enum Message {
     OpenLogFolder,
     OpenAccountSettings(String),
     OpenDesktopSettings(String),
-    AccountToggle(String, Toggle, bool),
-    AccountTimeout(String, u32),
+    AppToggle(Toggle, bool),
+    AppTimeout(u32),
+    /// Account override: 0 follows the app's setting, 1 on, 2 off.
+    AccountToggle(String, Toggle, usize),
+    AccountTimeout(String, Option<u32>),
     /// Resource key, setting, dropdown choice (0: follow the account).
     DesktopToggle(String, Toggle, usize),
     /// `None`: follow the account.

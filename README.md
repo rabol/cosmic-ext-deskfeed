@@ -16,7 +16,7 @@ Your work desktops on the COSMIC™ desktop. A native COSMIC app that **works wi
 - **Stays signed in** between starts: the sign-in is kept in your desktop keyring (Secret Service), never in files. Your organization's sign-in rules still apply.
 - **All your desktops** from every workspace your accounts can use.
 - **Connect with Entra sign-in** (no Windows password) by default; host pools that need a Windows password get a native dialog that allows pasting.
-- **Settings per account, with per-desktop overrides:** full screen or window, all monitors, open on a new COSMIC workspace, sound, microphone, camera, clipboard, and how long to wait for the desktop.
+- **Settings for the app, overridden per account and again per desktop:** full screen or window, all monitors, open on a new COSMIC workspace, sound, microphone, camera, clipboard, and how long to wait for the desktop.
 - **Built for COSMIC:** libcosmic UI that follows the COSMIC design, the remote desktop groups under the app in the dock, light and dark themes.
 - **Checks its dependencies** at startup and tells you what to install.
 
@@ -53,7 +53,7 @@ This installs the app (`/usr/bin/cosmic-ext-deskfeed`), its sign-in helper (`/us
 1. **Sign in.** Start the app and select **Sign in**. Microsoft's sign-in page opens in a small window; sign in as you normally do (password, Authenticator, your company's sign-in page).
 2. **Connect.** Your workspaces and desktops appear. Select **Connect**. Microsoft may show *"Are you trying to sign in to Azure Virtual Desktop Client?"* or ask for your password again, depending on your organization's rules; then the desktop opens.
 3. **More accounts:** **Add account** in the sidebar (or **Account → Add account**).
-4. **Settings:** the gear in the header bar sets defaults for the selected account; the gear on a desktop row overrides them for that desktop.
+4. **Settings:** **View → Settings** sets defaults for every account; the gear in the header bar overrides them for the selected account; the gear on a desktop row overrides them for that desktop.
 5. **Sign out:** **Account → Sign out**, or **Sign out** in the account settings. This removes the account's saved sign-in and cookies from this computer.
 
 If something doesn't work, **View → Dependencies** shows what's missing, and **View → Open log folder** opens the log.

@@ -9,7 +9,7 @@ The owner asked for several accounts, each with its own connection defaults, and
 
 ## Decision
 
-- **Levels:** built-in defaults → account settings → desktop overrides. Unset values inherit (`src/settings.rs`). Stored in the COSMIC config (`account_settings`, `desktop_settings`), keyed by opaque account IDs and resource keys; no credentials.
+- **Levels:** built-in defaults → app settings (View → Settings, added 2026-10-18 at the owner's request) → account overrides → desktop overrides. Every value that could matter to a user belongs at these levels; [settings-inventory.md](../settings-inventory.md) lists them and the values that stay fixed. Unset values inherit (`src/settings.rs`). Stored in the COSMIC config (`account_settings`, `desktop_settings`), keyed by opaque account IDs and resource keys; no credentials.
 - **First settings:** time to wait for the desktop (10–600 s, default 120 s, measured need up to 49.8 s), full screen, all monitors (full screen only), open on a new workspace, sound (default on), microphone and clipboard (default off, spec §11).
 - **FreeRDP arguments** are always explicit, because the feed's `.rdp` may ask for full screen or several monitors: `/timeout:`, `+f`/`-f`, `/multimon`/`-multimon`, `/audio-mode:redirect /sound` or `/audio-mode:none`, `/microphone`, `/clipboard`/`-clipboard`. Each was checked to parse with `sdl-freerdp3` 3.32.2.
 - **UI (COSMIC design):** account settings in the context drawer from a header button, as settings sections with togglers and a spin button, Sign out at the bottom. Desktop settings from a button on each desktop row, with a dropdown per setting (account default / on / off) and a reset for the timeout.

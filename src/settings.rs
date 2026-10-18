@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-//! Connection settings (spec §Settings): built-in defaults, overridden per
-//! account, overridden per desktop. `None` means "inherit".
+//! Connection settings (spec §Settings): built-in defaults, overridden by
+//! the app's settings, then per account, then per desktop. `None` means
+//! "inherit".
 //!
 //! The app alone decides display: `sessions/rdpfile.rs` drops the feed's
 //! `screen mode id` and `use multimon`. Every option here was checked
@@ -199,12 +200,14 @@ impl Effective {
     }
 }
 
-/// Defaults, then the account's settings, then the desktop's.
+/// Defaults, then the app's settings, then the account's, then the
+/// desktop's.
 pub fn effective(
+    app: Option<&ConnectionSettings>,
     account: Option<&ConnectionSettings>,
     desktop: Option<&ConnectionSettings>,
 ) -> Effective {
-    DEFAULTS.with(account).with(desktop)
+    DEFAULTS.with(app).with(account).with(desktop)
 }
 
 #[cfg(test)]
@@ -223,12 +226,20 @@ mod tests {
             sound: Some(false),
             ..Default::default()
         };
-        let e = effective(Some(&account), Some(&desktop));
-        assert!(e.fullscreen); // from the account
+        let app = ConnectionSettings {
+            fullscreen: Some(false),
+            clipboard: Some(true),
+            timeout_secs: Some(30),
+            ..Default::default()
+        };
+        let e = effective(Some(&app), Some(&account), Some(&desktop));
+        assert!(e.fullscreen); // the account overrides the app
         assert_eq!(e.timeout_secs, 300); // desktop wins
         assert!(!e.sound); // desktop
-        assert!(!e.clipboard); // default
-        assert_eq!(effective(None, None), DEFAULTS);
+        assert!(e.clipboard); // from the app
+        assert!(!e.microphone); // default
+        assert_eq!(effective(Some(&app), None, None).timeout_secs, 30);
+        assert_eq!(effective(None, None, None), DEFAULTS);
     }
 
     #[test]
@@ -243,7 +254,10 @@ mod tests {
             timeout_secs: Some(0),
             ..Default::default()
         };
-        assert_eq!(effective(Some(&raw), None).timeout_secs, TIMEOUT_MIN_SECS);
+        assert_eq!(
+            effective(None, Some(&raw), None).timeout_secs,
+            TIMEOUT_MIN_SECS
+        );
     }
 
     #[test]

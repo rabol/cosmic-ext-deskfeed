@@ -6,6 +6,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Added
 
+- App settings (View → Settings): defaults for every account. Account settings now follow the app's setting or override it, as desktop settings do for the account.
 - Desktop icons from the feed, with a stock icon until they load. Icons must be PNGs of at most 256×256 pixels.
 - Camera setting (off by default), per account and desktop. It shares this computer's cameras when the desktop's administrator allows all cameras; otherwise the desktop row says why no camera is shared (ADR 0013).
 

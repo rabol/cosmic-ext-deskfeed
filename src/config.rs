@@ -17,7 +17,9 @@ pub struct Config {
     /// of account, tenant, workspace and resource ID (spec §7: titles are never
     /// identity). No credentials are stored here.
     pub logon_settings: BTreeMap<String, LogonSetting>,
-    /// Connection defaults per account (keys: `accounts::account_id`).
+    /// Connection defaults for every account (App settings).
+    pub app_settings: ConnectionSettings,
+    /// Overrides of the app's settings per account (keys: `accounts::account_id`).
     pub account_settings: BTreeMap<String, ConnectionSettings>,
     /// Per-desktop overrides (keys: resource keys, as above).
     pub desktop_settings: BTreeMap<String, ConnectionSettings>,
