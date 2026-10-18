@@ -72,6 +72,13 @@ impl Account {
         }
     }
 
+    pub(super) fn workspaces(&self) -> &[WorkspaceView] {
+        match &self.state {
+            AccountState::Ready { workspaces, .. } => workspaces,
+            _ => &[],
+        }
+    }
+
     pub(super) fn resource_keys(&self) -> Vec<String> {
         match &self.state {
             AccountState::Ready { workspaces, .. } => workspaces
@@ -100,6 +107,8 @@ pub struct ResourceView {
     pub(super) title: String,
     pub(super) kind: ResourceKind,
     pub(super) connection_file: Option<Url>,
+    /// The feed's PNG icon.
+    pub(super) icon: Option<Url>,
 }
 
 /// A FreeRDP session and the account it belongs to (sign-out ends it even
@@ -199,6 +208,8 @@ pub enum Message {
         u64,
         Result<(Vec<WorkspaceView>, Arc<SignedIn>), StepError>,
     ),
+    /// Icons fetched for an account (account, epoch, URL and PNG bytes).
+    IconsLoaded(String, u64, Vec<(Url, Vec<u8>)>),
     SignOut(String),
     SignOutSelected,
     /// The keyring item of a signed-out account is gone (or not).
@@ -380,6 +391,7 @@ pub(super) fn workspace_view(account: &SignedIn, feed: discovery::WorkspaceFeed)
                         title: r.title,
                         kind: r.kind,
                         connection_file: r.connection_file,
+                        icon: r.icon_png,
                     })
                     .collect(),
             }

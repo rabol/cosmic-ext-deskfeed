@@ -49,7 +49,9 @@ impl Role {
         match self {
             Self::Token => 64 * 1024,
             Self::SigningKeys | Self::ConnectionFile => 256 * 1024,
-            Self::FeedDiscovery | Self::Icon => 1024 * 1024,
+            // Feed icons are 32×32 PNGs (service/icons.rs).
+            Self::Icon => 256 * 1024,
+            Self::FeedDiscovery => 1024 * 1024,
             Self::Feed => 4 * 1024 * 1024,
         }
     }

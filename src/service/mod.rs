@@ -7,3 +7,4 @@ pub mod discovery;
 pub mod endpoint;
 pub mod feed;
 pub mod http;
+pub mod icons;

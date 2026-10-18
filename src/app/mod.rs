@@ -30,6 +30,7 @@ use crate::service::discovery::{self, FetchError};
 use crate::service::endpoint::{EndpointPolicy, Role};
 use crate::service::feed::ResourceKind;
 use crate::service::http::{Http, HttpError};
+use crate::service::icons;
 use crate::sessions::launcher::{self, LaunchSpec, LogonSetting, SessionEnd, SessionEvent};
 use crate::sessions::rdpfile::{CameraPolicy, ConnectionFile, RdpError};
 use crate::settings::{self, ConnectionSettings, Toggle};
@@ -86,6 +87,9 @@ pub struct AppModel {
     /// Why a running session doesn't have something the user turned on
     /// (the camera, when the desktop's policy doesn't allow it).
     session_notes: HashMap<String, String>,
+    /// Resource icons per account and URL; the feed versions its icon
+    /// URLs (`?v=`), so a fetched one stays valid.
+    icons: HashMap<(String, Url), widget::icon::Handle>,
     quit: Quit,
     /// Logon setting and connection file of sessions not yet connected, to
     /// remember the setting on success or ask again on logon failure.
@@ -185,6 +189,7 @@ impl cosmic::Application for AppModel {
             signing_out: HashSet::new(),
             timed_out: HashSet::new(),
             session_notes: HashMap::new(),
+            icons: HashMap::new(),
             quit: Quit::No,
             pending_logon: HashMap::new(),
             dialog: None,
@@ -437,6 +442,7 @@ impl cosmic::Application for AppModel {
             | Message::Refresh(..)
             | Message::RefreshDue
             | Message::Discovered(..)
+            | Message::IconsLoaded(..)
             | Message::SignOut(..)
             | Message::SignOutSelected
             | Message::SignOutFinished(..)

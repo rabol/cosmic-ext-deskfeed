@@ -94,6 +94,7 @@ impl AppModel {
                 account.notice.as_deref(),
                 &self.connections,
                 &self.session_notes,
+                |url: &Url| self.icons.get(&(account.id.clone(), url.clone())),
             ),
         }
     }
@@ -202,6 +203,7 @@ pub(super) fn resource_row<'a>(
     r: &'a ResourceView,
     conn: Option<&'a Connection>,
     note: Option<&str>,
+    icon: Option<&widget::icon::Handle>,
 ) -> Element<'a, Message> {
     let kind = match r.kind {
         ResourceKind::Desktop => fl!("kind-desktop"),
@@ -250,7 +252,18 @@ pub(super) fn resource_row<'a>(
     let settings = widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
         .tooltip(fl!("desktop-settings"))
         .on_press(Message::OpenDesktopSettings(r.key.clone()));
+    // The feed's icon, or a stock one until it has loaded (or without one).
+    let icon = match icon {
+        Some(h) => widget::icon(h.clone()),
+        None => widget::icon::from_name(match r.kind {
+            ResourceKind::Desktop => "computer-symbolic",
+            _ => "application-x-executable-symbolic",
+        })
+        .icon(),
+    }
+    .size(32);
     widget::settings::item::builder(r.title.clone())
+        .icon(icon)
         .description(description)
         .control(
             widget::row::with_capacity(2)
@@ -269,6 +282,7 @@ pub(super) fn resources_view<'a>(
     notice: Option<&'a str>,
     connections: &'a HashMap<String, Connection>,
     notes: &'a HashMap<String, String>,
+    icon_of: impl Fn(&Url) -> Option<&'a widget::icon::Handle>,
 ) -> Element<'a, Message> {
     let space = cosmic::theme::spacing();
     let mut col = widget::column::with_capacity(workspaces.len() + 4).spacing(space.space_m);
@@ -302,6 +316,7 @@ pub(super) fn resources_view<'a>(
                 r,
                 connections.get(&r.key),
                 notes.get(&r.key).map(String::as_str),
+                r.icon.as_ref().and_then(&icon_of),
             ));
         }
         col = col.push(section);

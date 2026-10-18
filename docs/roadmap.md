@@ -6,7 +6,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
 
 ## Required for the first usable release (spec §3)
 
-1. **Resource icons.** Feeds provide icon URLs (`service/feed.rs` parses them); the UI shows generic icons. Needs fetching through the shared HTTP policy, size and dimension limits (§7).
+1. ~~**Resource icons.**~~ Done (2026-10-18): the feed's PNG, fetched in the background through the shared HTTP policy (256 KiB, no redirects), header-checked to at most 256×256 before display (`service/icons.rs`), cached per account and URL, cleared on sign-out. Stock icon until it loads. Checked with the owner's feed: 3 of 3 loaded. The `.ico` variant isn't used.
 2. **Search, favorites, last successful refresh time** in the UI (§3, §5). `Account.last_load` exists but isn't shown.
 3. **Offline metadata cache**, account-isolated, bounded, clearly marked as cached; never grants access (§7, §10).
 4. **Reconnect** after connection loss with bounded backoff, visible status and a stop action; **focus an existing session** when Connect is pressed for a running desktop (§3, §8).

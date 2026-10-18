@@ -48,8 +48,9 @@ impl AppModel {
             Message::Refresh(id) => return self.load_resources(&id),
             Message::RefreshDue => return self.refresh_due(),
             Message::Discovered(id, epoch, generation, result) => {
-                self.discovered(&id, epoch, generation, result);
+                return self.discovered(&id, epoch, generation, result);
             }
+            Message::IconsLoaded(id, epoch, icons) => self.icons_loaded(&id, epoch, icons),
             Message::SignOut(id) => return self.sign_out(&id),
             Message::SignOutSelected => {
                 if let Some(Page::Account(id)) = self.selected_page() {
@@ -454,20 +455,20 @@ impl AppModel {
         epoch: u64,
         generation: u64,
         result: Result<(Vec<WorkspaceView>, Arc<SignedIn>), StepError>,
-    ) {
+    ) -> Task<cosmic::Action<Message>> {
         // Renewed tokens are kept even if a newer refresh started meanwhile.
         if let Ok((_, renewed)) = &result {
             self.adopt_tokens(id, epoch, renewed);
         }
         let Some(account) = self.account_mut(id).filter(|a| a.generation == generation) else {
-            return;
+            return Task::none();
         };
         let result = match result {
             Ok((list, _)) => Ok(list),
             Err(StepError::Show(e)) => Err(e),
             Err(StepError::SignInAgain(e)) => {
                 self.needs_sign_in(id, e);
-                return;
+                return Task::none();
             }
         };
         if let AccountState::Ready {
@@ -488,9 +489,78 @@ impl AppModel {
                     *workspaces = list;
                     *error = None;
                     self.migrate_resource_keys(&pairs);
+                    return self.fetch_icons(id);
                 }
                 Err(e) => *error = Some(e),
             }
+        }
+        Task::none()
+    }
+
+    /// Fetches the icons of `id`'s desktops that aren't cached yet, in the
+    /// background, and forgets the ones no longer listed.
+    fn fetch_icons(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+        /// Bounds the requests one refresh makes.
+        const MAX_ICONS: usize = 200;
+        let Some(account) = self.account(id) else {
+            return Task::none();
+        };
+        let Some(signed_in) = account.signed_in().cloned() else {
+            return Task::none();
+        };
+        let epoch = account.epoch;
+        let listed: HashSet<Url> = account
+            .workspaces()
+            .iter()
+            .flat_map(|w| &w.resources)
+            .filter_map(|r| r.icon.clone())
+            .collect();
+        self.icons
+            .retain(|(account, url), _| account != id || listed.contains(url));
+        let missing: Vec<Url> = listed
+            .into_iter()
+            .filter(|u| !self.icons.contains_key(&(id.to_owned(), u.clone())))
+            .take(MAX_ICONS)
+            .collect();
+        if missing.is_empty() {
+            return Task::none();
+        }
+        let http = self.http.clone();
+        let id = id.to_owned();
+        cosmic::task::future(async move {
+            let icons = tokio::task::spawn_blocking(move || {
+                let mut icons = Vec::new();
+                let mut refused = 0;
+                for url in missing {
+                    let fetched = http
+                        .get(&url, Role::Icon, Some(&signed_in.tokens.access_token))
+                        .ok()
+                        .filter(|resp| icons::check_png(&resp.body).is_ok());
+                    match fetched {
+                        Some(resp) => icons.push((url, resp.body)),
+                        None => refused += 1,
+                    }
+                }
+                crate::app_log!(
+                    "Desktop icons: {} loaded, {refused} failed or refused",
+                    icons.len()
+                );
+                icons
+            })
+            .await
+            .unwrap_or_default();
+            Message::IconsLoaded(id, epoch, icons)
+        })
+    }
+
+    fn icons_loaded(&mut self, id: &str, epoch: u64, icons: Vec<(Url, Vec<u8>)>) {
+        // Not for an account signed out (or in again) meanwhile.
+        if self.account(id).is_none_or(|a| a.epoch != epoch) {
+            return;
+        }
+        for (url, bytes) in icons {
+            self.icons
+                .insert((id.to_owned(), url), widget::icon::from_raster_bytes(bytes));
         }
     }
 
@@ -539,6 +609,7 @@ impl AppModel {
             return Task::none();
         };
         let account = self.accounts.remove(pos);
+        self.icons.retain(|(account, _), _| account != id);
         // From now on nothing started earlier saves its tokens.
         accounts::note_sign_out(id);
         let sign_in = match &account.state {
