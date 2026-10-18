@@ -142,6 +142,15 @@ impl ConnectionFile {
         Ok(Self { props, dropped })
     }
 
+    /// Tests only: a file for a local test server, without the gateway a
+    /// parsed file must have (`research/rdp-test-server`).
+    #[cfg(test)]
+    pub fn local_test(address: &str) -> Self {
+        let mut props = BTreeMap::new();
+        props.insert("full address".to_owned(), Value::Str(address.to_owned()));
+        Self { props, dropped: 0 }
+    }
+
     /// Serialized for FreeRDP: kept properties, then device defaults.
     pub fn to_freerdp_text(&self) -> String {
         let mut out = String::new();

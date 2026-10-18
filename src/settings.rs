@@ -5,7 +5,7 @@
 //!
 //! The app alone decides display: `sessions/rdpfile.rs` drops the feed's
 //! `screen mode id` and `use multimon`. Every option here was checked
-//! against `sdl-freerdp3` 3.32.2 `/help` and WinPR's parser: `f` is a flag
+//! against `xfreerdp3` 3.32.2 `/help` and WinPR's parser: `f` is a flag
 //! (only "on" exists), `multimon` and `clipboard` are booleans (`-` turns
 //! them off).
 

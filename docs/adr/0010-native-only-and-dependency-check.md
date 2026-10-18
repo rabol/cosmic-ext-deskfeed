@@ -14,7 +14,7 @@ Without a sandbox bundle, the app relies on system software, which may be missin
 - Native packages only. Spec §11, step 5 and the distribution phase are changed accordingly; milestone step I is dropped.
 - The README lists every runtime dependency with its minimum version and the Arch Linux package.
 - The app checks them at startup and from **View → Dependencies** (with **Check again**), in the background (`src/deps.rs`). Each check tests the capability used, not only that a file exists:
-  - FreeRDP: `sdl-freerdp3` (or `sdl-freerdp`) in `PATH`, `/version` at least 3.32.2 ([ADR 0004](0004-freerdp-version-and-sign-in-helper.md)).
+  - FreeRDP: `xfreerdp3` (or `xfreerdp`) in `PATH`, `/version` at least 3.32.2 ([ADR 0004](0004-freerdp-version-and-sign-in-helper.md)).
   - FreeRDP Entra support: `/buildconfig` contains `WITH_AAD=ON`.
   - Sign-in helper: found next to the app and `--check` answers `ok`, which proves GTK 4 and WebKitGTK 6 load.
   - Secret Service: `org.freedesktop.secrets` opens a session and has a default keyring (optional: without it, sign-in isn't remembered).

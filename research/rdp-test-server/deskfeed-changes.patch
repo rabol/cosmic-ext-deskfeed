@@ -1,0 +1,180 @@
+--- a/sfreerdp.h	2026-10-18 08:16:14.968799952 +0200
++++ b/sfreerdp.h	2026-10-18 08:18:43.898375594 +0200
+@@ -20,6 +20,7 @@
+ #ifndef FREERDP_SERVER_SAMPLE_SFREERDP_SERVER_H
+ #define FREERDP_SERVER_SAMPLE_SFREERDP_SERVER_H
+ 
++#include <freerdp/server/disp.h>
+ #include <freerdp/freerdp.h>
+ #include <freerdp/listener.h>
+ #include <freerdp/codec/rfx.h>
+@@ -70,6 +71,13 @@
+ 
+ 	rdpTransportIo io;
+ 	wImage* image;
++
++	/* Deskfeed test addition: display control channel (MS-RDPEDISP). */
++	DispServerContext* disp;
++	BOOL disp_open;
++	UINT64 disp_ready_at;
++	HANDLE resize_event;
++	volatile LONG pending_size; /* (width << 16) | height, 0 = none */
+ };
+ typedef struct test_peer_context testPeerContext;
+ 
+--- a/sfreerdp.c	2026-10-18 08:16:14.967799890 +0200
++++ b/sfreerdp.c	2026-10-18 08:18:48.662502511 +0200
+@@ -24,6 +24,7 @@
+ #include <errno.h>
+ #include <signal.h>
+ 
++#include <winpr/sysinfo.h>
+ #include <winpr/winpr.h>
+ #include <winpr/crt.h>
+ #include <winpr/cast.h>
+@@ -108,10 +109,64 @@
+ 		rdpsnd_server_context_free(context->rdpsnd);
+ 		encomsp_server_context_free(context->encomsp);
+ 
++		/* Deskfeed test addition */
++		if (context->disp)
++		{
++			if (context->disp_open)
++				(void)context->disp->Close(context->disp);
++			disp_server_context_free(context->disp);
++		}
++		if (context->resize_event)
++			(void)CloseHandle(context->resize_event);
++
+ 		WTSCloseServer(context->vcm);
+ 	}
+ }
+ 
++/* Deskfeed test addition: the client's new monitor layout. Runs on the
++ * channel's thread; the peer thread applies it (sf_apply_pending_resize). */
++static UINT sf_disp_monitor_layout(DispServerContext* disp,
++                                   const DISPLAY_CONTROL_MONITOR_LAYOUT_PDU* pdu)
++{
++	testPeerContext* context = (testPeerContext*)disp->custom;
++	if (!pdu || pdu->NumMonitors < 1)
++		return CHANNEL_RC_OK;
++	const UINT32 w = pdu->Monitors[0].Width;
++	const UINT32 h = pdu->Monitors[0].Height;
++	WLog_INFO(TAG, "DESKFEED-TEST monitor layout %" PRIu32 "x%" PRIu32, w, h);
++	if ((w == 0) || (h == 0) || (w > 0xFFFF) || (h > 0xFFFF))
++		return CHANNEL_RC_OK;
++	(void)__atomic_exchange_n(&context->pending_size, (LONG)((w << 16) | h), __ATOMIC_SEQ_CST);
++	(void)SetEvent(context->resize_event);
++	return CHANNEL_RC_OK;
++}
++
++/* Deskfeed test addition: resize the desktop like the 'g' key handler. */
++static BOOL sf_apply_pending_resize(freerdp_peer* client)
++{
++	testPeerContext* context = (testPeerContext*)client->context;
++	rdpSettings* settings = client->context->settings;
++	(void)ResetEvent(context->resize_event);
++	const LONG v = __atomic_exchange_n(&context->pending_size, 0, __ATOMIC_SEQ_CST);
++	if (v == 0)
++		return TRUE;
++	const UINT32 w = ((UINT32)v >> 16) & 0xFFFF;
++	const UINT32 h = (UINT32)v & 0xFFFF;
++	if ((w == freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth)) &&
++	    (h == freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight)))
++		return TRUE;
++	if (!freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, w) ||
++	    !freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, h))
++		return FALSE;
++	if (!rfx_context_reset(context->rfx_context, w, h))
++		return FALSE;
++	WLog_INFO(TAG, "DESKFEED-TEST desktop resized to %" PRIu32 "x%" PRIu32, w, h);
++	if (!client->context->update->DesktopResize(client->context->update->context))
++		return FALSE;
++	context->activated = FALSE;
++	return TRUE;
++}
++
+ WINPR_ATTR_NODISCARD
+ static BOOL test_peer_context_new(freerdp_peer* client, rdpContext* ctx)
+ {
+@@ -151,6 +206,18 @@
+ 	if (!context->vcm || context->vcm == INVALID_HANDLE_VALUE)
+ 		goto fail;
+ 
++	/* Deskfeed test addition: display control channel. */
++	if (!(context->resize_event = CreateEvent(nullptr, TRUE, FALSE, nullptr)))
++		goto fail;
++	if (!(context->disp = disp_server_context_new(context->vcm)))
++		goto fail;
++	context->disp->custom = context;
++	context->disp->rdpcontext = ctx;
++	context->disp->MaxNumMonitors = 16;
++	context->disp->MaxMonitorAreaFactorA = 8192;
++	context->disp->MaxMonitorAreaFactorB = 8192;
++	context->disp->DispMonitorLayout = sf_disp_monitor_layout;
++
+ 	return TRUE;
+ fail:
+ 	test_peer_context_free(client, ctx);
+@@ -1263,7 +1330,9 @@
+ 
+ 		HANDLE channelHandle = WTSVirtualChannelManagerGetEventHandle(context->vcm);
+ 		handles[count++] = channelHandle;
+-		status = WaitForMultipleObjects(count, handles, FALSE, INFINITE);
++		handles[count++] = context->resize_event; /* Deskfeed test addition */
++		/* Deskfeed test change: wake up for the delayed caps. */
++		status = WaitForMultipleObjects(count, handles, FALSE, 100);
+ 
+ 		if (status == WAIT_FAILED)
+ 		{
+@@ -1275,9 +1344,20 @@
+ 		if (client->CheckFileDescriptor(client) != TRUE)
+ 			break;
+ 
+-		if (WTSVirtualChannelManagerCheckFileDescriptor(context->vcm) != TRUE)
++		/* Deskfeed test change: open drdynvc only once the client is active.
++		 * WTSVirtualChannelManagerOpen tries "once and only once"
++		 * (libfreerdp/core/server.c); before the client joined its channels
++		 * that try finds nothing and dynamic channels never start. */
++		if (WTSVirtualChannelManagerCheckFileDescriptorEx(context->vcm, context->activated) != TRUE)
+ 			break;
+ 
++		/* Deskfeed test addition */
++		if (WaitForSingleObject(context->resize_event, 0) == WAIT_OBJECT_0)
++		{
++			if (!sf_apply_pending_resize(client))
++				break;
++		}
++
+ 		/* Handle dynamic virtual channel initializations */
+ 		if (WTSVirtualChannelManagerIsChannelJoined(context->vcm, DRDYNVC_SVC_CHANNEL_NAME))
+ 		{
+@@ -1291,6 +1371,28 @@
+ 
+ 				case DRDYNVC_STATE_READY:
+ 
++					/* Deskfeed test addition: open the display control channel
++					 * and send its capabilities (queued behind the create
++					 * request on the same channel). */
++					/* DESKFEED_TEST_CAPS_DELAY_MS: send the caps this long after
++					 * dynamic channels are ready, like a real host that sends them
++					 * only after logon. */
++					if (context->disp_ready_at == 0)
++					{
++						const char* d = getenv("DESKFEED_TEST_CAPS_DELAY_MS");
++						context->disp_ready_at = GetTickCount64() + (d ? strtoull(d, nullptr, 10) : 0);
++					}
++					if (!context->disp_open && (GetTickCount64() >= context->disp_ready_at))
++					{
++						context->disp_open = TRUE;
++						if (context->disp->Open(context->disp) != CHANNEL_RC_OK)
++							WLog_ERR(TAG, "DESKFEED-TEST disp open failed");
++						else if (context->disp->DisplayControlCaps(context->disp) != CHANNEL_RC_OK)
++							WLog_ERR(TAG, "DESKFEED-TEST disp caps failed");
++						else
++							WLog_INFO(TAG, "DESKFEED-TEST disp channel open, caps sent");
++					}
++
+ 					/* Here is the correct state to start dynamic virtual channels */
+ 					if (sf_peer_audin_running(context) != context->audin_open)
+ 					{

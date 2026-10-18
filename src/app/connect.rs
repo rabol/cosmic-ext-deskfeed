@@ -3,14 +3,6 @@
 //! Connecting a desktop: connection file, Entra sign-in or password, FreeRDP, session events.
 
 use super::*;
-use crate::workspace::Refit;
-
-/// How long a refit waits for the window to report its new size; SDL
-/// sends it as soon as it applies COSMIC's size.
-const REFIT_CHECK: std::time::Duration = std::time::Duration::from_secs(1);
-/// Refits tried before giving up (the window becomes resizable within
-/// moments of the display channel being ready).
-const REFIT_TRIES: u8 = 3;
 
 impl AppModel {
     /// Connection messages: connecting, the password dialog, sessions, the workspace move. Routed here by `update`.
@@ -76,15 +68,7 @@ impl AppModel {
                 if self.account(&id).is_some_and(|a| a.epoch == epoch)
                     && self.running.get(&key).is_some_and(|r| r.attempt == attempt)
                 {
-                    match event {
-                        SessionEvent::DisplayReady => return self.refit(&key),
-                        SessionEvent::WindowResized => {
-                            if let Some(r) = self.running.get_mut(&key) {
-                                r.resized = true;
-                            }
-                        }
-                        event => self.session_event(&key, event),
-                    }
+                    self.session_event(&key, event);
                 }
             }
             Message::Disconnect(key) => {
@@ -94,19 +78,6 @@ impl AppModel {
                     l.stop = true;
                 }
             }
-            Message::WindowRefitted(key, attempt, result) => {
-                match result {
-                    Ok(Refit::Skipped) => return Task::none(),
-                    Ok(Refit::Focused | Refit::Maximized) => {}
-                    // Checked and tried again like a refit that was ignored.
-                    Err(e) => crate::app_log!("window size: refit failed ({e})"),
-                }
-                return cosmic::task::future(async move {
-                    tokio::time::sleep(REFIT_CHECK).await;
-                    Message::RefitCheck(key, attempt)
-                });
-            }
-            Message::RefitCheck(key, attempt) => return self.refit_check(&key, attempt),
             Message::WorkspaceMoved(key, result) => {
                 self.movers.remove(&key);
                 // Not worth interrupting the user: the desktop opened, only
@@ -341,7 +312,6 @@ impl AppModel {
                 deadline,
                 account: account.to_owned(),
                 stop: false,
-                refit: (!settings.fullscreen).then(|| title.clone()),
             },
         );
         // Starting FreeRDP writes files and hands over the arguments: not on
@@ -471,7 +441,6 @@ impl AppModel {
             deadline,
             account: owner,
             stop,
-            refit,
             ..
         } = self.launching.remove(&key).expect("checked above");
         let current = self.account(account).is_some_and(|a| a.epoch == epoch);
@@ -503,9 +472,6 @@ impl AppModel {
                         attempt,
                         account: owner,
                         session,
-                        refit,
-                        refits: 0,
-                        resized: false,
                     },
                 );
                 if wanted {
@@ -529,49 +495,6 @@ impl AppModel {
         }
         if self.quit == Quit::Stopping {
             return self.continue_quit();
-        }
-        Task::none()
-    }
-
-    /// The display channel of a windowed session is ready: maximize and
-    /// restore its window, so FreeRDP sends the window's size
-    /// (workspace.rs). Checked by [`Self::refit_check`].
-    pub(super) fn refit(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
-        let Some(r) = self.running.get_mut(key) else {
-            return Task::none();
-        };
-        let Some(title) = r.refit.clone() else {
-            return Task::none();
-        };
-        r.refits += 1;
-        r.resized = false;
-        let (key, attempt) = (key.to_owned(), r.attempt);
-        cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                crate::workspace::refit_window(<AppModel as cosmic::Application>::APP_ID, &title)
-            })
-            .await;
-            let result = match result {
-                Ok(Ok(done)) => Ok(done),
-                Ok(Err(e)) => Err(e.to_string()),
-                Err(_) => Err("task".to_owned()),
-            };
-            Message::WindowRefitted(key, attempt, result)
-        })
-    }
-
-    /// A moment after a refit: if the window didn't take a new size, it
-    /// wasn't resizable yet (`refit_window`); try again, a few times.
-    fn refit_check(&mut self, key: &str, attempt: u64) -> Task<cosmic::Action<Message>> {
-        let Some(r) = self.running.get(key).filter(|r| r.attempt == attempt) else {
-            return Task::none();
-        };
-        if r.resized {
-            crate::app_log!("window size: sent to the remote desktop (try {})", r.refits);
-        } else if r.refits < REFIT_TRIES {
-            return self.refit(key);
-        } else {
-            crate::app_log!("window size: the window kept its size after {} tries", r.refits);
         }
         Task::none()
     }
@@ -637,8 +560,6 @@ impl AppModel {
                     self.remember_logon(key, logon);
                 }
             }
-            // Handled before this (`refit`).
-            SessionEvent::DisplayReady | SessionEvent::WindowResized => {}
             SessionEvent::Ended { end, log } => {
                 self.running.remove(key);
                 self.launching.remove(key);

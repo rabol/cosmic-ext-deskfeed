@@ -29,28 +29,18 @@ use super::rdpfile::ConnectionFile;
 use crate::auth::token::Secret;
 use crate::service::http::BearerToken;
 
-/// FreeRDP clients we know, in order of preference (ADR 0004).
-const FREERDP_BINARIES: &[&str] = &["sdl-freerdp3", "sdl-freerdp"];
+/// FreeRDP clients we know, in order of preference (ADR 0004): the X11
+/// client. It sends the window's size as soon as the display channel is
+/// ready; the SDL client didn't under COSMIC tiling (ADR 0004, client
+/// comparison). Some distributions name FreeRDP 3's client `xfreerdp`; the
+/// dependency check requires version 3.32.2 either way.
+const FREERDP_BINARIES: &[&str] = &["xfreerdp3", "xfreerdp"];
 /// Log line FreeRDP writes once the session is set up.
 const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
 /// Longest FreeRDP output line looked at; the rest of a line is skipped.
 const MAX_OUTPUT_LINE: usize = 4096;
-/// FreeRDP's SDL3 display channel logger; at DEBUG it reports when the
-/// channel is ready (`client/SDL/SDL3/sdl_disp.cpp`, `DisplayControlCaps`).
-/// Its lines hold only monitor counts and area factors.
-const DISPLAY_LOGGER: &str = "com.freerdp.client.sdl.disp";
-/// Logged by that channel, in a windowed session only, once it is ready.
-const DISPLAY_READY_MARKER: &str = "DisplayControlCapsPdu: setting the window as resizable";
-/// FreeRDP's SDL3 client logger. SDL's own messages go through it at its
-/// level (`client/SDL/SDL3/sdl_freerdp.cpp`, `SDL_SetLogOutputFunction`);
-/// at DEBUG it reports each window event with the window's position and
-/// size (`sdl_context.cpp`, `handleEvent(const SDL_WindowEvent&)`).
-const SDL_LOGGER: &str = "com.freerdp.client.SDL";
-/// The desktop window took a new size. SDL sends this only when the size
-/// really changed, so a size the window ignored doesn't produce it.
-const WINDOW_RESIZED_MARKER: &str = "SDL_EVENT_WINDOW_RESIZED: [";
 
 /// Environment every child process (FreeRDP, the sign-in helper) gets;
 /// everything else is dropped. See [`pass_environment`].
@@ -202,7 +192,9 @@ pub enum LaunchError {
     Io(String),
 }
 
-/// Why a session ended, from FreeRDP's exit code (SDL client) and log.
+/// Why a session ended, from FreeRDP's exit code and log. The X11 and SDL
+/// clients share these codes (FreeRDP 3.32.2 `client/X11/xfreerdp.h`,
+/// `client/SDL/SDL3/sdl_utils.hpp`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEnd {
     /// Normal end: disconnect, log off, or the user closed the window.
@@ -224,15 +216,7 @@ pub enum SessionEnd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
     Connected,
-    /// The display channel is ready in a windowed session: from now on a
-    /// window event makes FreeRDP send the window's size (workspace.rs).
-    DisplayReady,
-    /// The desktop window's size changed.
-    WindowResized,
-    Ended {
-        end: SessionEnd,
-        log: Vec<String>,
-    },
+    Ended { end: SessionEnd, log: Vec<String> },
 }
 
 /// Finds a FreeRDP client in `PATH`.
@@ -509,10 +493,11 @@ fn write_connection_file(
 /// no setting changes this). The C library holds stdout back in blocks
 /// when it is a pipe, but writes each line when it is a terminal (C11
 /// 7.21.3: stdout is fully buffered only when not interactive; glibc
-/// line-buffers a terminal). Through a pipe the
-/// display-ready line, and with it the window refit, came only when FreeRDP
-/// ended. FreeRDP checks for a terminal only on its input (password prompt,
-/// `libfreerdp/utils/passphrase.c`), which stays `/dev/null`.
+/// line-buffers a terminal). Through a pipe the connection steps and the
+/// connected line came in blocks, some only when FreeRDP ended. FreeRDP
+/// checks for a terminal only on its input (password and certificate
+/// prompts, `libfreerdp/utils/passphrase.c`, `client/common/client.c`),
+/// which stays `/dev/null`.
 ///
 /// Raw mode: no line-ending translation. Not a controlling terminal
 /// (`O_NOCTTY`), so it can't send signals to anyone.
@@ -581,28 +566,12 @@ fn spawn_freerdp(
         cmd.env("no_proxy", n);
     }
     cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_PROFILE", profile);
-    // Native Wayland, not XWayland. SDL 3 picks XWayland when the
-    // compositor lacks `wp_fifo_manager_v1` (SDL 3.4.18
-    // `src/video/wayland/SDL_waylandvideo.c`), which COSMIC does: the
-    // window then had a Latin-1-mangled title, no Wayland app ID (so the
-    // refit and "open on a new workspace" couldn't find it) and X11's
-    // handling of tiling. A list: X11 still works without Wayland
-    // (`SDL_HINT_VIDEO_DRIVER`, SDL_hints.h). The user's own choice wins.
-    cmd.env(
-        "SDL_VIDEO_DRIVER",
-        std::env::var_os("SDL_VIDEO_DRIVER").unwrap_or_else(|| "wayland,x11".into()),
-    );
     // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it
     // stopped. This logger prints no names, passwords or tokens (FreeRDP
     // 3.32.2 `libfreerdp/core/rdp.c`). An environment variable, because
     // `/log-filters:` comes too late for loggers that already exist
     // (`winpr/libwinpr/utils/wlog/wlog.c` caches the level on creation).
-    // The display channel and SDL client loggers too (`WLOG_FILTER` is a
-    // comma-separated list, `winpr/libwinpr/utils/wlog/wlog.c`).
-    cmd.env(
-        "WLOG_FILTER",
-        format!("{STATE_LOGGER}:DEBUG,{DISPLAY_LOGGER}:DEBUG,{SDL_LOGGER}:DEBUG"),
-    );
+    cmd.env("WLOG_FILTER", format!("{STATE_LOGGER}:DEBUG"));
     // SAFETY: only async-signal-safe calls (dup2, fcntl) between fork and
     // exec. The pipe's read end becomes fd 3 without close-on-exec.
     unsafe {
@@ -687,12 +656,6 @@ fn supervise(
                     }
                     if log.lock().expect("not poisoned").push(&line) {
                         report(SessionEvent::Connected);
-                    }
-                    if line.contains(DISPLAY_READY_MARKER) {
-                        report(SessionEvent::DisplayReady);
-                    }
-                    if line.contains(WINDOW_RESIZED_MARKER) {
-                        report(SessionEvent::WindowResized);
                     }
                 }
             })
@@ -883,7 +846,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("avd-exec-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("sdl-freerdp3");
+        let file = dir.join("xfreerdp3");
         fs::write(&file, "#!/bin/sh\n").unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
         assert!(!is_executable(&file));
@@ -1018,7 +981,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("avd-launch-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let out = dir.join("out.txt");
-        let fake = dir.join("sdl-freerdp3");
+        let fake = dir.join("xfreerdp3");
         fs::write(
             &fake,
             format!(
@@ -1032,11 +995,8 @@ mod tests {
                  grep -q drivestoredirect \"$first\" && echo DRIVES >> \"$out\"\n\
                  env | grep -q AVD_TEST_SECRET && echo LEAKED_ENV >> \"$out\"\n\
                  env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
-                 env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG,com.freerdp.client.sdl.disp:DEBUG,com.freerdp.client.SDL:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
-                 env | grep -q '^SDL_VIDEO_DRIVER=wayland,x11$' && echo WAYLAND_OK >> \"$out\"\n\
+                 env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
                  echo '[INFO][x] - Loading Dynamic Virtual Channel rdpgfx'\n\
-                 echo '[DEBUG][com.freerdp.client.sdl.disp] - [DisplayControlCaps]: DisplayControlCapsPdu: setting the window as resizable'\n\
-                 echo '[DEBUG][com.freerdp.client.SDL] - [winpr_LogOutputFunction]: [APP] SDL_EVENT_WINDOW_RESIZED: [3] 0x0-1524x1680'\n\
                  exit 0\n",
                 out = out.display()
             ),
@@ -1054,14 +1014,6 @@ mod tests {
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(10)).unwrap(),
             SessionEvent::Connected
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_secs(10)).unwrap(),
-            SessionEvent::DisplayReady
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_secs(10)).unwrap(),
-            SessionEvent::WindowResized
         );
         let SessionEvent::Ended { end, .. } = rx.recv_timeout(Duration::from_secs(10)).unwrap()
         else {
@@ -1081,7 +1033,6 @@ mod tests {
         assert!(got.contains("DIRMODE:700"), "{got}");
         assert!(got.contains("PROFILE_OK"), "{got}");
         assert!(got.contains("FILTER_OK"), "{got}");
-        assert!(got.contains("WAYLAND_OK"), "{got}");
         assert!(!got.contains("DRIVES"));
         assert!(!got.contains("LEAKED_ENV"));
         // The connection file and its folder are gone.
@@ -1106,7 +1057,7 @@ mod tests {
         fs::write(
             &fake,
             "#!/bin/sh\ncat <&3 >/dev/null\n\
-             { echo '[DEBUG][com.freerdp.client.sdl.disp] - DisplayControlCapsPdu: setting the window as resizable'; sleep 5; } | sed -n p\n",
+             { echo '[INFO][com.freerdp.channels.drdynvc.client] - [dvcman_load_addin]: Loading Dynamic Virtual Channel rdpgfx'; sleep 5; } | sed -n p\n",
         )
         .unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
@@ -1116,7 +1067,7 @@ mod tests {
             launch_with(&fake, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(3)).unwrap(),
-            SessionEvent::DisplayReady
+            SessionEvent::Connected
         );
         stop_all(&[session], STOP_GRACE);
         fs::remove_dir_all(dir).unwrap();
@@ -1149,7 +1100,7 @@ mod tests {
                         assert_eq!(log.len(), 1);
                     }
                 }
-                other => panic!("unexpected {other:?}"),
+                other @ SessionEvent::Connected => panic!("unexpected {other:?}"),
             }
         }
         fs::remove_dir_all(dir).unwrap();
@@ -1209,11 +1160,81 @@ sleep 300
         fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Real `sdl-freerdp3`: every property we keep, plus our arguments, must
+    /// Real `xfreerdp3` through Deskfeed's own launch path, against the
+    /// local test server (`research/rdp-test-server/README.md`):
+    /// `DESKFEED_TEST_SERVER=<its socket> cargo test --release
+    /// local_test_server_session -- --ignored`. Runs `DESKFEED_TEST_SECS`
+    /// (default 20) seconds; the window's tiling and the server's resize log
+    /// are checked from outside.
+    #[test]
+    #[ignore = "needs xfreerdp3 and the local test server"]
+    fn local_test_server_session() {
+        let socket = std::env::var("DESKFEED_TEST_SERVER").expect("DESKFEED_TEST_SERVER");
+        let secs: u64 = std::env::var("DESKFEED_TEST_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(20);
+        let dir = std::env::temp_dir().join(format!("avd-local-{}", std::process::id()));
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let s = LaunchSpec {
+            connection: ConnectionFile::local_test(&socket),
+            username: Some("test".into()),
+            password: Some(Secret::new("test".into())),
+            logon: LogonSetting::EmptyDomain,
+            helper: PathBuf::from("/nonexistent/helper"),
+            profile: dir.join("profile"),
+            gateway_token: None,
+            settings: crate::settings::DEFAULTS,
+            window_title: "Deskfeed local test \u{2013} t\u{e9}st".into(),
+            app_id: "io.github.rabol.DeskfeedTest".into(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let freerdp = find_freerdp().expect("xfreerdp3 installed");
+        // `launch_with`'s steps, with the two arguments the test server
+        // can't take: no Azure gateway, TLS instead of NLA.
+        let rundir = RuntimeDir::create(&dir.join("run")).unwrap();
+        let rdp_path = write_connection_file(&rundir, &s.connection).unwrap();
+        let args: Vec<String> = build_args(&s, &rdp_path)
+            .unwrap()
+            .into_iter()
+            .filter(|a| !a.starts_with("/gateway:"))
+            .map(|a| {
+                if a == "/sec:nla" {
+                    "/sec:tls".to_owned()
+                } else {
+                    a
+                }
+            })
+            .chain(["/cert:ignore".to_owned()])
+            .collect();
+        let (read_end, write_end) = pipe().unwrap();
+        let (terminal, output) = output_terminal().unwrap();
+        let child = spawn_freerdp(&freerdp, &s.profile, &read_end, output).unwrap();
+        drop(read_end);
+        send_args(write_end, &args).unwrap();
+        let session = supervise(
+            child,
+            terminal,
+            rundir,
+            Arc::new(move |e| {
+                let _ = tx.send(e);
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(15)).unwrap(),
+            SessionEvent::Connected
+        );
+        std::thread::sleep(Duration::from_secs(secs));
+        stop_all(&[session], STOP_GRACE);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Real `xfreerdp3`: every property we keep, plus our arguments, must
     /// pass FreeRDP's argument parsing. Without `loadbalanceinfo` FreeRDP stops
     /// right after parsing, before any network access.
     #[test]
-    #[ignore = "needs sdl-freerdp3"]
+    #[ignore = "needs xfreerdp3"]
     fn real_freerdp_accepts_all_kept_properties() {
         let ints = [
             "gatewayusagemethod:i:1",
@@ -1272,7 +1293,7 @@ sleep 300
             app_id: String::new(),
         };
         let (tx, rx) = std::sync::mpsc::channel();
-        let freerdp = find_freerdp().expect("sdl-freerdp3 installed");
+        let freerdp = find_freerdp().expect("xfreerdp3 installed");
         let _session =
             launch_with(&freerdp, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
         let SessionEvent::Ended { log, .. } = rx.recv_timeout(Duration::from_secs(30)).unwrap()

@@ -27,7 +27,7 @@ Native packages only; there is no Flatpak ([ADR 0010](./docs/adr/0010-native-onl
 | Dependency | Minimum | Needed for | Arch Linux package |
 |---|---|---|---|
 | COSMIC desktop (cosmic-comp with window management v4) | Epoch 1 | The app itself; "Open on a new workspace" | `cosmic-session` |
-| FreeRDP with the SDL client (`sdl-freerdp3`), built with `WITH_AAD=ON` | 3.32.2 | Connecting to desktops, Entra sign-in to desktops | `freerdp` |
+| FreeRDP with the X11 client (`xfreerdp3`), built with `WITH_AAD=ON` | 3.32.2 | Connecting to desktops, Entra sign-in to desktops (runs on COSMIC's XWayland) | `freerdp` |
 | WebKitGTK 6 and GTK 4 | 2.52 | The Microsoft sign-in window | `webkitgtk-6.0` |
 | A Secret Service (oo7, GNOME Keyring, …) | — | Staying signed in (optional) | `oo7` or `gnome-keyring` |
 
@@ -62,7 +62,7 @@ If something doesn't work, **View → Dependencies** shows what's missing, and *
 
 - **One Microsoft confirmation page per connection.** FreeRDP fetches the token for the remote Windows machine itself, through a sign-in page; it offers no way for the app to supply that token ([details](./docs/milestone-1.md)). The official Windows and macOS clients don't show this page.
 - **Your organization's sign-in frequency applies.** If it requires a fresh sign-in after a set time (for example *"Every time"*, which allows reuse for five minutes), the app asks you to sign in again; it doesn't work around such policies.
-- **Window size under auto-tiling.** FreeRDP sends a window's size to Windows only after a window change, so once it has connected the app moves the focus away from the desktop's window and back, which makes COSMIC send the window its size again; you may see the focus outline blink. If the desktop's window is alone on its workspace, the app maximizes and restores it instead.
+- **Unknown certificates.** FreeRDP's X11 client asks about a certificate it can't verify in a terminal, which the app doesn't have, so such a connection fails with an error instead of asking. Azure Virtual Desktop connections through the gateway haven't needed this so far.
 - **RemoteApps** are listed but can't be started yet.
 - **Proxies:** the app takes the proxy from the usual environment variables (`all_proxy`, `https_proxy`, `http_proxy`, `no_proxy`, upper or lower case) and gives FreeRDP the same one. FreeRDP supports only `http://` and `socks5://` proxies; with another kind the app says so instead of connecting without it. Desktop-environment proxy settings that aren't exported as variables are not used.
 - **Azure public cloud only**; no sovereign clouds.

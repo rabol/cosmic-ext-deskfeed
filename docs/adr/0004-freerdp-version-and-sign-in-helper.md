@@ -34,9 +34,24 @@ Spec §4 step 6 and §8: inspect the selected FreeRDP version's AVD gateway and 
 
 The reference session log shows: helper detection failed (`aad_auth_helper_detect_helper: could not determine expected helper binary location`), the terminal `Browse to:` flow then got a gateway token, and RDSTLS later failed with `RDSTLS_RESULT_LOGON_FAILURE [0x0000052E]` / `ERRCONNECT_LOGON_FAILURE`. The reference app also writes the full `nativeclient?code=…` redirect URL to its session log, and stores feed XML and `.rdp` files with mode `0644`. We must not repeat either.
 
+### Client comparison on COSMIC (2026-10-18)
+
+Measured against a local test server (`research/rdp-test-server`: FreeRDP 3.32.2's sample server plus the display control channel, with the channel's capabilities delayed by 15 s like a real logon) on COSMIC (cosmic-comp `41497b4`, auto-tiling, output scale 1.25), with Deskfeed's arguments:
+
+| | `sdl-freerdp3` (native Wayland) | `sdl-freerdp3` (XWayland) | `xfreerdp3` (XWayland) | `wlfreerdp3` (native Wayland) |
+|---|---|---|---|---|
+| Opens tiled | 1 of 5 (else floating) | yes | 4 of 4 | 4 of 4 |
+| Sends the tile size once the display channel is ready | no | no | yes, every run | yes, every run |
+| Size sent for a 1524×836 tile | window's own | — | 1904×1000 (physical pixels) | 3048×1600 (integer scale 2) |
+| Non-ASCII title | correct | mangled (Latin-1) | correct | correct |
+
+Causes, from the 3.32.2 source: the SDL client sends a layout only on a window event or from its retry timer, at most 5 × 1 s after it (`client/SDL/SDL3/sdl_disp.cpp`, `MAX_RETRIES`), so capabilities that arrive after a longer logon never get one; and it makes its window fixed-size right after creating it (`sdl_context.cpp`, `postConnect` → `setResizeable(false)`), which COSMIC treats as a dialog and floats when it maps the window then (cosmic-comp `src/shell/layout/mod.rs`, `is_dialog`). `wlfreerdp3` knows only the integer output scale, so Windows would draw a desktop 1.6× too large for the window. `xfreerdp3` gets physical pixels because COSMIC's default XWayland scaling is fractional (`cosmic-comp-config`, `XwaylandDescaling::Fractional`).
+
+All three clients use `client_failsafe_get_access_token`, so the sign-in helper works with each (`client/X11/xf_client.c`, `client/Wayland/wlfreerdp.c`), and the X11 and SDL clients share their exit codes (`client/X11/xfreerdp.h`, `client/SDL/SDL3/sdl_utils.hpp`). Unlike the SDL client, `xfreerdp3` has no dialogs: an unverifiable certificate is asked about on the terminal (`client/common/client.c`, `client_cli_accept_certificate`), which reads `/dev/null` in the app and so refuses.
+
 ## Decision (proposed)
 
-1. Target FreeRDP **3.32.2** as the first supported version, using the distro `sdl-freerdp3` for native development builds.
+1. Target FreeRDP **3.32.2** as the first supported version, using the distro's **`xfreerdp3`** (X11 client, on COSMIC's XWayland). It was `sdl-freerdp3` until the client comparison above.
 2. Integrate Entra token requests through **FreeRDP's own helper protocol** (`/azure:auth-helper:<path>`), with a small Deskfeed helper binary that forwards each `navigate` to the running app over a private, authenticated channel. No FreeRDP patch and no terminal scraping.
 3. Pass the complete FreeRDP argument list through `/args-from:fd:<n>`.
 4. Keep `sso-mib` as a later optional capability. The distro build doesn't include it, so it needs our own FreeRDP build (likely only in Flatpak).
@@ -46,7 +61,7 @@ The reference session log shows: helper detection failed (`aad_auth_helper_detec
 - [ ] A research helper that speaks the protocol completes the gateway token request (`/sec:nla`) on the owner's tenant.
 - [ ] The same helper completes the session-host token request (`/sec:aad`, proof-of-possession) on a host pool with Entra single sign-on, if one is available.
 - [ ] (`research/loopback-redirect-test.sh`; unauthenticated checks are inconclusive, see `docs/milestone-1.md`) Whether Microsoft's public client ID accepts a loopback redirect (`http://localhost:<port>`). If it does, the system browser can replace the web view and the helper needs no web engine ([ADR 0003](0003-minimal-dependencies.md)). If it is rejected (`AADSTS50011`), record that.
-- [ ] Backend comparison on COSMIC (spec §4 step 7): `sdl-freerdp3` native Wayland, `sdl-freerdp3` on XWayland, `xfreerdp3` on XWayland.
+- [x] Backend comparison on COSMIC (spec §4 step 7): `sdl-freerdp3` native Wayland, `sdl-freerdp3` on XWayland, `xfreerdp3` on XWayland, plus `wlfreerdp3` (2026-10-18, above). Still open: multi-hour stability, and a real Azure connection with `xfreerdp3`.
 
 ## Consequences
 

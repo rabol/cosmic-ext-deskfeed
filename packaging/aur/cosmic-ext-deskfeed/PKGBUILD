@@ -14,7 +14,7 @@ license=('MIT' 'Apache-2.0' 'MPL-2.0' 'Unicode-3.0' 'Zlib' 'ISC' 'BSD-3-Clause'
          'BSD-2-Clause' 'Unlicense' 'CC0-1.0')
 depends=(
   'cosmic-icon-theme'
-  'freerdp>=2:3.32.2'   # connects; needs the SDL client and WITH_AAD
+  'freerdp>=2:3.32.2'   # connects; needs the X11 client (xfreerdp3) and WITH_AAD
   'glib2'
   'glibc'
   'gtk4'                # sign-in window
