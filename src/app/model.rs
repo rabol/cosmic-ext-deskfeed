@@ -112,6 +112,10 @@ pub(super) struct Running {
     /// Window title for [`crate::workspace::refit_window`]; `None` in full
     /// screen.
     pub(super) refit: Option<String>,
+    /// Refits tried so far.
+    pub(super) refits: u8,
+    /// The window took a new size since the last refit started.
+    pub(super) resized: bool,
 }
 
 /// A FreeRDP start in progress.
@@ -246,8 +250,11 @@ pub enum Message {
     DesktopTimeout(String, Option<u32>),
     /// Resource key; outcome of "open on a new workspace" (log text).
     WorkspaceMoved(String, Result<(), String>),
-    /// Outcome of fitting the remote desktop to its window (log text).
-    WindowRefitted(Result<(), String>),
+    /// Resource key, attempt; outcome of fitting the remote desktop to its
+    /// window (error as log text).
+    WindowRefitted(String, u64, Result<crate::workspace::Refit, String>),
+    /// Resource key, attempt: did the window take its new size?
+    RefitCheck(String, u64),
     /// The window's close button or the desktop asked the app to close.
     QuitRequested,
     QuitConfirm,

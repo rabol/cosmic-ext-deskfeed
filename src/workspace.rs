@@ -19,7 +19,8 @@
 //! `DisplayControlCaps` only makes the window resizable). Under COSMIC
 //! auto-tiling the window gets its tile size before that, so the remote
 //! desktop kept its first size. Maximizing and restoring the window once
-//! the channel is ready gives FreeRDP those events.
+//! the channel is ready gives FreeRDP those events; the app repeats it if
+//! the window didn't take the new size (see [`refit_window`]).
 //!
 //! Blocking, with its own short-lived Wayland connection; call it from
 //! `spawn_blocking`. Uses cosmic-client-toolkit as re-exported by libcosmic.
@@ -230,11 +231,26 @@ pub fn move_to_new_workspace(
     Ok(())
 }
 
+/// What [`refit_window`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refit {
+    /// Maximized and restored the window.
+    Done,
+    /// Left it alone: maximized or full screen already.
+    Skipped,
+}
+
 /// Maximizes the window with `app_id` and `title`, waits until COSMIC
 /// reports it maximized, then restores it, so FreeRDP sends the window's
 /// real size (see the module notes). Leaves maximized or full-screen
 /// windows alone.
-pub fn refit_window(app_id: &str, title: &str) -> Result<(), MoveError> {
+///
+/// The window may ignore both sizes: FreeRDP logs that its window is
+/// resizable before SDL makes it so (`sdl_context.cpp` `setResizeable`
+/// queues the change), and SDL ignores sizes for a fixed-size window
+/// (SDL 3.4.18 `SDL_waylandwindow.c`, `handle_xdg_toplevel_configure`).
+/// The caller checks that the window took a new size and calls again.
+pub fn refit_window(app_id: &str, title: &str) -> Result<Refit, MoveError> {
     let conn = Connection::connect_to_env().map_err(|e| MoveError::NoWayland(e.to_string()))?;
     let (globals, mut queue) =
         registry_queue_init::<State>(&conn).map_err(|e| MoveError::NoWayland(e.to_string()))?;
@@ -293,7 +309,7 @@ pub fn refit_window(app_id: &str, title: &str) -> Result<(), MoveError> {
         roundtrip(&mut state)?;
     };
     if maximized(&window) || is_fullscreen(&window) {
-        return Ok(());
+        return Ok(Refit::Skipped);
     }
     let toplevel = window.cosmic_toplevel.ok_or(MoveError::WindowNotFound)?;
     state.manager.manager.set_maximized(&toplevel);
@@ -310,7 +326,7 @@ pub fn refit_window(app_id: &str, title: &str) -> Result<(), MoveError> {
     }
     state.manager.manager.unset_maximized(&toplevel);
     roundtrip(&mut state)?;
-    Ok(())
+    Ok(Refit::Done)
 }
 
 fn is_fullscreen(t: &ToplevelInfo) -> bool {

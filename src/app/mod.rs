@@ -451,6 +451,7 @@ impl cosmic::Application for AppModel {
             | Message::Disconnect(..)
             | Message::WorkspaceMoved(..)
             | Message::WindowRefitted(..)
+            | Message::RefitCheck(..)
             | Message::QuitRequested
             | Message::QuitConfirm
             | Message::QuitCancel

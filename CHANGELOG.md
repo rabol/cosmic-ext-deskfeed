@@ -26,7 +26,7 @@ First version (0.1.0), not yet released.
 - Quitting with desktops open asks first ("Disconnect and quit"), then ends every FreeRDP process, including anything it started, before the app exits. This also applies to closing from the dock or a keyboard shortcut.
 - Signing out ends all of the account's sessions, including desktops that a refresh removed from the list.
 - FreeRDP is started in the background, so the window never waits for it.
-- Remote desktops in a window take the window's size under COSMIC auto-tiling: once connected, the app maximizes and restores the window once, which makes FreeRDP send its size.
+- Remote desktops in a window take the window's size under COSMIC auto-tiling: once connected, the app maximizes and restores the window, which makes FreeRDP send its size. FreeRDP reports the window resizable a moment before it is, so the app checks that the window took the new size and tries again (up to 3 times).
 - FreeRDP's log lines reach the app as they're written (its output is a terminal, not a pipe). Through a pipe they came in blocks, so the window fit above and the connected state could wait until FreeRDP ended.
 - FreeRDP's window is a native Wayland window. SDL 3 chose XWayland on COSMIC, which mangled non-ASCII characters in the window title and hid the app ID the window fit and "open on a new workspace" look for.
 - Signing out waits for the account's sign-in window and FreeRDP (with its sign-in helper) to end before deleting its cookies, so nothing can write them back; the helper never recreates deleted folders. Signing the same account in again waits until that is done.

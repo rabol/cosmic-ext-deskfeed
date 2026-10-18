@@ -35,14 +35,22 @@ const FREERDP_BINARIES: &[&str] = &["sdl-freerdp3", "sdl-freerdp"];
 const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
+/// Longest FreeRDP output line looked at; the rest of a line is skipped.
+const MAX_OUTPUT_LINE: usize = 4096;
 /// FreeRDP's SDL3 display channel logger; at DEBUG it reports when the
 /// channel is ready (`client/SDL/SDL3/sdl_disp.cpp`, `DisplayControlCaps`).
 /// Its lines hold only monitor counts and area factors.
-/// Longest FreeRDP output line looked at; the rest of a line is skipped.
-const MAX_OUTPUT_LINE: usize = 4096;
 const DISPLAY_LOGGER: &str = "com.freerdp.client.sdl.disp";
 /// Logged by that channel, in a windowed session only, once it is ready.
 const DISPLAY_READY_MARKER: &str = "DisplayControlCapsPdu: setting the window as resizable";
+/// FreeRDP's SDL3 client logger. SDL's own messages go through it at its
+/// level (`client/SDL/SDL3/sdl_freerdp.cpp`, `SDL_SetLogOutputFunction`);
+/// at DEBUG it reports each window event with the window's position and
+/// size (`sdl_context.cpp`, `handleEvent(const SDL_WindowEvent&)`).
+const SDL_LOGGER: &str = "com.freerdp.client.SDL";
+/// The desktop window took a new size. SDL sends this only when the size
+/// really changed, so a size the window ignored doesn't produce it.
+const WINDOW_RESIZED_MARKER: &str = "SDL_EVENT_WINDOW_RESIZED: [";
 
 /// Environment every child process (FreeRDP, the sign-in helper) gets;
 /// everything else is dropped. See [`pass_environment`].
@@ -219,6 +227,8 @@ pub enum SessionEvent {
     /// The display channel is ready in a windowed session: from now on a
     /// window event makes FreeRDP send the window's size (workspace.rs).
     DisplayReady,
+    /// The desktop window's size changed.
+    WindowResized,
     Ended {
         end: SessionEnd,
         log: Vec<String>,
@@ -587,11 +597,11 @@ fn spawn_freerdp(
     // 3.32.2 `libfreerdp/core/rdp.c`). An environment variable, because
     // `/log-filters:` comes too late for loggers that already exist
     // (`winpr/libwinpr/utils/wlog/wlog.c` caches the level on creation).
-    // The display channel logger too (`WLOG_FILTER` is a comma-separated
-    // list, `winpr/libwinpr/utils/wlog/wlog.c`).
+    // The display channel and SDL client loggers too (`WLOG_FILTER` is a
+    // comma-separated list, `winpr/libwinpr/utils/wlog/wlog.c`).
     cmd.env(
         "WLOG_FILTER",
-        format!("{STATE_LOGGER}:DEBUG,{DISPLAY_LOGGER}:DEBUG"),
+        format!("{STATE_LOGGER}:DEBUG,{DISPLAY_LOGGER}:DEBUG,{SDL_LOGGER}:DEBUG"),
     );
     // SAFETY: only async-signal-safe calls (dup2, fcntl) between fork and
     // exec. The pipe's read end becomes fd 3 without close-on-exec.
@@ -680,6 +690,9 @@ fn supervise(
                     }
                     if line.contains(DISPLAY_READY_MARKER) {
                         report(SessionEvent::DisplayReady);
+                    }
+                    if line.contains(WINDOW_RESIZED_MARKER) {
+                        report(SessionEvent::WindowResized);
                     }
                 }
             })
@@ -1019,10 +1032,11 @@ mod tests {
                  grep -q drivestoredirect \"$first\" && echo DRIVES >> \"$out\"\n\
                  env | grep -q AVD_TEST_SECRET && echo LEAKED_ENV >> \"$out\"\n\
                  env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
-                 env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG,com.freerdp.client.sdl.disp:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
+                 env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG,com.freerdp.client.sdl.disp:DEBUG,com.freerdp.client.SDL:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
                  env | grep -q '^SDL_VIDEO_DRIVER=wayland,x11$' && echo WAYLAND_OK >> \"$out\"\n\
                  echo '[INFO][x] - Loading Dynamic Virtual Channel rdpgfx'\n\
                  echo '[DEBUG][com.freerdp.client.sdl.disp] - [DisplayControlCaps]: DisplayControlCapsPdu: setting the window as resizable'\n\
+                 echo '[DEBUG][com.freerdp.client.SDL] - [winpr_LogOutputFunction]: [APP] SDL_EVENT_WINDOW_RESIZED: [3] 0x0-1524x1680'\n\
                  exit 0\n",
                 out = out.display()
             ),
@@ -1044,6 +1058,10 @@ mod tests {
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(10)).unwrap(),
             SessionEvent::DisplayReady
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+            SessionEvent::WindowResized
         );
         let SessionEvent::Ended { end, .. } = rx.recv_timeout(Duration::from_secs(10)).unwrap()
         else {
