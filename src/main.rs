@@ -4,6 +4,7 @@ mod accounts;
 mod app;
 mod auth;
 mod bounded_lines;
+mod cache;
 mod config;
 mod deps;
 mod i18n;

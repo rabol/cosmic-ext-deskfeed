@@ -21,6 +21,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | With roadmap item 5: the alternative, scaling the picture (`/smart-sizing`), gives Windows a fixed 1 024×768 desktop unless a size is set too (`client/X11/xf_client.c`), so it needs a desktop-size setting beside it |
 | Refresh desktop lists every | 60 min (15–1 440, steps of 15) | A, Ac | `settings.rs` `Number::Refresh` | Done |
 | Time allowed for signing in | 5 min (2–15) | A, Ac | `settings.rs` `Number::SignIn` | Done |
+| Keep the offline desktop list for | 30 days (1–90) | A, Ac | `settings.rs` `Number::OfflineDays` | Done |
 | Log file size before it rotates | 1 MB (1–100) | A | `log.rs` `MAX_SIZE_MIB`, config `log_max_mib` | Done |
 | Printers, smart cards, serial ports, location, WebAuthn | off (forced in the `.rdp`) | A, Ac, C | `sessions/rdpfile.rs` `DEVICE_DEFAULTS` | Later: each needs FreeRDP research and a real-session test before it can be offered (spec §9) |
 | Drives, USB devices | off (feed's lists dropped) | A, Ac, C | `sessions/rdpfile.rs` | Later, as above |
@@ -38,6 +39,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | `.rdp` limits: 1 000 lines, 4 096-char values; allowed properties | `sessions/rdpfile.rs` | Security bounds and the reviewed property list |
 | Icons: PNG, at most 256×256; at most 200 fetched per refresh | `service/icons.rs`, `app/account_flow.rs` | Security bounds |
 | Sign-in protocol limits (request, reply and callback 16 KiB, helper line 64 KiB, 16 queued requests, 15 min longest wait) | `auth/`, `signin/src/` | Security bounds |
+| Offline list: 1 MB file, 2 000 desktops, 64 workspaces, 256-char names; never URLs or connection files | `cache.rs` | Security and privacy bounds (spec §7, §10) |
 | Cookie jar: 512 KiB, 300 cookies | `signin/src/session_jar.rs` | Security bounds |
 | Sign-in window ended 30 s after its time if it hangs | `auth/signin.rs` `HELPER_GRACE` | Safety margin after the setting |
 | Keyring payload 64 KiB; keyring prompt wait 2 min | `secrets.rs` | Bound; the prompt is the keyring's own |

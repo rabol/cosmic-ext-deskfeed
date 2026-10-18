@@ -26,6 +26,9 @@ pub(super) struct Account {
     pub(super) last_load: Option<SystemTime>,
     /// When the desktop list last loaded successfully.
     pub(super) last_refreshed: Option<SystemTime>,
+    /// The offline list and when it was saved; shown, read-only, until a
+    /// live list has loaded in this run.
+    pub(super) cached: Option<(SystemTime, Vec<WorkspaceView>)>,
     /// Fixed for the life of this entry; session and connection events
     /// carry it, so events from before a sign-out are ignored.
     pub(super) epoch: u64,
@@ -245,6 +248,8 @@ pub enum Message {
     CheckDependencies,
     DependenciesChecked(Vec<Check>),
     OpenLogFolder,
+    /// An account's offline list was read (account, epoch, list).
+    CacheLoaded(String, u64, Option<crate::cache::Cached>),
     /// The search field's text.
     SearchInput(String),
     /// Resource key.
@@ -313,6 +318,59 @@ pub(super) fn logon_index(setting: &LogonSetting) -> (usize, String) {
 /// Opaque key for a resource (spec §7): account, tenant, workspace (the
 /// feed's publisher ID) and resource ID, so the same resource ID in two
 /// workspaces gets two keys.
+/// The part of a desktop list the offline cache keeps: names, titles,
+/// kinds and keys; no URLs (spec §7, `cache.rs`).
+pub(super) fn to_cached(list: &[WorkspaceView]) -> Vec<crate::cache::CachedWorkspace> {
+    list.iter()
+        .map(|w| crate::cache::CachedWorkspace {
+            name: w.name.clone(),
+            resources: w
+                .resources
+                .iter()
+                .map(|r| crate::cache::CachedResource {
+                    key: r.key.clone(),
+                    title: r.title.clone(),
+                    kind: match r.kind {
+                        ResourceKind::Desktop => "desktop",
+                        ResourceKind::RemoteApp => "remoteapp",
+                        ResourceKind::Other => "other",
+                    }
+                    .to_owned(),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
+/// An offline list as the list view shows it: nothing to connect to.
+pub(super) fn from_cached(c: crate::cache::Cached) -> (SystemTime, Vec<WorkspaceView>) {
+    let list = c
+        .workspaces
+        .into_iter()
+        .map(|w| WorkspaceView {
+            name: w.name,
+            error: None,
+            resources: w
+                .resources
+                .into_iter()
+                .map(|r| ResourceView {
+                    legacy_key: String::new(),
+                    kind: match r.kind.as_str() {
+                        "desktop" => ResourceKind::Desktop,
+                        "remoteapp" => ResourceKind::RemoteApp,
+                        _ => ResourceKind::Other,
+                    },
+                    key: r.key,
+                    title: r.title,
+                    connection_file: None,
+                    icon: None,
+                })
+                .collect(),
+        })
+        .collect();
+    (c.saved, list)
+}
+
 pub(super) fn resource_key(
     account: &SignedIn,
     tenant: &str,

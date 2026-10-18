@@ -51,6 +51,7 @@ impl AppModel {
                 return self.discovered(&id, epoch, generation, result);
             }
             Message::IconsLoaded(id, epoch, icons) => self.icons_loaded(&id, epoch, icons),
+            Message::CacheLoaded(id, epoch, cached) => self.cache_loaded(&id, epoch, cached),
             Message::SignOut(id) => return self.sign_out(&id),
             Message::SignOutSelected => {
                 if let Some(Page::Account(id)) = self.selected_page() {
@@ -87,6 +88,7 @@ impl AppModel {
         result: Result<Vec<Stored>, String>,
     ) -> Task<cosmic::Action<Message>> {
         self.loading_saved = false;
+        let loaded_ok = result.is_ok();
         let saved = match result {
             Ok(saved) => saved,
             Err(e) => {
@@ -94,6 +96,14 @@ impl AppModel {
                 Vec::new()
             }
         };
+        // Offline lists of accounts that are no longer saved go; only when
+        // the saved list could be read, so a locked keyring deletes nothing.
+        let known: Option<Vec<String>> = loaded_ok.then(|| {
+            saved
+                .iter()
+                .map(|s| accounts::account_id(&s.identity))
+                .collect()
+        });
         let mut tasks = Vec::new();
         for stored in saved {
             let id = accounts::account_id(&stored.identity);
@@ -113,12 +123,70 @@ impl AppModel {
                 sign_in: 0,
                 last_load: None,
                 last_refreshed: None,
+                cached: None,
                 epoch,
             });
+            tasks.push(self.load_cached(&id, epoch));
             tasks.push(self.start_restore(&id));
+        }
+        if let (Some(store), Some(known)) = (self.cache.clone(), known) {
+            tasks.push(
+                Task::future(async move {
+                    let _ = tokio::task::spawn_blocking(move || store.remove_others(&known)).await;
+                })
+                .discard(),
+            );
         }
         self.select_first_account();
         Task::batch(tasks)
+    }
+
+    /// Reads an account's offline list in the background.
+    fn load_cached(&self, id: &str, epoch: u64) -> Task<cosmic::Action<Message>> {
+        let Some(store) = self.cache.clone() else {
+            return Task::none();
+        };
+        let keep =
+            Duration::from_secs(u64::from(self.account_settings(Some(id)).offline_days) * 86_400);
+        let id = id.to_owned();
+        cosmic::task::future(async move {
+            let owner = id.clone();
+            let cached = tokio::task::spawn_blocking(move || store.load(&owner, keep))
+                .await
+                .ok()
+                .flatten();
+            Message::CacheLoaded(id, epoch, cached)
+        })
+    }
+
+    pub(super) fn cache_loaded(
+        &mut self,
+        id: &str,
+        epoch: u64,
+        cached: Option<crate::cache::Cached>,
+    ) {
+        if let Some(a) = self.account_mut(id).filter(|a| a.epoch == epoch)
+            // A live list that loaded first wins.
+            && a.last_refreshed.is_none()
+        {
+            a.cached = cached.map(from_cached);
+        }
+    }
+
+    /// Saves the live list as the account's offline list, in the
+    /// background.
+    fn save_cached(&self, id: &str, list: &[WorkspaceView]) -> Task<cosmic::Action<Message>> {
+        let Some(store) = self.cache.clone() else {
+            return Task::none();
+        };
+        let (id, list) = (id.to_owned(), to_cached(list));
+        Task::future(async move {
+            let result = tokio::task::spawn_blocking(move || store.save(&id, &list)).await;
+            if let Ok(Err(e)) = result {
+                crate::app_log!("offline desktop list not saved: {e}");
+            }
+        })
+        .discard()
     }
 
     /// Signs in with the account's saved refresh token.
@@ -367,6 +435,7 @@ impl AppModel {
                 sign_in: generation,
                 last_load: None,
                 last_refreshed: None,
+                cached: None,
                 epoch,
             }),
         }
@@ -496,11 +565,13 @@ impl AppModel {
                         .flat_map(|w| &w.resources)
                         .map(|r| (r.legacy_key.clone(), r.key.clone()))
                         .collect();
+                    let save = list.clone();
                     *workspaces = list;
                     *error = None;
                     account.last_refreshed = Some(SystemTime::now());
+                    account.cached = None;
                     self.migrate_resource_keys(&pairs);
-                    return self.fetch_icons(id);
+                    return Task::batch([self.fetch_icons(id), self.save_cached(id, &save)]);
                 }
                 Err(e) => *error = Some(e),
             }

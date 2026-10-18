@@ -1,0 +1,280 @@
+// SPDX-License-Identifier: MIT
+
+//! The offline desktop list (spec §7, §10): per account, only what the list
+//! shows. Never connection files, URLs or tokens, so a cached entry can't
+//! be used to connect (spec §7: the live flow is always required).
+//!
+//! - `$XDG_CACHE_HOME/cosmic-ext-deskfeed/accounts/<account id>/desktops.json`
+//!   (folder 0700, file 0600). Account IDs are opaque hex
+//!   (`accounts::account_id`); anything else is refused, so a name can't
+//!   leave the folder.
+//! - Versioned, written atomically (temporary file, then rename), at most
+//!   [`MAX_FILE`] bytes and [`MAX_RESOURCES`] desktops; older than the
+//!   account's "keep" setting is ignored and deleted.
+//! - Deleted on sign-out and for accounts no longer saved.
+//!
+//! Blocking; call from `spawn_blocking`.
+
+use std::fs::{self, OpenOptions};
+use std::io::{Read, Write};
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+
+const VERSION: u32 = 1;
+const FILE: &str = "desktops.json";
+pub const MAX_FILE: u64 = 1024 * 1024;
+pub const MAX_RESOURCES: usize = 2_000;
+const MAX_WORKSPACES: usize = 64;
+const MAX_TEXT: usize = 256;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedResource {
+    pub key: String,
+    pub title: String,
+    /// "desktop", "remoteapp" or "other".
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedWorkspace {
+    pub name: String,
+    pub resources: Vec<CachedResource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cached {
+    pub saved: SystemTime,
+    pub workspaces: Vec<CachedWorkspace>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct OnDisk {
+    version: u32,
+    /// Seconds since the Unix epoch.
+    saved: u64,
+    workspaces: Vec<CachedWorkspace>,
+}
+
+/// Where the lists live.
+#[derive(Debug, Clone)]
+pub struct Store {
+    root: PathBuf,
+}
+
+impl Store {
+    /// The user's cache folder.
+    pub fn user() -> Option<Self> {
+        Some(Self {
+            root: dirs::cache_dir()?
+                .join("cosmic-ext-deskfeed")
+                .join("accounts"),
+        })
+    }
+
+    /// The account's folder; `None` for anything but an opaque hex ID.
+    fn dir(&self, account: &str) -> Option<PathBuf> {
+        let valid = !account.is_empty()
+            && account.len() <= 64
+            && account.bytes().all(|b| b.is_ascii_hexdigit());
+        valid.then(|| self.root.join(account))
+    }
+
+    /// Saves the list, replacing the previous one. Too large a list isn't
+    /// saved (and the old one is removed, so it can't be shown as current).
+    pub fn save(&self, account: &str, workspaces: &[CachedWorkspace]) -> Result<(), String> {
+        let dir = self.dir(account).ok_or("bad account id")?;
+        let count: usize = workspaces.iter().map(|w| w.resources.len()).sum();
+        let bounded = workspaces.len() <= MAX_WORKSPACES && count <= MAX_RESOURCES;
+        let text = serde_json::to_vec(&OnDisk {
+            version: VERSION,
+            saved: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+            workspaces: workspaces.to_vec(),
+        })
+        .map_err(|e| e.to_string())?;
+        if !bounded || text.len() as u64 > MAX_FILE {
+            let _ = self.remove(account);
+            return Err("list too large to keep offline".into());
+        }
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)
+            .map_err(|e| e.kind().to_string())?;
+        let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+        let tmp = dir.join(format!(".{FILE}.{}", std::process::id()));
+        let result = (|| {
+            let mut f = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)?;
+            f.write_all(&text)?;
+            f.sync_all()?;
+            fs::rename(&tmp, dir.join(FILE))
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+        result.map_err(|e| e.kind().to_string())
+    }
+
+    /// The saved list, if there is one younger than `keep`. A damaged, too
+    /// large, too old or other-version file is deleted.
+    pub fn load(&self, account: &str, keep: Duration) -> Option<Cached> {
+        let path = self.dir(account)?.join(FILE);
+        let file = fs::File::open(&path).ok()?;
+        let mut bytes = Vec::new();
+        let read = file.take(MAX_FILE + 1).read_to_end(&mut bytes);
+        let parsed = read
+            .ok()
+            .filter(|_| bytes.len() as u64 <= MAX_FILE)
+            .and_then(|_| serde_json::from_slice::<OnDisk>(&bytes).ok())
+            .filter(|d| d.version == VERSION)
+            .and_then(|d| {
+                let saved = UNIX_EPOCH + Duration::from_secs(d.saved);
+                let age = SystemTime::now().duration_since(saved).ok()?;
+                (age <= keep).then_some(Cached {
+                    saved,
+                    workspaces: d.workspaces,
+                })
+            })
+            .filter(valid);
+        if parsed.is_none() {
+            let _ = fs::remove_file(&path);
+        }
+        parsed
+    }
+
+    /// Deletes the account's offline list (sign-out).
+    pub fn remove(&self, account: &str) -> Result<(), ()> {
+        match self.dir(account) {
+            Some(dir) if dir.exists() => fs::remove_dir_all(dir).map_err(|_| ()),
+            _ => Ok(()),
+        }
+    }
+
+    /// Deletes the lists of accounts that are no longer saved.
+    pub fn remove_others(&self, keep: &[String]) {
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !keep.contains(&name) && self.dir(&name).is_some() {
+                let _ = fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+}
+
+/// The same limits a live feed has (`service/feed.rs`).
+fn valid(c: &Cached) -> bool {
+    let count: usize = c.workspaces.iter().map(|w| w.resources.len()).sum();
+    c.workspaces.len() <= MAX_WORKSPACES
+        && count <= MAX_RESOURCES
+        && c.workspaces.iter().all(|w| {
+            w.name.chars().count() <= MAX_TEXT
+                && w.resources.iter().all(|r| {
+                    r.title.chars().count() <= MAX_TEXT
+                        && r.key.len() <= 128
+                        // URL-safe base64 (`app/model.rs` `hash_key`).
+                        && r
+                            .key
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                })
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A store in a fresh temporary folder.
+    fn with_store(f: impl FnOnce(&Store)) {
+        let root = std::env::temp_dir().join(format!(
+            "deskfeed-cache-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        f(&Store { root: root.clone() });
+        let _ = fs::remove_dir_all(root);
+    }
+
+    fn sample() -> Vec<CachedWorkspace> {
+        vec![CachedWorkspace {
+            name: "Work".into(),
+            resources: vec![CachedResource {
+                key: "aB3-_x".into(),
+                title: "Windows 11".into(),
+                kind: "desktop".into(),
+            }],
+        }]
+    }
+
+    const DAY: Duration = Duration::from_secs(86_400);
+
+    #[test]
+    fn saves_and_loads_privately() {
+        with_store(|st| {
+            st.save("ab12", &sample()).unwrap();
+            let c = st.load("ab12", DAY).unwrap();
+            assert_eq!(c.workspaces, sample());
+            let d = st.dir("ab12").unwrap();
+            let mode = |p: &std::path::Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode(&d), 0o700);
+            assert_eq!(mode(&d.join(FILE)), 0o600);
+            // Accounts don't see each other's lists.
+            assert!(st.load("cd34", DAY).is_none());
+            st.remove("ab12").unwrap();
+            assert!(st.load("ab12", DAY).is_none());
+        });
+    }
+
+    #[test]
+    fn refuses_odd_ids_old_and_damaged_files() {
+        with_store(|st| {
+            assert!(st.save("../x", &sample()).is_err());
+            assert!(st.save("", &sample()).is_err());
+            assert!(st.dir("ab/../cd").is_none());
+            st.save("ab12", &sample()).unwrap();
+            // Older than the keep setting: ignored and deleted.
+            assert!(st.load("ab12", Duration::ZERO).is_none());
+            assert!(!st.dir("ab12").unwrap().join(FILE).exists());
+            st.save("ab12", &sample()).unwrap();
+            fs::write(st.dir("ab12").unwrap().join(FILE), b"{not json").unwrap();
+            assert!(st.load("ab12", DAY).is_none());
+            assert!(!st.dir("ab12").unwrap().join(FILE).exists());
+        });
+    }
+
+    #[test]
+    fn too_large_lists_are_not_kept() {
+        with_store(|st| {
+            st.save("ab12", &sample()).unwrap();
+            let big = vec![CachedWorkspace {
+                name: "W".into(),
+                resources: vec![sample()[0].resources[0].clone(); MAX_RESOURCES + 1],
+            }];
+            assert!(st.save("ab12", &big).is_err());
+            // The old list is gone too, so it can't pass for the current one.
+            assert!(st.load("ab12", DAY).is_none());
+        });
+    }
+
+    #[test]
+    fn removes_lists_of_unsaved_accounts() {
+        with_store(|st| {
+            st.save("aa", &sample()).unwrap();
+            st.save("bb", &sample()).unwrap();
+            st.remove_others(&["aa".to_owned()]);
+            assert!(st.load("aa", DAY).is_some());
+            assert!(st.load("bb", DAY).is_none());
+        });
+    }
+}

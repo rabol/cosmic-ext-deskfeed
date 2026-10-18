@@ -164,6 +164,13 @@ follow-app-value = The app setting is { $value }.
 follow-account-value = The account setting is { $value }.
 seconds = { $value } s
 minutes = { $value } min
+days = { $value ->
+    [one] { $value } day
+   *[other] { $value } days
+}
+setting-offline = Keep the offline desktop list for
+setting-offline-desc = The last loaded list is shown, marked as offline, while the live one can't be loaded. It never lets you connect by itself. Signing out deletes it.
+offline-list-from = Offline list from { $when }. Connecting needs the live list.
 use-account-setting = Use account setting
 use-app-setting = Use app setting
 setting-fullscreen = Full screen

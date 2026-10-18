@@ -89,6 +89,8 @@ pub struct AppModel {
     session_notes: HashMap<String, String>,
     /// The search field's text; filters the desktop list.
     search: String,
+    /// Where offline desktop lists live (`None` without a cache folder).
+    cache: Option<crate::cache::Store>,
     /// Resource icons per account and URL; the feed versions its icon
     /// URLs (`?v=`), so a fetched one stays valid.
     icons: HashMap<(String, Url), widget::icon::Handle>,
@@ -194,6 +196,7 @@ impl cosmic::Application for AppModel {
             timed_out: HashSet::new(),
             session_notes: HashMap::new(),
             search: String::new(),
+            cache: crate::cache::Store::user(),
             icons: HashMap::new(),
             quit: Quit::No,
             pending_logon: HashMap::new(),
@@ -456,6 +459,7 @@ impl cosmic::Application for AppModel {
             | Message::RefreshDue
             | Message::Discovered(..)
             | Message::IconsLoaded(..)
+            | Message::CacheLoaded(..)
             | Message::SignOut(..)
             | Message::SignOutSelected
             | Message::SignOutFinished(..)

@@ -147,9 +147,10 @@ pub fn adopt_legacy_profile(id: &str) {
     }
 }
 
-/// Removes an account's cookies and RAM cookie folder (sign-out).
+/// Removes an account's cookies, RAM cookie folder and offline desktop
+/// list (sign-out, spec §6: credentials and account caches).
 pub fn remove_files(id: &str) -> Result<(), ()> {
-    let mut ok = true;
+    let mut ok = crate::cache::Store::user().is_none_or(|s| s.remove(id).is_ok());
     for dir in [profile_dir(id), jars_root().map(|j| j.join(id))]
         .into_iter()
         .flatten()

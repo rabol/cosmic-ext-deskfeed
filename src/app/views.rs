@@ -45,8 +45,16 @@ impl AppModel {
 
     pub(super) fn account_view<'a>(&'a self, account: &'a Account) -> Element<'a, Message> {
         let space = cosmic::theme::spacing();
+        // Without a live list, the offline one (if any) shows under the
+        // account's state.
+        let with_offline = |state: Element<'a, Message>| match &account.cached {
+            Some((saved, list)) => {
+                self.resources_view(account, false, list, None, Some(*saved), Some(state))
+            }
+            None => centered(state),
+        };
         match &account.state {
-            AccountState::Restoring => centered(
+            AccountState::Restoring => with_offline(
                 widget::column::with_capacity(2)
                     .push(widget::text::title3(fl!("restoring")))
                     .push(widget::text::body(fl!("restoring-hint")))
@@ -77,7 +85,7 @@ impl AppModel {
                     widget::button::text(fl!("sign-out"))
                         .on_press(Message::SignOut(account.id.clone())),
                 );
-                centered(col.into())
+                with_offline(col.into())
             }
             AccountState::SigningIn { .. } => {
                 waiting_view(Message::CancelSignIn(Some(account.id.clone())))
@@ -87,7 +95,20 @@ impl AppModel {
                 workspaces,
                 error,
                 ..
-            } => self.resources_view(account, *loading, workspaces, error.as_deref()),
+            } => match &account.cached {
+                // No live list yet in this run: the offline one meanwhile.
+                Some((saved, list)) if account.last_refreshed.is_none() => self.resources_view(
+                    account,
+                    *loading,
+                    list,
+                    error.as_deref(),
+                    Some(*saved),
+                    None,
+                ),
+                _ => {
+                    self.resources_view(account, *loading, workspaces, error.as_deref(), None, None)
+                }
+            },
         }
     }
 }
@@ -194,7 +215,12 @@ pub(super) fn dependency_text(d: Dependency) -> (String, String) {
 impl AppModel {
     /// One desktop: icon, title, kind and status, then favorite, settings
     /// and connect buttons.
-    fn resource_row<'a>(&'a self, account: &str, r: &'a ResourceView) -> Element<'a, Message> {
+    fn resource_row<'a>(
+        &'a self,
+        account: &str,
+        r: &'a ResourceView,
+        live: bool,
+    ) -> Element<'a, Message> {
         let conn = self.connections.get(&r.key);
         let kind = match r.kind {
             ResourceKind::Desktop => fl!("kind-desktop"),
@@ -204,7 +230,8 @@ impl AppModel {
         let (status, control): (Option<String>, Element<'a, Message>) = match conn {
             None => {
                 let mut b = widget::button::suggested(fl!("connect"));
-                if r.kind == ResourceKind::Desktop {
+                // An offline entry never connects (spec §7).
+                if live && r.kind == ResourceKind::Desktop {
                     b = b.on_press(Message::Connect(r.key.clone()));
                 }
                 (None, b.into())
@@ -268,31 +295,43 @@ impl AppModel {
             .icon(),
         }
         .size(32);
+        let mut controls = widget::row::with_capacity(3)
+            .push(favorite)
+            .spacing(cosmic::theme::spacing().space_xs)
+            .align_y(Alignment::Center);
+        // Desktop settings need the live desktop (`desktop_settings_view`).
+        if live {
+            controls = controls.push(settings);
+        }
         widget::settings::item::builder(r.title.clone())
             .icon(icon)
             .description(description)
-            .control(
-                widget::row::with_capacity(3)
-                    .push(favorite)
-                    .push(settings)
-                    .push(control)
-                    .spacing(cosmic::theme::spacing().space_xs)
-                    .align_y(Alignment::Center),
-            )
+            .control(controls.push(control))
             .into()
     }
 
-    /// An account's desktops: search, last update, favorites, then each
-    /// workspace.
+    /// An account's desktops: `header`, search, last update, favorites,
+    /// then each workspace. `offline`: an offline list saved then, shown
+    /// read-only.
     fn resources_view<'a>(
         &'a self,
         account: &'a Account,
         loading: bool,
         workspaces: &'a [WorkspaceView],
         error: Option<&'a str>,
+        offline: Option<SystemTime>,
+        header: Option<Element<'a, Message>>,
     ) -> Element<'a, Message> {
         let space = cosmic::theme::spacing();
-        let mut col = widget::column::with_capacity(workspaces.len() + 6).spacing(space.space_m);
+        let live = offline.is_none();
+        let mut col = widget::column::with_capacity(workspaces.len() + 8).spacing(space.space_m);
+        if let Some(header) = header {
+            col = col.push(
+                widget::container(header)
+                    .width(Length::Fill)
+                    .center_x(Length::Fill),
+            );
+        }
         let any = workspaces.iter().any(|w| !w.resources.is_empty());
         if any {
             col = col.push(
@@ -310,7 +349,12 @@ impl AppModel {
         if let Some(error) = error {
             col = col.push(widget::text::body(error.to_owned()));
         }
-        if let Some(t) = account.last_refreshed {
+        if let Some(saved) = offline {
+            col = col.push(widget::text::body(fl!(
+                "offline-list-from",
+                when = clock_label(saved)
+            )));
+        } else if let Some(t) = account.last_refreshed {
             let when = clock_label(t);
             col = col.push(widget::text::caption(if error.is_some() {
                 fl!("showing-list-from", when = when)
@@ -318,7 +362,8 @@ impl AppModel {
                 fl!("updated-at", when = when)
             }));
         }
-        if !loading
+        if live
+            && !loading
             && error.is_none()
             && workspaces
                 .iter()
@@ -337,7 +382,7 @@ impl AppModel {
         if !favorites.is_empty() {
             let mut section = widget::settings::section().title(fl!("favorites"));
             for r in favorites {
-                section = section.add(self.resource_row(&account.id, r));
+                section = section.add(self.resource_row(&account.id, r, live));
             }
             col = col.push(section);
         }
@@ -357,7 +402,7 @@ impl AppModel {
                 )));
             }
             for r in listed {
-                section = section.add(self.resource_row(&account.id, r));
+                section = section.add(self.resource_row(&account.id, r, live));
             }
             col = col.push(section);
         }
@@ -444,6 +489,31 @@ mod tests {
         assert!(!search_matches("linux", &ws, &r));
         // Non-ASCII titles compare case-insensitively too.
         assert!(search_matches("æble", &ws, &desktop("ÆBLE desktop")));
+    }
+
+    #[test]
+    fn offline_list_keeps_no_urls() {
+        let mut r = desktop("Win 11");
+        r.connection_file = Some(Url::parse("https://rdweb.wvd.microsoft.com/x.rdp").unwrap());
+        r.icon = Some(Url::parse("https://rdweb.wvd.microsoft.com/x.png").unwrap());
+        let list = vec![WorkspaceView {
+            name: "Work".into(),
+            error: None,
+            resources: vec![r],
+        }];
+        let saved = to_cached(&list);
+        let text = serde_json::to_string(&saved).unwrap();
+        assert!(!text.contains("https"), "{text}");
+        let (_, back) = from_cached(crate::cache::Cached {
+            saved: SystemTime::now(),
+            workspaces: saved,
+        });
+        let r = &back[0].resources[0];
+        assert_eq!(
+            (r.title.as_str(), r.kind),
+            ("Win 11", ResourceKind::Desktop)
+        );
+        assert!(r.connection_file.is_none() && r.icon.is_none());
     }
 
     #[test]

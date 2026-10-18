@@ -330,6 +330,7 @@ fn settings_column<'a>(
                 .title(fl!("settings-account"))
                 .add(number(Number::SignIn))
                 .add(number(Number::Refresh))
+                .add(number(Number::OfflineDays))
                 .into(),
         );
     }
@@ -376,6 +377,7 @@ fn number_label(n: Number, value: u32) -> String {
     match n {
         Number::Timeout => fl!("seconds", value = value),
         Number::Refresh | Number::SignIn => fl!("minutes", value = value),
+        Number::OfflineDays => fl!("days", value = value),
     }
 }
 
@@ -385,6 +387,7 @@ fn number_text(n: Number) -> (String, String) {
         Number::Timeout => (fl!("setting-timeout"), fl!("setting-timeout-desc")),
         Number::Refresh => (fl!("setting-refresh"), fl!("setting-refresh-desc")),
         Number::SignIn => (fl!("setting-sign-in"), fl!("setting-sign-in-desc")),
+        Number::OfflineDays => (fl!("setting-offline"), fl!("setting-offline-desc")),
     }
 }
 

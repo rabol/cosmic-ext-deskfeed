@@ -38,6 +38,9 @@ pub struct ConnectionSettings {
     /// App and account levels only.
     #[serde(default)]
     pub sign_in_mins: Option<u32>,
+    /// App and account levels only.
+    #[serde(default)]
+    pub offline_days: Option<u32>,
 }
 
 /// The on/off settings.
@@ -74,10 +77,17 @@ pub enum Number {
     Refresh,
     /// Time allowed for signing in, in minutes.
     SignIn,
+    /// How long the offline desktop list is kept, in days.
+    OfflineDays,
 }
 
 impl Number {
-    pub const ALL: [Self; 3] = [Self::Timeout, Self::Refresh, Self::SignIn];
+    pub const ALL: [Self; 4] = [
+        Self::Timeout,
+        Self::Refresh,
+        Self::SignIn,
+        Self::OfflineDays,
+    ];
 
     /// Smallest value, largest value, step.
     pub fn range(self) -> (u32, u32, u32) {
@@ -89,6 +99,8 @@ impl Number {
             // The sign-in window takes at most 15 min (`signin/src/protocol.rs`
             // `MAX_TIMEOUT_MS`).
             Self::SignIn => (2, 15, 1),
+            // Spec §10: cached metadata has an age limit.
+            Self::OfflineDays => (1, 90, 1),
         }
     }
 
@@ -134,6 +146,7 @@ impl ConnectionSettings {
             Number::Timeout => self.timeout_secs,
             Number::Refresh => self.refresh_mins,
             Number::SignIn => self.sign_in_mins,
+            Number::OfflineDays => self.offline_days,
         }
     }
 
@@ -143,6 +156,7 @@ impl ConnectionSettings {
             Number::Timeout => &mut self.timeout_secs,
             Number::Refresh => &mut self.refresh_mins,
             Number::SignIn => &mut self.sign_in_mins,
+            Number::OfflineDays => &mut self.offline_days,
         };
         *slot = value.map(|v| n.clamp(v));
     }
@@ -167,11 +181,13 @@ pub struct Effective {
     pub clipboard: bool,
     pub refresh_mins: u32,
     pub sign_in_mins: u32,
+    pub offline_days: u32,
 }
 
 /// Built-in defaults. 120 s: measured Entra exchanges took up to 49.8 s
 /// (docs/milestone-1.md). Microphone, camera and clipboard off (spec §9).
-/// Lists refresh hourly; signing in may take 5 min (MFA included).
+/// Lists refresh hourly; signing in may take 5 min (MFA included); the
+/// offline list is kept 30 days.
 pub const DEFAULTS: Effective = Effective {
     timeout_secs: 120,
     fullscreen: false,
@@ -183,6 +199,7 @@ pub const DEFAULTS: Effective = Effective {
     clipboard: false,
     refresh_mins: 60,
     sign_in_mins: 5,
+    offline_days: 30,
 };
 
 impl Effective {
@@ -201,6 +218,7 @@ impl Effective {
             clipboard: s.clipboard.unwrap_or(self.clipboard),
             refresh_mins: number(Number::Refresh, self.refresh_mins),
             sign_in_mins: number(Number::SignIn, self.sign_in_mins),
+            offline_days: number(Number::OfflineDays, self.offline_days),
         }
     }
 
@@ -209,6 +227,7 @@ impl Effective {
             Number::Timeout => self.timeout_secs,
             Number::Refresh => self.refresh_mins,
             Number::SignIn => self.sign_in_mins,
+            Number::OfflineDays => self.offline_days,
         }
     }
 
