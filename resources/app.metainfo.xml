@@ -45,5 +45,12 @@
     <keyword>COSMIC</keyword>
   </keywords>
   <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-10-18">
+      <description>
+        <p>First version: Azure Virtual Desktop and Windows 365 feeds with Entra sign-in, connecting through FreeRDP.</p>
+      </description>
+    </release>
+  </releases>
 </component>
 

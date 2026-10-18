@@ -4,7 +4,9 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ## [Unreleased]
 
-First version (0.1.0), not yet released.
+## [0.1.0] - 2026-10-18
+
+First version.
 
 ### Added
 
