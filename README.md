@@ -62,7 +62,7 @@ If something doesn't work, **View → Dependencies** shows what's missing, and *
 
 - **One Microsoft confirmation page per connection.** FreeRDP fetches the token for the remote Windows machine itself, through a sign-in page; it offers no way for the app to supply that token ([details](./docs/milestone-1.md)). The official Windows and macOS clients don't show this page.
 - **Your organization's sign-in frequency applies.** If it requires a fresh sign-in after a set time (for example *"Every time"*, which allows reuse for five minutes), the app asks you to sign in again; it doesn't work around such policies.
-- **Window size under auto-tiling.** FreeRDP sends a window's size to Windows only after a window change, so the app briefly maximizes and restores the desktop's window once it has connected; you may see it flicker once.
+- **Window size under auto-tiling.** FreeRDP sends a window's size to Windows only after a window change, so once it has connected the app moves the focus away from the desktop's window and back, which makes COSMIC send the window its size again; you may see the focus outline blink. If the desktop's window is alone on its workspace, the app maximizes and restores it instead.
 - **RemoteApps** are listed but can't be started yet.
 - **Proxies:** the app takes the proxy from the usual environment variables (`all_proxy`, `https_proxy`, `http_proxy`, `no_proxy`, upper or lower case) and gives FreeRDP the same one. FreeRDP supports only `http://` and `socks5://` proxies; with another kind the app says so instead of connecting without it. Desktop-environment proxy settings that aren't exported as variables are not used.
 - **Azure public cloud only**; no sovereign clouds.

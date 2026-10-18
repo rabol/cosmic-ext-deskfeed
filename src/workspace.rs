@@ -18,9 +18,10 @@
 //! `OnActivated` returns early on the first activation, and
 //! `DisplayControlCaps` only makes the window resizable). Under COSMIC
 //! auto-tiling the window gets its tile size before that, so the remote
-//! desktop kept its first size. Maximizing and restoring the window once
-//! the channel is ready gives FreeRDP those events; the app repeats it if
-//! the window didn't take the new size (see [`refit_window`]).
+//! desktop kept its first size. Once the channel is ready, moving the
+//! focus away from the window and back makes COSMIC send the size again;
+//! the app repeats it if the window didn't take the size (see
+//! [`refit_window`]).
 //!
 //! Blocking, with its own short-lived Wayland connection; call it from
 //! `spawn_blocking`. Uses cosmic-client-toolkit as re-exported by libcosmic.
@@ -44,7 +45,9 @@ use cosmic::cctk::{
     toplevel_info::{ToplevelInfo, ToplevelInfoHandler, ToplevelInfoState},
     toplevel_management::{ToplevelManagerHandler, ToplevelManagerState},
     wayland_client::{
-        Connection, Proxy, QueueHandle, WEnum, globals::registry_queue_init, protocol::wl_output,
+        Connection, Dispatch, Proxy, QueueHandle, WEnum,
+        globals::registry_queue_init,
+        protocol::{wl_output, wl_seat},
     },
     wayland_protocols::ext::{
         foreign_toplevel_list::v1::client::ext_foreign_toplevel_handle_v1,
@@ -56,7 +59,8 @@ use cosmic::cctk::{
 const POLL: Duration = Duration::from_millis(200);
 /// How long to wait for COSMIC to create a requested workspace.
 const CREATE_WAIT: Duration = Duration::from_secs(3);
-/// How long to wait for COSMIC to report the window maximized.
+/// How long to wait for COSMIC to report a window found, focused or
+/// maximized.
 const REFIT_WAIT: Duration = Duration::from_secs(2);
 
 struct State {
@@ -234,23 +238,32 @@ pub fn move_to_new_workspace(
 /// What [`refit_window`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refit {
-    /// Maximized and restored the window.
-    Done,
+    /// Moved the focus away from the window and back (or to it).
+    Focused,
+    /// Maximized and restored the window: nothing else to focus on its
+    /// workspace.
+    Maximized,
     /// Left it alone: maximized or full screen already.
     Skipped,
 }
 
-/// Maximizes the window with `app_id` and `title`, waits until COSMIC
-/// reports it maximized, then restores it, so FreeRDP sends the window's
-/// real size (see the module notes). Leaves maximized or full-screen
-/// windows alone.
+/// Makes COSMIC send the window with `app_id` and `title` its size again,
+/// so FreeRDP sends it to Windows (see the module notes). Leaves maximized
+/// or full-screen windows alone.
 ///
-/// The window may ignore both sizes: FreeRDP logs that its window is
+/// COSMIC sends a window its size with every change of its focused state
+/// (cosmic-comp `src/shell/focus/mod.rs`, `set_activated` then
+/// `configure`), so moving the focus to another window on the same
+/// workspace and back does it without a size in between; Windows changes
+/// resolution once. Without another window there, maximize and restore.
+///
+/// The window may ignore the size: FreeRDP logs that its window is
 /// resizable before SDL makes it so (`sdl_context.cpp` `setResizeable`
 /// queues the change), and SDL ignores sizes for a fixed-size window
 /// (SDL 3.4.18 `SDL_waylandwindow.c`, `handle_xdg_toplevel_configure`).
 /// The caller checks that the window took a new size and calls again.
 pub fn refit_window(app_id: &str, title: &str) -> Result<Refit, MoveError> {
+    use zcosmic_toplevel_handle_v1::State as S;
     let conn = Connection::connect_to_env().map_err(|e| MoveError::NoWayland(e.to_string()))?;
     let (globals, mut queue) =
         registry_queue_init::<State>(&conn).map_err(|e| MoveError::NoWayland(e.to_string()))?;
@@ -260,6 +273,7 @@ pub fn refit_window(app_id: &str, title: &str) -> Result<Refit, MoveError> {
         .ok_or(MoveError::Unsupported("toplevel info"))?;
     let manager = ToplevelManagerState::try_new(&registry, &qh)
         .ok_or(MoveError::Unsupported("toplevel management"))?;
+    let seat: Option<wl_seat::WlSeat> = globals.bind(&qh, 1..=1, ()).ok();
     let workspaces = WorkspaceState::new(&registry, &qh);
     let outputs = OutputState::new(&globals, &qh);
     let mut state = State {
@@ -278,22 +292,14 @@ pub fn refit_window(app_id: &str, title: &str) -> Result<Refit, MoveError> {
     };
     roundtrip(&mut state)?;
     roundtrip(&mut state)?;
-    if !state
-        .capabilities
-        .contains(&WEnum::Value(Capability::Maximize))
-    {
-        return Err(MoveError::Unsupported("maximize capability"));
-    }
+    let can = |c: Capability| state.capabilities.contains(&WEnum::Value(c));
+    let (can_activate, can_maximize) = (can(Capability::Activate), can(Capability::Maximize));
     let find = |state: &State| {
         state
             .info
             .toplevels()
             .find(|t| t.app_id == app_id && t.title == title && t.cosmic_toplevel.is_some())
             .cloned()
-    };
-    let maximized = |t: &ToplevelInfo| {
-        t.state
-            .contains(&zcosmic_toplevel_handle_v1::State::Maximized)
     };
     // The window's details arrive in steps; FreeRDP's window exists by
     // now, so this is short.
@@ -308,25 +314,58 @@ pub fn refit_window(app_id: &str, title: &str) -> Result<Refit, MoveError> {
         std::thread::sleep(Duration::from_millis(50));
         roundtrip(&mut state)?;
     };
-    if maximized(&window) || is_fullscreen(&window) {
+    if window.state.contains(&S::Maximized) || is_fullscreen(&window) {
         return Ok(Refit::Skipped);
     }
-    let toplevel = window.cosmic_toplevel.ok_or(MoveError::WindowNotFound)?;
-    state.manager.manager.set_maximized(&toplevel);
-    let until = Instant::now() + REFIT_WAIT;
-    loop {
-        roundtrip(&mut state)?;
-        if find(&state).is_some_and(|t| maximized(&t)) {
-            break;
+    let toplevel = window.cosmic_toplevel.clone().ok_or(MoveError::WindowNotFound)?;
+    let has = |state: &State, handle: &zcosmic_toplevel_handle_v1::ZcosmicToplevelHandleV1, s: S| {
+        state
+            .info
+            .toplevels()
+            .any(|t| t.cosmic_toplevel.as_ref() == Some(handle) && t.state.contains(&s))
+    };
+    // Waits until COSMIC reports the state (or gives up quietly: the
+    // caller checks the outcome).
+    let mut wait_for = |state: &mut State, handle, s: S| -> Result<(), MoveError> {
+        let until = Instant::now() + REFIT_WAIT;
+        while !has(state, handle, s) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+            roundtrip(state)?;
         }
-        if Instant::now() > until {
-            break; // restore anyway, so the window isn't left maximized
+        Ok(())
+    };
+
+    // Another window on the same workspace to hand the focus to.
+    let other = state
+        .info
+        .toplevels()
+        .filter(|t| t.cosmic_toplevel.is_some() && t.cosmic_toplevel != window.cosmic_toplevel)
+        .filter(|t| !t.state.contains(&S::Minimized))
+        .find(|t| t.workspace.iter().any(|w| window.workspace.contains(w)))
+        .and_then(|t| t.cosmic_toplevel.clone());
+    match (&seat, can_activate) {
+        (Some(seat), true) if other.is_some() || !window.state.contains(&S::Activated) => {
+            if window.state.contains(&S::Activated)
+                && let Some(other) = &other
+            {
+                state.manager.manager.activate(other, seat);
+                wait_for(&mut state, other, S::Activated)?;
+            }
+            state.manager.manager.activate(&toplevel, seat);
+            wait_for(&mut state, &toplevel, S::Activated)?;
+            Ok(Refit::Focused)
         }
-        std::thread::sleep(Duration::from_millis(50));
+        _ if can_maximize => {
+            state.manager.manager.set_maximized(&toplevel);
+            // Restored even if COSMIC never reports it maximized, so the
+            // window isn't left maximized.
+            wait_for(&mut state, &toplevel, S::Maximized)?;
+            state.manager.manager.unset_maximized(&toplevel);
+            roundtrip(&mut state)?;
+            Ok(Refit::Maximized)
+        }
+        _ => Err(MoveError::Unsupported("activate or maximize")),
     }
-    state.manager.manager.unset_maximized(&toplevel);
-    roundtrip(&mut state)?;
-    Ok(Refit::Done)
 }
 
 fn is_fullscreen(t: &ToplevelInfo) -> bool {
@@ -430,6 +469,19 @@ impl WorkspaceHandler for State {
         &mut self.workspaces
     }
     fn done(&mut self) {}
+}
+
+/// A seat for `activate`; its events (capabilities, name) aren't needed.
+impl Dispatch<wl_seat::WlSeat, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &wl_seat::WlSeat,
+        _: wl_seat::Event,
+        (): &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 sctk::delegate_output!(State);

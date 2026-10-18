@@ -94,16 +94,18 @@ impl AppModel {
                     l.stop = true;
                 }
             }
-            Message::WindowRefitted(key, attempt, result) => match result {
-                Ok(Refit::Done) => {
-                    return cosmic::task::future(async move {
-                        tokio::time::sleep(REFIT_CHECK).await;
-                        Message::RefitCheck(key, attempt)
-                    });
+            Message::WindowRefitted(key, attempt, result) => {
+                match result {
+                    Ok(Refit::Skipped) => return Task::none(),
+                    Ok(Refit::Focused | Refit::Maximized) => {}
+                    // Checked and tried again like a refit that was ignored.
+                    Err(e) => crate::app_log!("window size: refit failed ({e})"),
                 }
-                Ok(Refit::Skipped) => {}
-                Err(e) => crate::app_log!("window size: not refitted ({e})"),
-            },
+                return cosmic::task::future(async move {
+                    tokio::time::sleep(REFIT_CHECK).await;
+                    Message::RefitCheck(key, attempt)
+                });
+            }
             Message::RefitCheck(key, attempt) => return self.refit_check(&key, attempt),
             Message::WorkspaceMoved(key, result) => {
                 self.movers.remove(&key);
@@ -565,11 +567,11 @@ impl AppModel {
             return Task::none();
         };
         if r.resized {
-            crate::app_log!("window size: sent to the remote desktop");
+            crate::app_log!("window size: sent to the remote desktop (try {})", r.refits);
         } else if r.refits < REFIT_TRIES {
             return self.refit(key);
         } else {
-            crate::app_log!("window size: the window kept its size");
+            crate::app_log!("window size: the window kept its size after {} tries", r.refits);
         }
         Task::none()
     }
