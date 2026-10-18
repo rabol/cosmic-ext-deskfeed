@@ -332,6 +332,8 @@ pub enum Message {
     DesktopChoice(String, Choice, usize),
     /// Log rotation size in MiB.
     AppLogSize(u32),
+    /// Appearance: index into `THEMES`.
+    AppTheme(usize),
     /// Account override: 0 follows the app's setting, 1 on, 2 off.
     AccountToggle(String, Toggle, usize),
     AccountNumber(String, Number, Option<u32>),

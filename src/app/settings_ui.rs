@@ -57,6 +57,16 @@ impl AppModel {
                 let value = i.checked_sub(1).and_then(|i| c.options().get(i).copied());
                 self.edit_settings(Level::Desktop, &key, |s| s.set_choice(c, value));
             }
+            Message::AppTheme(i) => {
+                let value = u32::try_from(i).unwrap_or(0).min(2);
+                match &self.config_handler {
+                    Some(handler) => {
+                        let _ = self.config.set_app_theme(handler, Some(value));
+                    }
+                    None => self.config.app_theme = Some(value),
+                }
+                return apply_theme(value);
+            }
             Message::AppLogSize(mib) => {
                 let (min, max, _) = crate::log::MAX_SIZE_MIB;
                 let mib = mib.clamp(min, max);
@@ -188,6 +198,15 @@ impl AppModel {
                 }))
                 .into()
         };
+        let appearance = widget::settings::section()
+            .title(fl!("settings-appearance"))
+            .add(
+                widget::settings::item::builder(fl!("setting-theme")).control(widget::dropdown(
+                    vec![fl!("theme-system"), fl!("theme-dark"), fl!("theme-light")],
+                    Some(self.config.app_theme.unwrap_or(0).min(2) as usize),
+                    Message::AppTheme,
+                )),
+            );
         let (min, max, default) = crate::log::MAX_SIZE_MIB;
         let mib = self.config.log_max_mib.unwrap_or(default).clamp(min, max);
         let diagnostics = widget::settings::section()
@@ -211,7 +230,13 @@ impl AppModel {
             number,
             toggle,
             choice,
-            Some(diagnostics.into()),
+            Some(
+                widget::column::with_capacity(2)
+                    .push(appearance)
+                    .push(diagnostics)
+                    .spacing(cosmic::theme::spacing().space_m)
+                    .into(),
+            ),
         )
     }
 
@@ -470,6 +495,24 @@ fn number_spin<'a>(
         max,
         on_change,
     )
+}
+
+/// Applies Deskfeed's appearance: 0 follows the desktop, 1 dark, 2
+/// light, each with the desktop's own palette.
+///
+/// A forced mode sets `prefer_dark`, which libcosmic checks before it
+/// follows a desktop mode change (`app/cosmic.rs`,
+/// `SystemThemeModeChange`); without it, Dark would turn light again.
+pub(super) fn apply_theme(value: u32) -> Task<cosmic::Action<Message>> {
+    let (mut theme, prefer) = match value {
+        1 => (cosmic::theme::system_dark(), Some(true)),
+        2 => (cosmic::theme::system_light(), Some(false)),
+        _ => (cosmic::theme::system_preference(), None),
+    };
+    if let cosmic::theme::ThemeType::System { prefer_dark, .. } = &mut theme.theme_type {
+        *prefer_dark = prefer;
+    }
+    cosmic::command::set_theme(theme)
 }
 
 /// Name and description of a choice.

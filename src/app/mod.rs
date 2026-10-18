@@ -238,7 +238,8 @@ impl cosmic::Application for AppModel {
             Message::SavedLoaded(result)
         });
         let deps = app.check_dependencies();
-        (app, Task::batch([title, load, deps]))
+        let theme = settings_ui::apply_theme(app.config.app_theme.unwrap_or(0));
+        (app, Task::batch([title, load, deps, theme]))
     }
 
     fn nav_model(&self) -> Option<&nav_bar::Model> {
@@ -517,6 +518,7 @@ impl cosmic::Application for AppModel {
             | Message::AppToggle(..)
             | Message::AppNumber(..)
             | Message::AppLogSize(..)
+            | Message::AppTheme(..)
             | Message::AppChoice(..)
             | Message::AccountChoice(..)
             | Message::DesktopChoice(..)

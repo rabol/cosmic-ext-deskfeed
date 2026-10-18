@@ -7,6 +7,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 ### Added
 
 - App settings (View → Settings): defaults for every account. New settings: time allowed for signing in and how often desktop lists refresh (app and account), and the log file size (app). Account settings now follow the app's setting or override it, as desktop settings do for the account.
+- Appearance: Deskfeed can match the desktop or stay dark or light (View → Settings), with the desktop's own colours.
 - Clipboard directions: both ways, only to the desktop, or only to this computer. Copying files is a separate setting, off by default; before, turning the clipboard on also let files through both ways.
 - Remember Windows passwords (opt-in): the password dialog can keep the password in the keyring for that desktop, so it isn't asked again and the desktop can reconnect by itself. A rejected password is removed; signing out removes all of them.
 - Unverified desktop certificates: instead of failing silently, Deskfeed shows the certificate (name, issuer, validity, fingerprint) and lets you trust it for that desktop. A certificate that changes after you trusted it is blocked; you can remove the trusted one in the desktop's settings.

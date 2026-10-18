@@ -25,6 +25,9 @@ pub struct Config {
     pub saved_passwords: BTreeSet<String>,
     /// Favorite desktops (resource keys, as above).
     pub favorites: BTreeSet<String>,
+    /// Deskfeed's own look (App settings → Appearance): 0 or none follows
+    /// the desktop, 1 dark, 2 light.
+    pub app_theme: Option<u32>,
     /// Log rotation size in MiB (App settings → Diagnostics); `None` is
     /// the default (`log::MAX_SIZE_MIB`).
     pub log_max_mib: Option<u32>,

@@ -30,7 +30,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Drives, USB devices | off (feed's lists dropped) | A, Ac, C | `sessions/rdpfile.rs` | Later, as above |
 | Microsoft cloud (public, government, China) | public Azure | Ac | `service/endpoint.rs`, `service/http.rs` | Later: needs each cloud's endpoints and client registration |
 | Display scaling | Automatic (the X11 scale from XSETTINGS); 100–300 % | A, Ac, C | `settings.rs` `Choice::Scale`, `display.rs` | Done (ADR 0015) |
-| Light/dark theme | follows the desktop | A | — | Roadmap item 12 |
+| Theme: match desktop, dark, light | match desktop | A | config `app_theme`, `app/settings_ui.rs` `apply_theme` | Done |
 
 ## Fixed on purpose
 
