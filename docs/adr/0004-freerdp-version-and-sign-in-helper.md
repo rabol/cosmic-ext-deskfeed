@@ -61,7 +61,7 @@ All three clients use `client_failsafe_get_access_token`, so the sign-in helper 
 - [ ] A research helper that speaks the protocol completes the gateway token request (`/sec:nla`) on the owner's tenant.
 - [ ] The same helper completes the session-host token request (`/sec:aad`, proof-of-possession) on a host pool with Entra single sign-on, if one is available.
 - [ ] (`research/loopback-redirect-test.sh`; unauthenticated checks are inconclusive, see `docs/milestone-1.md`) Whether Microsoft's public client ID accepts a loopback redirect (`http://localhost:<port>`). If it does, the system browser can replace the web view and the helper needs no web engine ([ADR 0003](0003-minimal-dependencies.md)). If it is rejected (`AADSTS50011`), record that.
-- [x] Backend comparison on COSMIC (spec §4 step 7): `sdl-freerdp3` native Wayland, `sdl-freerdp3` on XWayland, `xfreerdp3` on XWayland, plus `wlfreerdp3` (2026-10-18, above). Still open: multi-hour stability, and a real Azure connection with `xfreerdp3`.
+- [x] Backend comparison on COSMIC (spec §4 step 7): `sdl-freerdp3` native Wayland, `sdl-freerdp3` on XWayland, `xfreerdp3` on XWayland, plus `wlfreerdp3` (2026-10-18, above). A real Azure connection with `xfreerdp3` (owner's tenant, Entra sign-in, 2026-10-18 08:43): opened tiled and the desktop filled the tile after logon (owner confirmed). Still open: multi-hour stability.
 
 ## Consequences
 
