@@ -19,7 +19,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
 11. **Stability acceptance** (§8, §13): several hours of active and idle use, audio device changes, monitor hotplug, network changes, suspend/resume.
 12. Smaller items:
     - ~~Light/dark theme override (§5).~~ Done (2026-10-18): View → Settings → Appearance.
-    - The sign-in helper's "Sign in" strings aren't localized (`signin/src/main.rs`, `freerdp.rs`, `protocol.rs`).
+    - ~~The sign-in helper's "Sign in" strings aren't localized~~ Done (2026-10-18): the app passes its translated title to the helper (`COSMIC_EXT_DESKFEED_SIGNIN_TITLE`); "Sign in" stays only as the fallback.
     - Capturing system shortcuts (Super, Alt+Tab) in a session and a visible way to release them: unverified with `xfreerdp3` (§9).
     - Diagnostics support export, previewable and redacted (§12).
 

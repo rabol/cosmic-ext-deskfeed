@@ -23,6 +23,24 @@ use crate::protocol::{self, RedirectTarget, Reply};
 use crate::view::{self, Show, SignInView};
 
 const PROFILE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_PROFILE";
+/// The window title in the user's language, set by the app for FreeRDP.
+const TITLE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_TITLE";
+
+/// The title from `TITLE_ENV`: one line, printable, bounded; English
+/// without it.
+fn window_title() -> String {
+    let title: String = std::env::var(TITLE_ENV)
+        .unwrap_or_default()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect();
+    if title.trim().is_empty() {
+        "Sign in".to_owned()
+    } else {
+        title
+    }
+}
 const MAX_LINE: usize = 64 * 1024;
 /// Messages waiting for the main loop; FreeRDP sends one at a time.
 const MAX_QUEUED: usize = 16;
@@ -205,7 +223,7 @@ pub fn run(args: &[String]) -> ExitCode {
     });
 
     let main_loop = glib::MainLoop::new(None, false);
-    let view = SignInView::new(&profile, "Sign in");
+    let view = SignInView::new(&profile, &window_title());
     let send = Arc::new(send);
     {
         let main_loop = main_loop.clone();
