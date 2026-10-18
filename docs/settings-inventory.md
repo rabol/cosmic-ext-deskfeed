@@ -18,8 +18,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Microphone | off | A, Ac, C | `settings.rs` | Done |
 | Camera | off | A, Ac, C | `settings.rs` | Done |
 | Clipboard | off | A, Ac, C | `settings.rs` | Done |
-| Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | To do |
-| FreeRDP log detail | info (`/log-level:info`) | A, Ac, C | `sessions/launcher.rs` `build_args` | To do |
+| Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | With roadmap item 5: the alternative, scaling the picture (`/smart-sizing`), gives Windows a fixed 1 024×768 desktop unless a size is set too (`client/X11/xf_client.c`), so it needs a desktop-size setting beside it |
 | Refresh desktop lists every | 60 min (15–1 440, steps of 15) | A, Ac | `settings.rs` `Number::Refresh` | Done |
 | Time allowed for signing in | 5 min (2–15) | A, Ac | `settings.rs` `Number::SignIn` | Done |
 | Log file size before it rotates | 1 MB (1–100) | A | `log.rs` `MAX_SIZE_MIB`, config `log_max_mib` | Done |
@@ -51,4 +50,5 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Workspace move: poll 200 ms, wait 3 s for a new workspace | `workspace.rs` | Internal timing |
 | Refresh check every 5 min (and after resume) | `app/mod.rs` `REFRESH_CHECK` | Internal; the refresh interval is a setting |
 | Log line 2 000 chars; redaction lists | `log.rs` | Internal; privacy |
+| FreeRDP log level `info` | `sessions/launcher.rs` `build_args` | Security: at `debug` FreeRDP logs every gateway HTTP header, including `Authorization: Bearer` (`libfreerdp/core/gateway/http.c`), and hex dumps of sign-in tickets (`nla.c`, `tsg.c`), which the log's redaction can't reliably catch (spec §12). Diagnostics export (roadmap item 12) is the place for more detail |
 | Endpoints, client ID, `X-MS-User-Agent`, D-Bus names, app ID | `service/`, `auth/`, `secrets.rs` | Protocol facts (the cloud choice above is the setting) |
