@@ -479,6 +479,8 @@ impl cosmic::Application for AppModel {
             | Message::Session(..)
             | Message::ConnectDeadline(..)
             | Message::ReconnectDue(..)
+            | Message::ShowSession(..)
+            | Message::SessionShown(..)
             | Message::Disconnect(..)
             | Message::WorkspaceMoved(..)
             | Message::QuitRequested

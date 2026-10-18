@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
 //! "Open on a new workspace": moves a FreeRDP window to an empty COSMIC
-//! workspace (ADR 0011).
+//! workspace (ADR 0011). Also brings a session's window to the front
+//! ([`focus`], `activate` in `cosmic-toplevel-management`).
 //!
 //! FreeRDP is started with a known app ID (`/wm-class:`) and window title
 //! (`/title:`); this module waits for that window with COSMIC's window
@@ -21,17 +22,23 @@ use std::time::{Duration, Instant};
 
 use cosmic::cctk::{
     self,
-    cosmic_protocols::toplevel_management::v1::client::zcosmic_toplevel_manager_v1,
+    cosmic_protocols::{
+        toplevel_info::v1::client::zcosmic_toplevel_handle_v1,
+        toplevel_management::v1::client::zcosmic_toplevel_manager_v1,
+    },
     sctk::{
         self,
         output::{OutputHandler, OutputState},
         registry::{ProvidesRegistryState, RegistryState},
         registry_handlers,
+        seat::{Capability, SeatHandler, SeatState},
     },
     toplevel_info::{ToplevelInfo, ToplevelInfoHandler, ToplevelInfoState},
     toplevel_management::{ToplevelManagerHandler, ToplevelManagerState},
     wayland_client::{
-        Connection, Proxy, QueueHandle, WEnum, globals::registry_queue_init, protocol::wl_output,
+        Connection, Proxy, QueueHandle, WEnum,
+        globals::registry_queue_init,
+        protocol::{wl_output, wl_seat},
     },
     wayland_protocols::ext::{
         foreign_toplevel_list::v1::client::ext_foreign_toplevel_handle_v1,
@@ -50,7 +57,9 @@ struct State {
     info: ToplevelInfoState,
     manager: ToplevelManagerState,
     workspaces: WorkspaceState,
+    seats: SeatState,
     can_move: bool,
+    can_activate: bool,
 }
 
 /// Why the window wasn't moved; for the log only.
@@ -62,6 +71,8 @@ pub enum MoveError {
     WindowNotFound,
     NoWorkspace,
     Cancelled,
+    /// COSMIC didn't activate the window.
+    NotActivated,
 }
 
 impl std::fmt::Display for MoveError {
@@ -72,6 +83,7 @@ impl std::fmt::Display for MoveError {
             Self::WindowNotFound => write!(f, "window not found in time"),
             Self::NoWorkspace => write!(f, "no empty workspace"),
             Self::Cancelled => write!(f, "session ended first"),
+            Self::NotActivated => write!(f, "compositor didn't activate the window"),
         }
     }
 }
@@ -122,13 +134,16 @@ pub fn move_to_new_workspace(
     }
     let workspaces = WorkspaceState::new(&registry, &qh);
     let outputs = OutputState::new(&globals, &qh);
+    let seats = SeatState::new(&globals, &qh);
     let mut state = State {
         registry,
         outputs,
         info,
         manager,
         workspaces,
+        seats,
         can_move: false,
+        can_activate: false,
     };
     let roundtrip = |queue: &mut cctk::wayland_client::EventQueue<State>, state: &mut State| {
         queue
@@ -209,6 +224,112 @@ pub fn move_to_new_workspace(
         .move_to_ext_workspace(toplevel, &target, &output);
     roundtrip(&mut queue, &mut state)?;
     Ok(())
+}
+
+/// Brings the window with `app_id` and `title` to the front (COSMIC
+/// switches to its workspace). Blocking; call from `spawn_blocking`.
+pub fn focus(app_id: &str, title: &str) -> Result<(), MoveError> {
+    with_window(app_id, title, |state, toplevel, seat| {
+        state.manager.manager.activate(toplevel, seat);
+    })?;
+    Ok(())
+}
+
+/// Connects, finds the window, runs `act` on it, then waits up to a
+/// second for it to be activated.
+fn with_window(
+    app_id: &str,
+    title: &str,
+    act: impl FnOnce(
+        &mut State,
+        &cctk::cosmic_protocols::toplevel_info::v1::client::zcosmic_toplevel_handle_v1::ZcosmicToplevelHandleV1,
+        &wl_seat::WlSeat,
+    ),
+) -> Result<(), MoveError> {
+    let conn = Connection::connect_to_env().map_err(|e| MoveError::NoWayland(e.to_string()))?;
+    let (globals, mut queue) =
+        registry_queue_init::<State>(&conn).map_err(|e| MoveError::NoWayland(e.to_string()))?;
+    let qh = queue.handle();
+    let registry = RegistryState::new(&globals);
+    let info = ToplevelInfoState::try_new(&registry, &qh)
+        .ok_or(MoveError::Unsupported("toplevel info"))?;
+    let manager = ToplevelManagerState::try_new(&registry, &qh)
+        .ok_or(MoveError::Unsupported("toplevel management"))?;
+    let workspaces = WorkspaceState::new(&registry, &qh);
+    let outputs = OutputState::new(&globals, &qh);
+    let seats = SeatState::new(&globals, &qh);
+    let mut state = State {
+        registry,
+        outputs,
+        info,
+        manager,
+        workspaces,
+        seats,
+        can_move: false,
+        can_activate: false,
+    };
+    for _ in 0..2 {
+        queue
+            .roundtrip(&mut state)
+            .map_err(|e| MoveError::NoWayland(e.to_string()))?;
+    }
+    if !state.can_activate {
+        return Err(MoveError::Unsupported("activate capability"));
+    }
+    let seat = state
+        .seats
+        .seats()
+        .next()
+        .ok_or(MoveError::Unsupported("seat"))?;
+    // The window list arrives over several round trips.
+    let until = Instant::now() + Duration::from_secs(2);
+    let toplevel = loop {
+        if let Some(t) = state
+            .info
+            .toplevels()
+            .find(|t| t.app_id == app_id && t.title == title)
+            .and_then(|t| t.cosmic_toplevel.clone())
+        {
+            break t;
+        }
+        if Instant::now() > until {
+            #[cfg(test)]
+            eprintln!(
+                "windows: {:?}",
+                state
+                    .info
+                    .toplevels()
+                    .map(|t| t.app_id.clone())
+                    .collect::<Vec<_>>()
+            );
+            return Err(MoveError::WindowNotFound);
+        }
+        std::thread::sleep(POLL);
+        queue
+            .roundtrip(&mut state)
+            .map_err(|e| MoveError::NoWayland(e.to_string()))?;
+    };
+    act(&mut state, &toplevel, &seat);
+    // Confirm it: COSMIC reports the window as activated.
+    let until = Instant::now() + Duration::from_secs(1);
+    loop {
+        queue
+            .roundtrip(&mut state)
+            .map_err(|e| MoveError::NoWayland(e.to_string()))?;
+        let active = state.info.toplevels().any(|t| {
+            t.app_id == app_id
+                && t.title == title
+                && t.state
+                    .contains(&zcosmic_toplevel_handle_v1::State::Activated)
+        });
+        if active {
+            return Ok(());
+        }
+        if Instant::now() > until {
+            return Err(MoveError::NotActivated);
+        }
+        std::thread::sleep(POLL);
+    }
 }
 
 /// The workspace group holding the window's workspace.
@@ -308,7 +429,32 @@ impl ToplevelManagerHandler for State {
         use zcosmic_toplevel_manager_v1::ZcosmicToplelevelManagementCapabilitiesV1 as C;
         self.can_move = capabilities.contains(&WEnum::Value(C::MoveToExtWorkspace))
             || capabilities.contains(&WEnum::Value(C::MoveToWorkspace));
+        self.can_activate = capabilities.contains(&WEnum::Value(C::Activate));
     }
+}
+
+impl SeatHandler for State {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seats
+    }
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn new_capability(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        _: Capability,
+    ) {
+    }
+    fn remove_capability(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        _: Capability,
+    ) {
+    }
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
 }
 
 impl WorkspaceHandler for State {
@@ -320,6 +466,7 @@ impl WorkspaceHandler for State {
 
 sctk::delegate_output!(State);
 sctk::delegate_registry!(State);
+sctk::delegate_seat!(State);
 cctk::delegate_toplevel_info!(State);
 cctk::delegate_toplevel_manager!(State);
 cctk::delegate_workspace!(State);
@@ -338,6 +485,21 @@ mod tests {
             &std::env::var("MOVE_TITLE").unwrap(),
             std::time::Duration::from_secs(10),
             &cancel,
+        )
+        .unwrap();
+    }
+
+    /// Focuses a real window: `MOVE_APP_ID=… MOVE_TITLE=… cargo test
+    /// --release focus_a_real_window -- --ignored`.
+    /// Run it while another window has the focus (for example a second
+    /// session opened later); `focus` only succeeds once COSMIC reports
+    /// the window activated.
+    #[test]
+    #[ignore = "focuses a real window on the running COSMIC session"]
+    fn focus_a_real_window() {
+        super::focus(
+            &std::env::var("MOVE_APP_ID").unwrap(),
+            &std::env::var("MOVE_TITLE").unwrap(),
         )
         .unwrap();
     }

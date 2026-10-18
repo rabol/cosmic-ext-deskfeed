@@ -1245,7 +1245,9 @@ sleep 300
                 camera: std::env::var("DESKFEED_TEST_CAMERA").is_ok_and(|v| v == "1"),
                 ..crate::settings::DEFAULTS
             },
-            window_title: "Deskfeed local test \u{2013} t\u{e9}st".into(),
+            // `DESKFEED_TEST_TITLE`: another title, for two sessions at once.
+            window_title: std::env::var("DESKFEED_TEST_TITLE")
+                .unwrap_or_else(|_| "Deskfeed local test \u{2013} t\u{e9}st".into()),
             app_id: "io.github.rabol.DeskfeedTest".into(),
         };
         let (tx, rx) = std::sync::mpsc::channel();

@@ -60,6 +60,13 @@ impl AppModel {
             }
             Message::ConnectDeadline(key, attempt) => self.connect_deadline(key, attempt),
             Message::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
+            Message::ShowSession(key) => return self.show_session(&key),
+            Message::SessionShown(result) => {
+                // The desktop is open either way; only the log hears of it.
+                if let Err(e) = result {
+                    crate::app_log!("show desktop: not brought to the front ({e})");
+                }
+            }
             Message::QuitRequested
             | Message::QuitConfirm
             | Message::QuitCancel
@@ -349,6 +356,7 @@ impl AppModel {
                 deadline,
                 account: account.to_owned(),
                 stop: false,
+                title: title.clone(),
             },
         );
         // Starting FreeRDP writes files and hands over the arguments: not on
@@ -475,6 +483,7 @@ impl AppModel {
             return Task::none();
         }
         let Launching {
+            title,
             deadline,
             account: owner,
             stop,
@@ -509,6 +518,7 @@ impl AppModel {
                         attempt,
                         account: owner,
                         session,
+                        title,
                     },
                 );
                 if wanted {
@@ -698,6 +708,23 @@ impl AppModel {
             }
         }
         Task::none()
+    }
+
+    /// Brings a running session's window to the front (COSMIC switches to
+    /// its workspace), in the background.
+    fn show_session(&self, key: &str) -> Task<cosmic::Action<Message>> {
+        let Some(title) = self.running.get(key).map(|r| r.title.clone()) else {
+            return Task::none();
+        };
+        cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                crate::workspace::focus(<Self as cosmic::Application>::APP_ID, &title)
+                    .map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap_or_else(|_| Err("task".into()));
+            Message::SessionShown(result)
+        })
     }
 
     /// Waits, then starts the next reconnect attempt; gives up after the

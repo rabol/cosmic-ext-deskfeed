@@ -123,6 +123,8 @@ pub(super) struct Running {
     pub(super) attempt: u64,
     pub(super) account: String,
     pub(super) session: launcher::Session,
+    /// Its window's title, to find the window (Show).
+    pub(super) title: String,
 }
 
 /// A FreeRDP start in progress.
@@ -134,6 +136,8 @@ pub(super) struct Launching {
     /// Stop it as soon as it has started (disconnected or signed out
     /// meanwhile).
     pub(super) stop: bool,
+    /// Its window's title, as FreeRDP got it (`launcher::safe_title`).
+    pub(super) title: String,
 }
 
 /// Quitting the app.
@@ -257,6 +261,10 @@ pub enum Message {
     Session(String, u64, String, u64, SessionEvent),
     /// Resource key, attempt: the time to connect is up.
     ConnectDeadline(String, u64),
+    /// Resource key: bring its session's window to the front.
+    ShowSession(String),
+    /// Outcome of Show (log text).
+    SessionShown(Result<(), String>),
     /// Resource key, wait: time for the next reconnect attempt.
     ReconnectDue(String, u64),
     Disconnect(String),

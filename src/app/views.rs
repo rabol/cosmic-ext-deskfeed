@@ -248,8 +248,16 @@ impl AppModel {
             ),
             Some(Connection::Connected) => (
                 Some(fl!("status-connected")),
-                widget::button::destructive(fl!("disconnect"))
-                    .on_press(Message::Disconnect(r.key.clone()))
+                widget::row::with_capacity(2)
+                    .push(
+                        widget::button::suggested(fl!("show-desktop"))
+                            .on_press(Message::ShowSession(r.key.clone())),
+                    )
+                    .push(
+                        widget::button::destructive(fl!("disconnect"))
+                            .on_press(Message::Disconnect(r.key.clone())),
+                    )
+                    .spacing(cosmic::theme::spacing().space_xs)
                     .into(),
             ),
             Some(Connection::Reconnecting { attempt, of }) => (
