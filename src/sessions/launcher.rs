@@ -1164,7 +1164,8 @@ sleep 300
     /// local test server (`research/rdp-test-server/README.md`):
     /// `DESKFEED_TEST_SERVER=<its socket> cargo test --release
     /// local_test_server_session -- --ignored`. Runs `DESKFEED_TEST_SECS`
-    /// (default 20) seconds; the window's tiling and the server's resize log
+    /// (default 20) seconds, with the camera when `DESKFEED_TEST_CAMERA=1`;
+    /// the window's tiling and the server's resize log
     /// are checked from outside.
     #[test]
     #[ignore = "needs xfreerdp3 and the local test server"]
@@ -1184,7 +1185,12 @@ sleep 300
             helper: PathBuf::from("/nonexistent/helper"),
             profile: dir.join("profile"),
             gateway_token: None,
-            settings: crate::settings::DEFAULTS,
+            settings: crate::settings::Effective {
+                // `DESKFEED_TEST_CAMERA=1`: with the camera channel
+                // (research/rdp-test-server logs what the client offers).
+                camera: std::env::var("DESKFEED_TEST_CAMERA").is_ok_and(|v| v == "1"),
+                ..crate::settings::DEFAULTS
+            },
             window_title: "Deskfeed local test \u{2013} t\u{e9}st".into(),
             app_id: "io.github.rabol.DeskfeedTest".into(),
         };

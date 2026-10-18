@@ -31,7 +31,7 @@ use crate::service::endpoint::{EndpointPolicy, Role};
 use crate::service::feed::ResourceKind;
 use crate::service::http::{Http, HttpError};
 use crate::sessions::launcher::{self, LaunchSpec, LogonSetting, SessionEnd, SessionEvent};
-use crate::sessions::rdpfile::{ConnectionFile, RdpError};
+use crate::sessions::rdpfile::{CameraPolicy, ConnectionFile, RdpError};
 use crate::settings::{self, ConnectionSettings, Toggle};
 
 mod account_flow;
@@ -83,6 +83,9 @@ pub struct AppModel {
     signing_out: HashSet<String>,
     /// Sessions stopped because connecting took too long.
     timed_out: HashSet<String>,
+    /// Why a running session doesn't have something the user turned on
+    /// (the camera, when the desktop's policy doesn't allow it).
+    session_notes: HashMap<String, String>,
     quit: Quit,
     /// Logon setting and connection file of sessions not yet connected, to
     /// remember the setting on success or ask again on logon failure.
@@ -181,6 +184,7 @@ impl cosmic::Application for AppModel {
             launching: HashMap::new(),
             signing_out: HashSet::new(),
             timed_out: HashSet::new(),
+            session_notes: HashMap::new(),
             quit: Quit::No,
             pending_logon: HashMap::new(),
             dialog: None,

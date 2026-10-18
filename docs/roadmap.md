@@ -25,7 +25,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
 
 ## Parity work the spec allows later (§3)
 
-- **Camera redirection**: the distro FreeRDP build includes `rdpecam` with V4L2 (`libfreerdp-client3.so`). Deskfeed drops the feed's `camerastoredirect` (`sessions/rdpfile.rs`) and has no setting. Needs a Camera setting, off by default (§9), and evidence from a real session. The owner wants this soon.
+- **Camera redirection**: done apart from the real-session test ([ADR 0013](adr/0013-camera-redirection.md)). Camera setting, off by default, gated by the feed's `camerastoredirect`; checked against the local test server. Still open: a real AVD session with a camera, unplug/replug (§13), and a dependency-check item for FreeRDP builds without the camera channel. FreeRDP 3.32.2 can't pick specific cameras or notice ones plugged in later.
 - **RemoteApps**: listed, not connectable (`app/views.rs`). FreeRDP's RemoteApp support is in the X11 client, which Deskfeed now uses (§9).
 - Tray resource menus and session indicators, optional background operation, start minimized.
 - Choosing specific monitors (beyond one or all).

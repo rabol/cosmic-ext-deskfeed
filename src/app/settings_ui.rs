@@ -115,6 +115,7 @@ impl AppModel {
             .title(fl!("settings-devices"))
             .add(toggle(Toggle::Sound))
             .add(toggle(Toggle::Microphone))
+            .add(toggle(Toggle::Camera))
             .add(toggle(Toggle::Clipboard));
         widget::settings::view_column(vec![
             widget::text::body(fl!("account-settings-hint")).into(),
@@ -188,6 +189,7 @@ impl AppModel {
             .title(fl!("settings-devices"))
             .add(choice(Toggle::Sound))
             .add(choice(Toggle::Microphone))
+            .add(choice(Toggle::Camera))
             .add(choice(Toggle::Clipboard));
         widget::settings::view_column(vec![
             widget::text::body(fl!("desktop-settings-hint", account = account.label())).into(),
@@ -230,6 +232,7 @@ pub(super) fn toggle_text(t: Toggle) -> (String, String) {
         ),
         Toggle::Sound => (fl!("setting-sound"), fl!("setting-sound-desc")),
         Toggle::Microphone => (fl!("setting-microphone"), fl!("setting-microphone-desc")),
+        Toggle::Camera => (fl!("setting-camera"), fl!("setting-camera-desc")),
         Toggle::Clipboard => (fl!("setting-clipboard"), fl!("setting-clipboard-desc")),
     }
 }

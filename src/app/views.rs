@@ -93,6 +93,7 @@ impl AppModel {
                 error.as_deref(),
                 account.notice.as_deref(),
                 &self.connections,
+                &self.session_notes,
             ),
         }
     }
@@ -200,6 +201,7 @@ pub(super) fn dependency_text(d: Dependency) -> (String, String) {
 pub(super) fn resource_row<'a>(
     r: &'a ResourceView,
     conn: Option<&'a Connection>,
+    note: Option<&str>,
 ) -> Element<'a, Message> {
     let kind = match r.kind {
         ResourceKind::Desktop => fl!("kind-desktop"),
@@ -237,9 +239,13 @@ pub(super) fn resource_row<'a>(
                 .into(),
         ),
     };
-    let description = match status {
-        Some(s) => format!("{kind} · {s}"),
-        None => kind,
+    // The note only belongs to a session that is starting or running.
+    let note =
+        note.filter(|_| matches!(conn, Some(Connection::Connecting | Connection::Connected)));
+    let description = match (status, note) {
+        (Some(s), Some(n)) => format!("{kind} · {s} · {n}"),
+        (Some(s), None) => format!("{kind} · {s}"),
+        _ => kind,
     };
     let settings = widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
         .tooltip(fl!("desktop-settings"))
@@ -262,6 +268,7 @@ pub(super) fn resources_view<'a>(
     error: Option<&'a str>,
     notice: Option<&'a str>,
     connections: &'a HashMap<String, Connection>,
+    notes: &'a HashMap<String, String>,
 ) -> Element<'a, Message> {
     let space = cosmic::theme::spacing();
     let mut col = widget::column::with_capacity(workspaces.len() + 4).spacing(space.space_m);
@@ -291,7 +298,11 @@ pub(super) fn resources_view<'a>(
             )));
         }
         for r in &ws.resources {
-            section = section.add(resource_row(r, connections.get(&r.key)));
+            section = section.add(resource_row(
+                r,
+                connections.get(&r.key),
+                notes.get(&r.key).map(String::as_str),
+            ));
         }
         col = col.push(section);
     }

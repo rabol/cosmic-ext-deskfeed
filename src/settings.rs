@@ -30,6 +30,8 @@ pub struct ConnectionSettings {
     #[serde(default)]
     pub microphone: Option<bool>,
     #[serde(default)]
+    pub camera: Option<bool>,
+    #[serde(default)]
     pub clipboard: Option<bool>,
 }
 
@@ -41,17 +43,19 @@ pub enum Toggle {
     NewWorkspace,
     Sound,
     Microphone,
+    Camera,
     Clipboard,
 }
 
 impl Toggle {
     #[cfg(test)]
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Fullscreen,
         Self::AllMonitors,
         Self::NewWorkspace,
         Self::Sound,
         Self::Microphone,
+        Self::Camera,
         Self::Clipboard,
     ];
 }
@@ -64,6 +68,7 @@ impl ConnectionSettings {
             Toggle::NewWorkspace => self.new_workspace,
             Toggle::Sound => self.sound,
             Toggle::Microphone => self.microphone,
+            Toggle::Camera => self.camera,
             Toggle::Clipboard => self.clipboard,
         }
     }
@@ -75,6 +80,7 @@ impl ConnectionSettings {
             Toggle::NewWorkspace => &mut self.new_workspace,
             Toggle::Sound => &mut self.sound,
             Toggle::Microphone => &mut self.microphone,
+            Toggle::Camera => &mut self.camera,
             Toggle::Clipboard => &mut self.clipboard,
         };
         *slot = value;
@@ -100,11 +106,12 @@ pub struct Effective {
     pub new_workspace: bool,
     pub sound: bool,
     pub microphone: bool,
+    pub camera: bool,
     pub clipboard: bool,
 }
 
 /// Built-in defaults. 120 s: measured Entra exchanges took up to 49.8 s
-/// (docs/milestone-1.md). Microphone and clipboard off (spec §11).
+/// (docs/milestone-1.md). Microphone, camera and clipboard off (spec §9).
 pub const DEFAULTS: Effective = Effective {
     timeout_secs: 120,
     fullscreen: false,
@@ -112,6 +119,7 @@ pub const DEFAULTS: Effective = Effective {
     new_workspace: false,
     sound: true,
     microphone: false,
+    camera: false,
     clipboard: false,
 };
 
@@ -128,6 +136,7 @@ impl Effective {
             new_workspace: s.new_workspace.unwrap_or(self.new_workspace),
             sound: s.sound.unwrap_or(self.sound),
             microphone: s.microphone.unwrap_or(self.microphone),
+            camera: s.camera.unwrap_or(self.camera),
             clipboard: s.clipboard.unwrap_or(self.clipboard),
         }
     }
@@ -139,6 +148,7 @@ impl Effective {
             Toggle::NewWorkspace => self.new_workspace,
             Toggle::Sound => self.sound,
             Toggle::Microphone => self.microphone,
+            Toggle::Camera => self.camera,
             Toggle::Clipboard => self.clipboard,
         }
     }
@@ -170,6 +180,12 @@ impl Effective {
         }
         if self.microphone {
             args.push("/microphone".to_owned());
+        }
+        // 3.32.2 has no `/camera` option; this loads the camera channel
+        // (MS-RDPECAM), which offers every V4L2 camera
+        // (`channels/rdpecam/client`, ADR 0013).
+        if self.camera {
+            args.push("/dvc:rdpecam".to_owned());
         }
         args.push(
             if self.clipboard {
@@ -238,6 +254,7 @@ mod tests {
         assert!(a.contains(&"-multimon".into()));
         assert!(a.contains(&"-clipboard".into()));
         assert!(!a.iter().any(|x| x.starts_with("/microphone")));
+        assert!(!a.iter().any(|x| x.contains("rdpecam")));
         assert!(a.contains(&"/sound".into()));
     }
 
@@ -256,11 +273,13 @@ mod tests {
         let mut e = DEFAULTS;
         e.sound = false;
         e.microphone = true;
+        e.camera = true;
         e.clipboard = true;
         let a = e.freerdp_args();
         assert!(a.contains(&"/audio-mode:none".into()));
         assert!(!a.contains(&"/sound".into()));
         assert!(a.contains(&"/microphone".into()));
+        assert!(a.contains(&"/dvc:rdpecam".into()));
         assert!(a.contains(&"/clipboard".into()));
     }
 

@@ -9,6 +9,10 @@
 //! off; the user's own settings decide those later. Commands such as
 //! `alternate shell` are never passed on.
 //!
+//! `camerastoredirect` isn't passed on either, but it is read: it is the
+//! administrator's camera policy, which the user's Camera setting can't
+//! override (`cameras`).
+//!
 //! The file decides where the access token goes (`gatewayhostname`), so a
 //! file naming any other gateway than an AVD service host is refused. Its
 //! certificate policy (`authentication level`) is not kept: in FreeRDP
@@ -88,11 +92,43 @@ pub enum RdpError {
     GatewayNotAllowed,
 }
 
+/// What the feed's `camerastoredirect` allows. Its value is `*` for every
+/// camera, or a `;`-separated list of Windows device paths, where a leading
+/// `-` excludes one (Microsoft's RDP properties reference).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CameraPolicy {
+    /// Not set or empty: no cameras.
+    NotAllowed,
+    /// `*` alone: every camera.
+    All,
+    /// A list of specific cameras, or `*` with exclusions. FreeRDP 3.32.2
+    /// can't follow it: it shares every camera and ignores device names
+    /// (`channels/rdpecam/client`), so no camera is shared.
+    Specific,
+}
+
+impl CameraPolicy {
+    fn parse(value: &str) -> Self {
+        let entries: Vec<&str> = value
+            .split([';', ','])
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .collect();
+        match entries.as_slice() {
+            [] => Self::NotAllowed,
+            ["*"] => Self::All,
+            _ => Self::Specific,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionFile {
     props: BTreeMap<String, Value>,
     /// Properties that were in the feed's file but not passed on.
     pub dropped: usize,
+    /// The administrator's camera policy (`camerastoredirect`).
+    pub cameras: CameraPolicy,
 }
 
 impl ConnectionFile {
@@ -100,6 +136,7 @@ impl ConnectionFile {
         let text = decode(bytes)?;
         let mut props = BTreeMap::new();
         let mut dropped = 0;
+        let mut cameras = CameraPolicy::NotAllowed;
         for (n, line) in text.lines().enumerate() {
             if n >= MAX_LINES {
                 return Err(RdpError::TooLarge);
@@ -113,6 +150,9 @@ impl ConnectionFile {
                 continue;
             };
             let key = key.trim().to_ascii_lowercase();
+            if key == "camerastoredirect" && kind == "s" && value.len() <= MAX_VALUE_LEN {
+                cameras = CameraPolicy::parse(value);
+            }
             if !ALLOWED.contains(&key.as_str()) || value.len() > MAX_VALUE_LEN {
                 dropped += 1;
                 continue;
@@ -139,7 +179,11 @@ impl ConnectionFile {
         if !matches!(props.get("gatewayhostname"), Some(Value::Str(g)) if is_avd_gateway(g)) {
             return Err(RdpError::GatewayNotAllowed);
         }
-        Ok(Self { props, dropped })
+        Ok(Self {
+            props,
+            dropped,
+            cameras,
+        })
     }
 
     /// Tests only: a file for a local test server, without the gateway a
@@ -148,7 +192,11 @@ impl ConnectionFile {
     pub fn local_test(address: &str) -> Self {
         let mut props = BTreeMap::new();
         props.insert("full address".to_owned(), Value::Str(address.to_owned()));
-        Self { props, dropped: 0 }
+        Self {
+            props,
+            dropped: 0,
+            cameras: CameraPolicy::All,
+        }
     }
 
     /// Serialized for FreeRDP: kept properties, then device defaults.
@@ -244,6 +292,32 @@ mod tests {
         assert!(text.contains("redirectprinters:i:0"));
         assert!(!text.contains("redirectclipboard:i:1"));
         assert_eq!(f.dropped, 9);
+        assert_eq!(f.cameras, CameraPolicy::All);
+    }
+
+    #[test]
+    fn reads_camera_policy() {
+        let policy = |line: &str| {
+            ConnectionFile::parse(format!("full address:s:h\r\n{GW}{line}").as_bytes())
+                .unwrap()
+                .cameras
+        };
+        assert_eq!(policy(""), CameraPolicy::NotAllowed);
+        assert_eq!(policy("camerastoredirect:s:\r\n"), CameraPolicy::NotAllowed);
+        assert_eq!(policy("CameraStoreDirect:s: * \r\n"), CameraPolicy::All);
+        assert_eq!(
+            policy("camerastoredirect:s:\\\\?\\usb#vid_0bda&pid_58b0\r\n"),
+            CameraPolicy::Specific
+        );
+        assert_eq!(
+            policy("camerastoredirect:s:*;-\\\\?\\usb#vid_0bda\r\n"),
+            CameraPolicy::Specific
+        );
+        // Wrong type: not a camera policy.
+        assert_eq!(
+            policy("camerastoredirect:i:1\r\n"),
+            CameraPolicy::NotAllowed
+        );
     }
 
     #[test]

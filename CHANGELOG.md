@@ -4,6 +4,10 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ## [Unreleased]
 
+### Added
+
+- Camera setting (off by default), per account and desktop. It shares this computer's cameras when the desktop's administrator allows all cameras; otherwise the desktop row says why no camera is shared (ADR 0013).
+
 ## [0.1.0] - 2026-10-18
 
 First version.

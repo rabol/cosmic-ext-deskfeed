@@ -266,7 +266,25 @@ impl AppModel {
             );
             return Task::none();
         };
-        let settings = self.effective_settings(account, key);
+        let mut settings = self.effective_settings(account, key);
+        // The administrator's camera policy wins over the user's setting
+        // (spec §Settings: respect server policy, show effective behaviour).
+        self.session_notes.remove(key);
+        if settings.camera {
+            let note = match connection.cameras {
+                CameraPolicy::All => None,
+                CameraPolicy::NotAllowed => Some(fl!("camera-not-allowed")),
+                CameraPolicy::Specific => Some(fl!("camera-only-some")),
+            };
+            crate::app_log!(
+                "Camera: {:?} allowed by the connection file",
+                connection.cameras
+            );
+            if let Some(note) = note {
+                settings.camera = false;
+                self.session_notes.insert(key.to_owned(), note);
+            }
+        }
         let window_title = self
             .account(account)
             .and_then(|a| Some(format!("{} – {}", a.resource(key)?.title, a.label())))
@@ -562,6 +580,7 @@ impl AppModel {
             }
             SessionEvent::Ended { end, log } => {
                 self.running.remove(key);
+                self.session_notes.remove(key);
                 self.launching.remove(key);
                 if let Some(stop) = self.movers.remove(key) {
                     stop.store(true, Ordering::SeqCst);

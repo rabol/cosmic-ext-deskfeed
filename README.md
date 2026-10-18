@@ -16,7 +16,7 @@ Your work desktops on the COSMIC™ desktop. A native COSMIC app that **works wi
 - **Stays signed in** between starts: the sign-in is kept in your desktop keyring (Secret Service), never in files. Your organization's sign-in rules still apply.
 - **All your desktops** from every workspace your accounts can use.
 - **Connect with Entra sign-in** (no Windows password) by default; host pools that need a Windows password get a native dialog that allows pasting.
-- **Settings per account, with per-desktop overrides:** full screen or window, all monitors, open on a new COSMIC workspace, sound, microphone, clipboard, and how long to wait for the desktop.
+- **Settings per account, with per-desktop overrides:** full screen or window, all monitors, open on a new COSMIC workspace, sound, microphone, camera, clipboard, and how long to wait for the desktop.
 - **Built for COSMIC:** libcosmic UI that follows the COSMIC design, the remote desktop groups under the app in the dock, light and dark themes.
 - **Checks its dependencies** at startup and tells you what to install.
 
