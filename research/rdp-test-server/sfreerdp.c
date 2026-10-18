@@ -56,6 +56,7 @@
 #include "sf_audin.h"
 #include "sf_rdpsnd.h"
 #include "sf_encomsp.h"
+#include "sf_rdpecam.h" /* Deskfeed test addition */
 
 #include "sfreerdp.h"
 
@@ -105,6 +106,8 @@ static void test_peer_context_free(freerdp_peer* client, rdpContext* ctx)
 #if defined(CHANNEL_AINPUT_SERVER)
 		sf_peer_ainput_uninit(context);
 #endif
+
+		sf_peer_rdpecam_uninit(context); /* Deskfeed test addition */
 
 		rdpsnd_server_context_free(context->rdpsnd);
 		encomsp_server_context_free(context->encomsp);
@@ -861,6 +864,10 @@ static BOOL tf_peer_post_connect(freerdp_peer* client)
 	sf_peer_ainput_init(context);
 #endif
 
+	/* Deskfeed test addition: camera device enumeration. */
+	if (!sf_peer_rdpecam_init(context))
+		return FALSE;
+
 	/* Return FALSE here would stop the execution of the peer main loop. */
 	return TRUE;
 }
@@ -1391,6 +1398,15 @@ static DWORD WINAPI test_peer_mainloop(LPVOID arg)
 							WLog_ERR(TAG, "DESKFEED-TEST disp caps failed");
 						else
 							WLog_INFO(TAG, "DESKFEED-TEST disp channel open, caps sent");
+					}
+
+					/* Deskfeed test addition: offer the camera enumeration channel
+					 * once. A client without camera redirection refuses it. */
+					if (!context->rdpecam_open)
+					{
+						context->rdpecam_open = TRUE;
+						if (sf_peer_rdpecam_start(context))
+							WLog_INFO(TAG, "DESKFEED-TEST camera channel offered");
 					}
 
 					/* Here is the correct state to start dynamic virtual channels */

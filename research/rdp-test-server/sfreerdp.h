@@ -21,6 +21,7 @@
 #define FREERDP_SERVER_SAMPLE_SFREERDP_SERVER_H
 
 #include <freerdp/server/disp.h>
+#include <freerdp/server/rdpecam-enumerator.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/listener.h>
 #include <freerdp/codec/rfx.h>
@@ -78,6 +79,10 @@ struct test_peer_context
 	UINT64 disp_ready_at;
 	HANDLE resize_event;
 	volatile LONG pending_size; /* (width << 16) | height, 0 = none */
+
+	/* Deskfeed test addition: camera device enumeration (MS-RDPECAM). */
+	CamDevEnumServerContext* rdpecam;
+	BOOL rdpecam_open;
 };
 typedef struct test_peer_context testPeerContext;
 

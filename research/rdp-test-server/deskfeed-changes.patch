@@ -1,14 +1,15 @@
---- a/sfreerdp.h	2026-10-18 08:16:14.968799952 +0200
-+++ b/sfreerdp.h	2026-10-18 08:18:43.898375594 +0200
-@@ -20,6 +20,7 @@
+--- a/sfreerdp.h
++++ b/sfreerdp.h
+@@ -20,6 +20,8 @@
  #ifndef FREERDP_SERVER_SAMPLE_SFREERDP_SERVER_H
  #define FREERDP_SERVER_SAMPLE_SFREERDP_SERVER_H
  
 +#include <freerdp/server/disp.h>
++#include <freerdp/server/rdpecam-enumerator.h>
  #include <freerdp/freerdp.h>
  #include <freerdp/listener.h>
  #include <freerdp/codec/rfx.h>
-@@ -70,6 +71,13 @@
+@@ -70,6 +72,17 @@
  
  	rdpTransportIo io;
  	wImage* image;
@@ -19,11 +20,15 @@
 +	UINT64 disp_ready_at;
 +	HANDLE resize_event;
 +	volatile LONG pending_size; /* (width << 16) | height, 0 = none */
++
++	/* Deskfeed test addition: camera device enumeration (MS-RDPECAM). */
++	CamDevEnumServerContext* rdpecam;
++	BOOL rdpecam_open;
  };
  typedef struct test_peer_context testPeerContext;
  
---- a/sfreerdp.c	2026-10-18 08:16:14.967799890 +0200
-+++ b/sfreerdp.c	2026-10-18 08:18:48.662502511 +0200
+--- a/sfreerdp.c
++++ b/sfreerdp.c
 @@ -24,6 +24,7 @@
  #include <errno.h>
  #include <signal.h>
@@ -32,7 +37,20 @@
  #include <winpr/winpr.h>
  #include <winpr/crt.h>
  #include <winpr/cast.h>
-@@ -108,10 +109,64 @@
+@@ -55,6 +56,7 @@
+ #include "sf_audin.h"
+ #include "sf_rdpsnd.h"
+ #include "sf_encomsp.h"
++#include "sf_rdpecam.h" /* Deskfeed test addition */
+ 
+ #include "sfreerdp.h"
+ 
+@@ -105,13 +107,69 @@
+ 		sf_peer_ainput_uninit(context);
+ #endif
+ 
++		sf_peer_rdpecam_uninit(context); /* Deskfeed test addition */
++
  		rdpsnd_server_context_free(context->rdpsnd);
  		encomsp_server_context_free(context->encomsp);
  
@@ -97,7 +115,7 @@
  WINPR_ATTR_NODISCARD
  static BOOL test_peer_context_new(freerdp_peer* client, rdpContext* ctx)
  {
-@@ -151,6 +206,18 @@
+@@ -151,6 +209,18 @@
  	if (!context->vcm || context->vcm == INVALID_HANDLE_VALUE)
  		goto fail;
  
@@ -116,7 +134,18 @@
  	return TRUE;
  fail:
  	test_peer_context_free(client, ctx);
-@@ -1263,7 +1330,9 @@
+@@ -794,6 +864,10 @@
+ 	sf_peer_ainput_init(context);
+ #endif
+ 
++	/* Deskfeed test addition: camera device enumeration. */
++	if (!sf_peer_rdpecam_init(context))
++		return FALSE;
++
+ 	/* Return FALSE here would stop the execution of the peer main loop. */
+ 	return TRUE;
+ }
+@@ -1263,7 +1337,9 @@
  
  		HANDLE channelHandle = WTSVirtualChannelManagerGetEventHandle(context->vcm);
  		handles[count++] = channelHandle;
@@ -127,7 +156,7 @@
  
  		if (status == WAIT_FAILED)
  		{
-@@ -1275,9 +1344,20 @@
+@@ -1275,9 +1351,20 @@
  		if (client->CheckFileDescriptor(client) != TRUE)
  			break;
  
@@ -149,7 +178,7 @@
  		/* Handle dynamic virtual channel initializations */
  		if (WTSVirtualChannelManagerIsChannelJoined(context->vcm, DRDYNVC_SVC_CHANNEL_NAME))
  		{
-@@ -1291,6 +1371,28 @@
+@@ -1291,6 +1378,37 @@
  
  				case DRDYNVC_STATE_READY:
  
@@ -173,6 +202,15 @@
 +							WLog_ERR(TAG, "DESKFEED-TEST disp caps failed");
 +						else
 +							WLog_INFO(TAG, "DESKFEED-TEST disp channel open, caps sent");
++					}
++
++					/* Deskfeed test addition: offer the camera enumeration channel
++					 * once. A client without camera redirection refuses it. */
++					if (!context->rdpecam_open)
++					{
++						context->rdpecam_open = TRUE;
++						if (sf_peer_rdpecam_start(context))
++							WLog_INFO(TAG, "DESKFEED-TEST camera channel offered");
 +					}
 +
  					/* Here is the correct state to start dynamic virtual channels */
