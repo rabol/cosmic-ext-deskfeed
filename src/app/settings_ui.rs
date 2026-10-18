@@ -263,7 +263,27 @@ impl AppModel {
         let key_toggle = key.to_owned();
         let key_number = key.to_owned();
         let key_choice = key.to_owned();
-        rows.view(
+        let pin = self.config.certificate_pins.get(key).map(|fp| {
+            // The start and end are enough to recognize it.
+            let short = format!(
+                "{}…{}",
+                &fp[..11.min(fp.len())],
+                &fp[fp.len().saturating_sub(11)..]
+            );
+            widget::settings::section()
+                .title(fl!("settings-security"))
+                .add(
+                    widget::settings::item::builder(fl!("setting-certificate"))
+                        .description(fl!("setting-certificate-desc", fingerprint = short))
+                        .control(
+                            widget::button::destructive(fl!("forget-certificate"))
+                                .on_press(Message::ForgetCertificate(key.to_owned())),
+                        ),
+                )
+                .into()
+        });
+        rows.view_with(
+            pin,
             fl!("desktop-settings-hint", account = account.label()),
             false,
             move |t, i| Message::DesktopToggle(key_toggle.clone(), t, i),
@@ -292,6 +312,19 @@ struct OverrideRows<'a, F: Fn(String) -> String> {
 impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
     fn view(
         self,
+        hint: String,
+        account_level: bool,
+        on_toggle: impl Fn(Toggle, usize) -> Message + Clone + Send + Sync + 'static,
+        on_number: impl Fn(Number, Option<u32>) -> Message + Clone + 'static,
+        on_choice: impl Fn(Choice, usize) -> Message + Clone + Send + Sync + 'static,
+    ) -> Element<'a, Message> {
+        self.view_with(None, hint, account_level, on_toggle, on_number, on_choice)
+    }
+
+    /// With `last` at the end of the page.
+    fn view_with(
+        self,
+        last: Option<Element<'a, Message>>,
         hint: String,
         account_level: bool,
         on_toggle: impl Fn(Toggle, usize) -> Message + Clone + Send + Sync + 'static,
@@ -361,7 +394,7 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
                 }))
                 .into()
         };
-        settings_column(hint, account_level, number, toggle, choice, None)
+        settings_column(hint, account_level, number, toggle, choice, last)
     }
 }
 

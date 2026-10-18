@@ -57,4 +57,5 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Refresh check every 5 min (and after resume) | `app/mod.rs` `REFRESH_CHECK` | Internal; the refresh interval is a setting |
 | Log line 2 000 chars; redaction lists | `log.rs` | Internal; privacy |
 | FreeRDP log level `info` | `sessions/launcher.rs` `build_args` | Security: at `debug` FreeRDP logs every gateway HTTP header, including `Authorization: Bearer` (`libfreerdp/core/gateway/http.c`), and hex dumps of sign-in tickets (`nla.c`, `tsg.c`), which the log's redaction can't reliably catch (spec §12). Diagnostics export (roadmap item 12) is the place for more detail |
+| Never `/cert:ignore`; approved certificates are per desktop, not a setting | `sessions/launcher.rs`, `app/connect.rs` | Security (ADR 0016) |
 | Endpoints, client ID, `X-MS-User-Agent`, D-Bus names, app ID | `service/`, `auth/`, `secrets.rs` | Protocol facts (the cloud choice above is the setting) |

@@ -56,6 +56,7 @@ pub(super) fn describe_session_end(end: &SessionEnd) -> String {
         SessionEnd::AuthenticationFailed => fl!("error-auth-failed"),
         SessionEnd::DnsFailed => fl!("error-network"),
         SessionEnd::ConnectionLost => fl!("error-connection-lost"),
+        SessionEnd::CertificateNotTrusted(_) => fl!("error-certificate-untrusted"),
         SessionEnd::TlsFailed => fl!("error-tls"),
         SessionEnd::Crashed => fl!("error-freerdp-crashed"),
         SessionEnd::Failed { code } => fl!("error-session-failed", code = code.to_string()),

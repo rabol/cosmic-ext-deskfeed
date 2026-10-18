@@ -7,6 +7,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 ### Added
 
 - App settings (View → Settings): defaults for every account. New settings: time allowed for signing in and how often desktop lists refresh (app and account), and the log file size (app). Account settings now follow the app's setting or override it, as desktop settings do for the account.
+- Unverified desktop certificates: instead of failing silently, Deskfeed shows the certificate (name, issuer, validity, fingerprint) and lets you trust it for that desktop. A certificate that changes after you trusted it is blocked; you can remove the trusted one in the desktop's settings.
 - Desktop rows say what a connection is doing: preparing, waiting for your password, connecting, signing in to Windows, connected, reconnecting, disconnecting. "Connected" now means the Windows session is active.
 - Display scaling follows the monitor: Windows draws text and apps at COSMIC's scale (for example 125 %), so the desktop matches the apps around it. A "Display scaling" setting (App, account, desktop) can set it instead.
 - Show: a connected desktop's row brings its window to the front, switching to its workspace.

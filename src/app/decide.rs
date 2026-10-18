@@ -112,6 +112,7 @@ pub(super) fn reconnects(
         | SessionEnd::Crashed => reconnecting,
         SessionEnd::Closed
         | SessionEnd::Cancelled
+        | SessionEnd::CertificateNotTrusted(_)
         | SessionEnd::LogonFailed
         | SessionEnd::AccountLockedOut
         | SessionEnd::PasswordExpired
@@ -125,6 +126,26 @@ pub(super) fn reconnects(
 pub(super) fn reconnect_delay(attempt: u32) -> std::time::Duration {
     let secs = 5u64.saturating_mul(1 << attempt.saturating_sub(1).min(6));
     std::time::Duration::from_secs(secs.min(60))
+}
+
+/// What an untrusted session host certificate means (ADR 0016).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CertificateStep {
+    /// Nothing approved for this desktop yet: ask.
+    Ask,
+    /// A different certificate than the approved one: block.
+    Changed,
+}
+
+/// `pinned`: the fingerprint approved for this desktop, if any. FreeRDP
+/// was given it, so a refusal with a pin means the certificate changed.
+pub(super) fn certificate_step(pinned: Option<&str>, presented: &str) -> CertificateStep {
+    match pinned {
+        Some(p) if !p.eq_ignore_ascii_case(presented) => CertificateStep::Changed,
+        // The same one refused can't happen with a well-formed pin; asking
+        // again is safe.
+        _ => CertificateStep::Ask,
+    }
 }
 
 /// What a finished sign-in changes besides the signed-in account itself.
@@ -317,5 +338,28 @@ mod tests {
         assert_eq!(secs, [5, 10, 20, 40, 60, 60, 60, 60]);
         assert_eq!(reconnect_delay(0).as_secs(), 5);
         assert_eq!(reconnect_delay(u32::MAX).as_secs(), 60);
+    }
+
+    #[test]
+    fn certificate_changes_block() {
+        let a = "aa:".repeat(31) + "aa";
+        let b = "bb:".repeat(31) + "bb";
+        assert_eq!(certificate_step(None, &a), CertificateStep::Ask);
+        assert_eq!(certificate_step(Some(&a), &b), CertificateStep::Changed);
+        assert_eq!(
+            certificate_step(Some(&a.to_uppercase()), &a),
+            CertificateStep::Ask
+        );
+        let cert = SessionEnd::CertificateNotTrusted(crate::sessions::launcher::CertificateInfo {
+            host: String::new(),
+            common_name: String::new(),
+            subject: String::new(),
+            issuer: String::new(),
+            valid_from: String::new(),
+            valid_to: String::new(),
+            fingerprint: a,
+        });
+        // Never retried by itself.
+        assert!(!reconnects(&cert, false, true, Some(&ENTRA)));
     }
 }

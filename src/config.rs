@@ -17,6 +17,9 @@ pub struct Config {
     /// of account, tenant, workspace and resource ID (spec §7: titles are never
     /// identity). No credentials are stored here.
     pub logon_settings: BTreeMap<String, LogonSetting>,
+    /// Session host certificates the user approved, per desktop (resource
+    /// keys; sha256 fingerprints), ADR 0016.
+    pub certificate_pins: BTreeMap<String, String>,
     /// Favorite desktops (resource keys, as above).
     pub favorites: BTreeSet<String>,
     /// Log rotation size in MiB (App settings → Diagnostics); `None` is

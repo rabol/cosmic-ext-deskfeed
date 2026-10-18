@@ -101,6 +101,7 @@ pub struct AppModel {
     /// remember the setting on success or ask again on logon failure.
     pending_logon: HashMap<String, (LogonSetting, Arc<ConnectionFile>)>,
     dialog: Option<PasswordDialog>,
+    certificate_dialog: Option<CertificateDialog>,
     /// Why the last attempt for a resource failed, shown at the top of the
     /// next password dialog.
     last_failure: HashMap<String, String>,
@@ -204,6 +205,7 @@ impl cosmic::Application for AppModel {
             quit: Quit::No,
             pending_logon: HashMap::new(),
             dialog: None,
+            certificate_dialog: None,
             last_failure: HashMap::new(),
             entra_failed: HashSet::new(),
             entra_failures: HashMap::new(),
@@ -359,6 +361,9 @@ impl cosmic::Application for AppModel {
         if self.quit == Quit::Asking {
             return Some(self.quit_dialog());
         }
+        if let Some(d) = &self.certificate_dialog {
+            return Some(connect::certificate_dialog(d));
+        }
         let d = self.dialog.as_ref()?;
         let account = self
             .account(&d.account)
@@ -480,6 +485,9 @@ impl cosmic::Application for AppModel {
             | Message::ConnectDeadline(..)
             | Message::ReconnectDue(..)
             | Message::ShowSession(..)
+            | Message::TrustCertificate
+            | Message::CloseCertificateDialog
+            | Message::ForgetCertificate(..)
             | Message::SessionShown(..)
             | Message::Disconnect(..)
             | Message::WorkspaceMoved(..)

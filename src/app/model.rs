@@ -179,6 +179,17 @@ pub(super) struct Reconnect {
     pub(super) timer: u64,
 }
 
+/// An untrusted session host certificate, shown for approval or as
+/// blocked (ADR 0016).
+pub(super) struct CertificateDialog {
+    pub(super) key: String,
+    pub(super) title: String,
+    pub(super) certificate: launcher::CertificateInfo,
+    /// The approved fingerprint it differs from; then it can't be trusted
+    /// here.
+    pub(super) changed_from: Option<String>,
+}
+
 pub(super) struct PasswordDialog {
     pub(super) account: String,
     pub(super) key: String,
@@ -269,6 +280,12 @@ pub enum Message {
     Session(String, u64, String, u64, SessionEvent),
     /// Resource key, attempt: the time to connect is up.
     ConnectDeadline(String, u64),
+    /// Trust the certificate in the certificate dialog and connect.
+    TrustCertificate,
+    /// Close the certificate dialog.
+    CloseCertificateDialog,
+    /// Resource key: forget its approved certificate.
+    ForgetCertificate(String),
     /// Resource key: bring its session's window to the front.
     ShowSession(String),
     /// Outcome of Show (log text).

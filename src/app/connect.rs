@@ -62,6 +62,29 @@ impl AppModel {
             Message::ConnectDeadline(key, attempt) => self.connect_deadline(key, attempt),
             Message::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
             Message::ShowSession(key) => return self.show_session(&key),
+            Message::TrustCertificate => {
+                let Some(d) = self.certificate_dialog.take() else {
+                    return Task::none();
+                };
+                // A changed certificate can't be trusted from the dialog.
+                if d.changed_from.is_some() {
+                    return Task::none();
+                }
+                crate::app_log!("session host certificate approved for a desktop");
+                let mut pins = self.config.certificate_pins.clone();
+                pins.insert(d.key.clone(), d.certificate.fingerprint);
+                self.save_certificate_pins(pins);
+                self.connections.remove(&d.key);
+                return self.prepare_connection(&d.key);
+            }
+            Message::CloseCertificateDialog => self.certificate_dialog = None,
+            Message::ForgetCertificate(key) => {
+                let mut pins = self.config.certificate_pins.clone();
+                if pins.remove(&key).is_some() {
+                    crate::app_log!("approved session host certificate forgotten");
+                    self.save_certificate_pins(pins);
+                }
+            }
             Message::SessionShown(result) => {
                 // The desktop is open either way; only the log hears of it.
                 if let Err(e) = result {
@@ -335,6 +358,7 @@ impl AppModel {
             profile,
             gateway_token: (!signed_in.tokens.needs_refresh(Instant::now()))
                 .then(|| signed_in.tokens.access_token.clone()),
+            pinned_certificate: self.config.certificate_pins.get(key).cloned(),
             settings,
             window_title: window_title.clone(),
             app_id: <Self as cosmic::Application>::APP_ID.to_owned(),
@@ -704,6 +728,33 @@ impl AppModel {
                 {
                     *self.entra_failures.entry(key.to_owned()).or_insert(0) += 1;
                 }
+                if let SessionEnd::CertificateNotTrusted(certificate) = &end {
+                    let pinned = self.config.certificate_pins.get(key).cloned();
+                    let step =
+                        decide::certificate_step(pinned.as_deref(), &certificate.fingerprint);
+                    crate::app_log!("session host certificate not trusted: {step:?}");
+                    let title = self
+                        .account_of_resource(key)
+                        .and_then(|a| a.resource(key))
+                        .map(|r| r.title.clone())
+                        .unwrap_or_default();
+                    self.connections.insert(
+                        key.to_owned(),
+                        Connection::Failed(match step {
+                            decide::CertificateStep::Ask => fl!("error-certificate-untrusted"),
+                            decide::CertificateStep::Changed => fl!("error-certificate-changed"),
+                        }),
+                    );
+                    self.certificate_dialog = Some(CertificateDialog {
+                        key: key.to_owned(),
+                        title,
+                        certificate: certificate.clone(),
+                        changed_from: (step == decide::CertificateStep::Changed)
+                            .then_some(pinned)
+                            .flatten(),
+                    });
+                    return Task::none();
+                }
                 match outcome {
                     decide::EndOutcome::Clear => {
                         self.connections.remove(key);
@@ -743,6 +794,15 @@ impl AppModel {
             }
         }
         Task::none()
+    }
+
+    fn save_certificate_pins(&mut self, pins: BTreeMap<String, String>) {
+        match &self.config_handler {
+            Some(handler) => {
+                let _ = self.config.set_certificate_pins(handler, pins);
+            }
+            None => self.config.certificate_pins = pins,
+        }
     }
 
     /// Brings a running session's window to the front (COSMIC switches to
@@ -833,4 +893,78 @@ impl AppModel {
             let _ = self.config.set_logon_settings(handler, map);
         }
     }
+}
+
+/// The certificate dialog: what the session host presented, and either
+/// "Trust and connect" or, for a changed certificate, only Close.
+pub(super) fn certificate_dialog(d: &CertificateDialog) -> Element<'_, Message> {
+    let c = &d.certificate;
+    let space = cosmic::theme::spacing();
+    let unknown = || fl!("certificate-unknown");
+    let or_unknown = |s: &str| {
+        if s.is_empty() || s == "(null)" {
+            unknown()
+        } else {
+            s.to_owned()
+        }
+    };
+    let row = |label: String, value: String| {
+        widget::settings::item::builder(label).control(widget::text::body(value))
+    };
+    let details = widget::settings::section()
+        .add(row(fl!("certificate-host"), or_unknown(&c.host)))
+        .add(row(fl!("certificate-name"), or_unknown(&c.common_name)))
+        .add(row(fl!("certificate-issuer"), or_unknown(&c.issuer)))
+        .add(row(
+            fl!("certificate-valid"),
+            fl!(
+                "certificate-valid-range",
+                from = or_unknown(&c.valid_from),
+                to = or_unknown(&c.valid_to)
+            ),
+        ));
+    let mut body = widget::column::with_capacity(5).spacing(space.space_s);
+    match &d.changed_from {
+        None => {
+            body = body.push(widget::text::body(fl!(
+                "certificate-untrusted-body",
+                title = d.title.clone()
+            )));
+        }
+        Some(_) => {
+            body = body.push(widget::text::body(fl!(
+                "certificate-changed-body",
+                title = d.title.clone()
+            )));
+        }
+    }
+    body = body.push(details);
+    body = body.push(widget::text::caption(fl!("certificate-fingerprint")));
+    body = body.push(widget::text::monotext(c.fingerprint.clone()));
+    if let Some(old) = &d.changed_from {
+        body = body.push(widget::text::caption(fl!(
+            "certificate-approved-fingerprint"
+        )));
+        body = body.push(widget::text::monotext(old.clone()));
+    }
+    let mut dialog = widget::dialog().title(match d.changed_from {
+        None => fl!("certificate-untrusted-title"),
+        Some(_) => fl!("certificate-changed-title"),
+    });
+    dialog = dialog.control(body);
+    if d.changed_from.is_none() {
+        dialog = dialog
+            .primary_action(
+                widget::button::destructive(fl!("certificate-trust"))
+                    .on_press(Message::TrustCertificate),
+            )
+            .secondary_action(
+                widget::button::standard(fl!("cancel")).on_press(Message::CloseCertificateDialog),
+            );
+    } else {
+        dialog = dialog.primary_action(
+            widget::button::standard(fl!("close")).on_press(Message::CloseCertificateDialog),
+        );
+    }
+    dialog.into()
 }

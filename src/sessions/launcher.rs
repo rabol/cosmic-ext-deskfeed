@@ -173,6 +173,9 @@ pub struct LaunchSpec {
     /// `libfreerdp/core/settings.c`) and skips its own request when one is
     /// given (`gateway/arm.c`), which saves the user a sign-in prompt.
     pub gateway_token: Option<BearerToken>,
+    /// A session host certificate the user approved for this desktop
+    /// (sha256, `aa:bb:…`); FreeRDP accepts exactly it (ADR 0016).
+    pub pinned_certificate: Option<String>,
     /// Effective connection settings (account, then desktop overrides).
     pub settings: crate::settings::Effective,
     /// Window title and Wayland app ID for FreeRDP's window, so the dock
@@ -221,11 +224,51 @@ pub enum SessionEnd {
     Cancelled,
     /// A connected session lost its connection (network, sleep, server).
     ConnectionLost,
+    /// FreeRDP couldn't verify the session host's certificate (ADR 0016).
+    CertificateNotTrusted(CertificateInfo),
     Failed {
         code: i32,
     },
     Crashed,
 }
+
+/// A session host certificate as FreeRDP described it. All text comes
+/// from the network: bounded, printable only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CertificateInfo {
+    /// The host the certificate was for (as FreeRDP connected).
+    pub host: String,
+    pub common_name: String,
+    pub subject: String,
+    pub issuer: String,
+    pub valid_from: String,
+    pub valid_to: String,
+    /// sha256, lower case, `aa:bb:…` (32 pairs).
+    pub fingerprint: String,
+}
+
+/// A field from FreeRDP's output: one line, printable, at most 256 chars.
+fn clean_field(s: &str) -> String {
+    s.trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(256)
+        .collect()
+}
+
+/// A sha256 fingerprint as FreeRDP prints and parses it.
+pub fn is_sha256_fingerprint(s: &str) -> bool {
+    s.len() == 95
+        && s.split(':').count() == 32
+        && s.split(':')
+            .all(|p| p.len() == 2 && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// FreeRDP gives up on an unverified certificate (`libfreerdp/crypto/tls.c`).
+const CERT_REFUSED_MARKER: &str = "certificate not trusted, aborting";
+/// FreeRDP's log line with the presented certificate's fingerprint
+/// (`tls_print_new_certificate_warn`, `tls_print_certificate_error`).
+const PRESENTED_MARKER: &str = "The fingerprint for the host key sent by the remote host is ";
 
 /// Where a starting session is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,6 +349,15 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
             }
             args.push(format!("/p:{pw}"));
         }
+    }
+    // Only well-formed values; otherwise FreeRDP asks (and refuses), which
+    // ends in the approval dialog again.
+    if let Some(fp) = spec
+        .pinned_certificate
+        .as_deref()
+        .filter(|f| is_sha256_fingerprint(f))
+    {
+        args.push(format!("/cert:fingerprint:sha256:{fp}"));
     }
     args.extend([
         "/dynamic-resolution".to_owned(),
@@ -695,8 +747,17 @@ fn supervise(
                     if line.starts_with("cosmic-ext-deskfeed-signin: ") || is_state_change(&line) {
                         crate::app_log!("{line}");
                     }
-                    if let Some(event) = log.lock().expect("not poisoned").push(&line) {
+                    let (event, stop) = {
+                        let mut log = log.lock().expect("not poisoned");
+                        let event = log.push(&line);
+                        (event, std::mem::take(&mut log.stop_now))
+                    };
+                    if let Some(event) = event {
                         report(event);
+                    }
+                    if stop {
+                        // SAFETY: plain syscall on FreeRDP's own process group.
+                        unsafe { libc::kill(-pgid, libc::SIGTERM) };
                     }
                 }
             })
@@ -722,7 +783,10 @@ fn supervise(
         }
         drop(dir); // removes the connection file
         let log = std::mem::take(&mut *log.lock().expect("not poisoned"));
-        let end = classify_exit(status.code(), log.logon_failure, log.connected && log.lost);
+        let end = match log.refused_certificate() {
+            Some(cert) => SessionEnd::CertificateNotTrusted(cert),
+            None => classify_exit(status.code(), log.logon_failure, log.connected && log.lost),
+        };
         ended.store(true, std::sync::atomic::Ordering::SeqCst);
         events(SessionEvent::Ended {
             end,
@@ -745,9 +809,102 @@ struct Log {
     logon_failure: bool,
     /// The connection was lost (`LOST_MARKERS`).
     lost: bool,
+    /// The certificate FreeRDP is describing (`Certificate details for`).
+    certificate: Option<CertificateInfo>,
+    /// A complete description (it has a well-formed thumbprint).
+    described: Option<CertificateInfo>,
+    /// The fingerprint from FreeRDP's own log line about the new host key.
+    presented: Option<String>,
+    /// FreeRDP refused the certificate.
+    refused: bool,
+    stop_sent: bool,
+    /// Set once when the refusal and the description are both in: the
+    /// reader ends FreeRDP, which otherwise may wait after it.
+    stop_now: bool,
 }
 
 impl Log {
+    /// FreeRDP's description of an unverified certificate
+    /// (`client/common/client.c`, `client_cli_verify_certificate_ex`):
+    /// `Certificate details for <host> (<name>):`, then tab-indented
+    /// `Common Name`, `Subject`, `Issuer`, `Valid from`, `Valid to`,
+    /// `Thumbprint` lines. The refusal follows; only a complete, well-formed
+    /// description counts.
+    fn read_certificate(&mut self, line: &str) {
+        let line = line.trim_end_matches('\r');
+        if let Some(rest) = line.strip_prefix("Certificate details for ") {
+            let host = rest.split(" (").next().unwrap_or_default();
+            self.certificate = Some(CertificateInfo {
+                host: clean_field(host),
+                common_name: String::new(),
+                subject: String::new(),
+                issuer: String::new(),
+                valid_from: String::new(),
+                valid_to: String::new(),
+                fingerprint: String::new(),
+            });
+            return;
+        }
+        if let (Some(c), Some(field)) = (self.certificate.as_mut(), line.strip_prefix('\t'))
+            && let Some((name, value)) = field.split_once(':')
+        {
+            let value = clean_field(value);
+            match name.trim() {
+                "Common Name" => c.common_name = value,
+                "Subject" => c.subject = value,
+                "Issuer" => c.issuer = value,
+                "Valid from" => c.valid_from = value,
+                "Valid to" => c.valid_to = value,
+                "Thumbprint" => c.fingerprint = value.to_ascii_lowercase(),
+                _ => {}
+            }
+        }
+        if self
+            .certificate
+            .as_ref()
+            .is_some_and(|c| is_sha256_fingerprint(&c.fingerprint))
+        {
+            self.described = self.certificate.take();
+        }
+        if let Some((_, fp)) = line.split_once(PRESENTED_MARKER) {
+            let fp = clean_field(fp).to_ascii_lowercase();
+            if is_sha256_fingerprint(&fp) {
+                self.presented = Some(fp);
+            }
+        }
+        if line.contains(CERT_REFUSED_MARKER) {
+            self.refused = true;
+        }
+        if self.refused && self.described.is_some() && !self.stop_sent {
+            self.stop_sent = true;
+            self.stop_now = true;
+        }
+    }
+
+    /// The refused certificate, from whatever arrived: stdout (the
+    /// description) and stderr (the log lines) are read separately, so
+    /// their order isn't known. FreeRDP's own fingerprint line wins; a
+    /// description of another certificate is ignored.
+    fn refused_certificate(&self) -> Option<CertificateInfo> {
+        if !self.refused {
+            return None;
+        }
+        match (&self.described, &self.presented) {
+            (Some(d), Some(p)) if d.fingerprint == *p => Some(d.clone()),
+            (_, Some(p)) => Some(CertificateInfo {
+                host: String::new(),
+                common_name: String::new(),
+                subject: String::new(),
+                issuer: String::new(),
+                valid_from: String::new(),
+                valid_to: String::new(),
+                fingerprint: p.clone(),
+            }),
+            (Some(d), None) => Some(d.clone()),
+            (None, None) => None,
+        }
+    }
+
     /// Keeps warnings, errors and connection steps (bounded). Returns the
     /// event a connection step means: a stage while starting, `Connected`
     /// the first time the session is active.
@@ -758,6 +915,7 @@ impl Log {
         if LOST_MARKERS.iter().any(|m| line.contains(m)) {
             self.lost = true;
         }
+        self.read_certificate(line);
         if line.contains("[ERROR]") || line.contains("[WARN]") || is_state_change(line) {
             if self.lines.len() == MAX_LOG_LINES {
                 self.lines.remove(0);
@@ -816,6 +974,7 @@ mod tests {
             helper: PathBuf::from("/usr/libexec/cosmic-ext-deskfeed/cosmic-ext-deskfeed-signin"),
             profile: PathBuf::from("/tmp/p"),
             gateway_token: None,
+            pinned_certificate: None,
             settings: crate::settings::DEFAULTS,
             window_title: String::new(),
             app_id: String::new(),
@@ -1028,6 +1187,71 @@ mod tests {
             SessionEnd::Failed { code: 131 }
         );
         assert_eq!(classify_exit(None, false, false), SessionEnd::Crashed);
+    }
+
+    /// As xfreerdp3 3.32.2 printed it for the local test server's
+    /// throwaway certificate (research/rdp-test-server).
+    const REFUSAL: &str = "Certificate details for /tmp/tfreerdp-server.33900:3389 (RDP-Server):
+\tCommon Name: (null)
+\tSubject:     (null)
+\tIssuer:      (null)
+\tValid from:  Oct 18 08:01:10 2026 GMT
+\tValid to:    Oct 18 08:01:10 2027 GMT
+\tThumbprint:  c8:3c:d4:90:e0:4e:ca:86:9d:9e:71:aa:89:09:90:0c:94:da:3a:bf:cf:b8:dc:9a:32:59:09:c7:2b:d9:e4:af
+The above X.509 certificate could not be verified, possibly because you do not have
+Do you trust the above certificate? (Y/T/N) [15:13:10:299] [675264:000a4dc2] [ERROR][com.freerdp.crypto] - [freerdp_tls_handshake]: certificate not trusted, aborting.";
+
+    #[test]
+    fn reads_a_refused_certificate() {
+        let mut log = Log::default();
+        for line in REFUSAL.lines() {
+            log.push(line);
+        }
+        // FreeRDP's own log line, read on the other stream: it may come
+        // before or after the description.
+        log.push("[ERROR][com.freerdp.crypto] - [tls_print_new_certificate_warn]: The fingerprint for the host key sent by the remote host is c8:3c:d4:90:e0:4e:ca:86:9d:9e:71:aa:89:09:90:0c:94:da:3a:bf:cf:b8:dc:9a:32:59:09:c7:2b:d9:e4:af");
+        let c = log.refused_certificate().expect("refused");
+        assert_eq!(c.host, "/tmp/tfreerdp-server.33900:3389");
+        assert_eq!(c.valid_to, "Oct 18 08:01:10 2027 GMT");
+        assert!(c.fingerprint.starts_with("c8:3c:d4") && is_sha256_fingerprint(&c.fingerprint));
+        assert!(log.stop_now);
+        // The refusal first, the description later: still found.
+        let mut log = Log::default();
+        let mut lines: Vec<&str> = REFUSAL.lines().collect();
+        lines.rotate_right(1);
+        for line in lines {
+            log.push(line);
+        }
+        assert_eq!(
+            log.refused_certificate().unwrap().valid_to,
+            "Oct 18 08:01:10 2027 GMT"
+        );
+        // A malformed thumbprint isn't something to approve.
+        let mut log = Log::default();
+        for line in REFUSAL.replace("c8:3c", "zz:3c").lines() {
+            log.push(line);
+        }
+        assert!(log.refused_certificate().is_none() && !log.stop_now);
+        // Only FreeRDP's log line: the fingerprint, without details.
+        let mut log = Log::default();
+        log.push("[ERROR][com.freerdp.crypto] - [tls_print_new_certificate_warn]: The fingerprint for the host key sent by the remote host is C8:3C:D4:90:E0:4E:CA:86:9D:9E:71:AA:89:09:90:0C:94:DA:3A:BF:CF:B8:DC:9A:32:59:09:C7:2B:D9:E4:AF");
+        log.push("[ERROR][com.freerdp.crypto] - [freerdp_tls_handshake]: certificate not trusted, aborting.");
+        let c = log.refused_certificate().unwrap();
+        assert!(c.fingerprint.starts_with("c8:3c") && c.issuer.is_empty());
+        // Control characters from the network are dropped.
+        assert_eq!(clean_field(" a\u{1b}[31mb\t "), "a[31mb");
+    }
+
+    #[test]
+    fn pinned_certificate_goes_to_freerdp() {
+        let fp = "c8:3c:d4:90:e0:4e:ca:86:9d:9e:71:aa:89:09:90:0c:94:da:3a:bf:cf:b8:dc:9a:32:59:09:c7:2b:d9:e4:af";
+        let mut s = spec(LogonSetting::EntraSignIn, None, true);
+        assert!(!args(&s).iter().any(|a| a.starts_with("/cert")));
+        s.pinned_certificate = Some(fp.into());
+        assert!(args(&s).contains(&format!("/cert:fingerprint:sha256:{fp}")));
+        // Never anything else through this field.
+        s.pinned_certificate = Some(format!("{fp},ignore"));
+        assert!(!args(&s).iter().any(|a| a.starts_with("/cert")));
     }
 
     #[test]
@@ -1297,6 +1521,9 @@ sleep 300
             helper: PathBuf::from("/nonexistent/helper"),
             profile: dir.join("profile"),
             gateway_token: None,
+            // `DESKFEED_TEST_PIN=<sha256>`: connect with that approved
+            // certificate instead of `/cert:ignore`.
+            pinned_certificate: std::env::var("DESKFEED_TEST_PIN").ok(),
             settings: crate::settings::Effective {
                 // `DESKFEED_TEST_CAMERA=1`: with the camera channel
                 // (research/rdp-test-server logs what the client offers).
@@ -1327,7 +1554,13 @@ sleep 300
                     a
                 }
             })
-            .chain(["/cert:ignore".to_owned()])
+            // Without a pin the test server's self-signed certificate is
+            // ignored, unless `DESKFEED_TEST_CHECK_CERT=1`.
+            .chain(
+                (s.pinned_certificate.is_none()
+                    && std::env::var("DESKFEED_TEST_CHECK_CERT").is_err())
+                .then(|| "/cert:ignore".to_owned()),
+            )
             .collect();
         let (read_end, write_end) = pipe().unwrap();
         let (terminal, output) = output_terminal().unwrap();
@@ -1343,6 +1576,22 @@ sleep 300
             }),
         )
         .unwrap();
+        if std::env::var("DESKFEED_TEST_CHECK_CERT").is_ok() {
+            // Expect the refusal, ended by the launcher at once.
+            let SessionEvent::Ended { end, log } =
+                rx.recv_timeout(Duration::from_secs(15)).unwrap()
+            else {
+                panic!("expected an end");
+            };
+            println!("ended: {end:?}");
+            for line in &log {
+                println!("  {line}");
+            }
+            assert!(matches!(end, SessionEnd::CertificateNotTrusted(_)));
+            stop_all(&[session], STOP_GRACE);
+            fs::remove_dir_all(dir).unwrap();
+            return;
+        }
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(15)).unwrap(),
             SessionEvent::Connected
@@ -1425,6 +1674,7 @@ sleep 300
             helper: PathBuf::from("/nonexistent/helper"),
             profile: dir.join("profile"),
             gateway_token: None,
+            pinned_certificate: None,
             settings: crate::settings::DEFAULTS,
             window_title: String::new(),
             app_id: String::new(),
