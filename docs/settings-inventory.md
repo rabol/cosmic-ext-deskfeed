@@ -10,7 +10,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 
 | Setting | Built-in default | Levels | Where | Status |
 |---|---|---|---|---|
-| Time to wait for the desktop | 120 s (10–600) | A, Ac, C | `settings.rs` `DEFAULTS` | Done |
+| Time to wait for the desktop | 120 s (10–600, steps of 10) | A, Ac, C | `settings.rs` `DEFAULTS` | Done |
 | Full screen | off | A, Ac, C | `settings.rs` | Done |
 | Use all monitors | off | A, Ac, C | `settings.rs` | Done |
 | Open on a new workspace | off | A, Ac, C | `settings.rs` | Done |
@@ -20,9 +20,9 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Clipboard | off | A, Ac, C | `settings.rs` | Done |
 | Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | To do |
 | FreeRDP log detail | info (`/log-level:info`) | A, Ac, C | `sessions/launcher.rs` `build_args` | To do |
-| Refresh desktop lists every | 1 h | A, Ac | `app/mod.rs` `REFRESH_EVERY` | To do |
-| Time allowed for signing in | 5 min | A, Ac | `auth/signin.rs` `HELPER_TIMEOUT` | To do |
-| Log file size before it rotates | 1 MiB | A | `log.rs` `MAX_SIZE` | To do |
+| Refresh desktop lists every | 60 min (15–1 440, steps of 15) | A, Ac | `settings.rs` `Number::Refresh` | Done |
+| Time allowed for signing in | 5 min (2–15) | A, Ac | `settings.rs` `Number::SignIn` | Done |
+| Log file size before it rotates | 1 MB (1–100) | A | `log.rs` `MAX_SIZE_MIB`, config `log_max_mib` | Done |
 | Printers, smart cards, serial ports, location, WebAuthn | off (forced in the `.rdp`) | A, Ac, C | `sessions/rdpfile.rs` `DEVICE_DEFAULTS` | Later: each needs FreeRDP research and a real-session test before it can be offered (spec §9) |
 | Drives, USB devices | off (feed's lists dropped) | A, Ac, C | `sessions/rdpfile.rs` | Later, as above |
 | Microsoft cloud (public, government, China) | public Azure | Ac | `service/endpoint.rs`, `service/http.rs` | Later: needs each cloud's endpoints and client registration |
@@ -40,6 +40,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Icons: PNG, at most 256×256; at most 200 fetched per refresh | `service/icons.rs`, `app/account_flow.rs` | Security bounds |
 | Sign-in protocol limits (request, reply and callback 16 KiB, helper line 64 KiB, 16 queued requests, 15 min longest wait) | `auth/`, `signin/src/` | Security bounds |
 | Cookie jar: 512 KiB, 300 cookies | `signin/src/session_jar.rs` | Security bounds |
+| Sign-in window ended 30 s after its time if it hangs | `auth/signin.rs` `HELPER_GRACE` | Safety margin after the setting |
 | Keyring payload 64 KiB; keyring prompt wait 2 min | `secrets.rs` | Bound; the prompt is the keyring's own |
 | ID token clock skew 5 min; token renewal 5 min before expiry; sign-in attempt lifetime 10 min | `auth/` | Protocol safety margins |
 | Silent sign-in attempt 20 s; sign-in page wait 180 s (FreeRDP's own); sign-in window shown after 1.5 s | `signin/src/` | Follow FreeRDP and Microsoft behaviour; the overall sign-in time is a setting |

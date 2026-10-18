@@ -17,6 +17,9 @@ pub struct Config {
     /// of account, tenant, workspace and resource ID (spec §7: titles are never
     /// identity). No credentials are stored here.
     pub logon_settings: BTreeMap<String, LogonSetting>,
+    /// Log rotation size in MiB (App settings → Diagnostics); `None` is
+    /// the default (`log::MAX_SIZE_MIB`).
+    pub log_max_mib: Option<u32>,
     /// Connection defaults for every account (App settings).
     pub app_settings: ConnectionSettings,
     /// Overrides of the app's settings per account (keys: `accounts::account_id`).

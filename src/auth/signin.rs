@@ -23,11 +23,10 @@ use crate::service::http::Http;
 
 const HELPER_NAME: &str = "cosmic-ext-deskfeed-signin";
 const MAX_REPLY_LEN: u64 = 16 * 1024;
-/// How long the sign-in window stays open; sent to the helper.
-const HELPER_TIMEOUT: Duration = Duration::from_mins(5);
-/// The helper's own timer should end it by then; if it hangs, the app
-/// ends it (spec §8: every attempt ends).
-const HELPER_DEADLINE: Duration = Duration::from_secs(HELPER_TIMEOUT.as_secs() + 30);
+/// The sign-in window's time is a setting ("Time allowed for signing in"),
+/// sent to the helper. Its own timer should end it by then; if it hangs,
+/// the app ends it this much later (spec §8: every attempt ends).
+const HELPER_GRACE: Duration = Duration::from_secs(30);
 
 pub struct SignedIn {
     pub identity: Identity,
@@ -173,11 +172,18 @@ pub fn sign_in(
     helper: &Path,
     profile: &Path,
     login_hint: Option<&str>,
+    time: Duration,
     cancel: &Cancel,
 ) -> Result<SignedIn, SignInError> {
     let mut attempt =
         Attempt::new(config.clone()).map_err(|_| SignInError::HelperFailed("random".into()))?;
-    let reply = run_helper(helper, profile, &attempt.authorize_url(login_hint), cancel)?;
+    let reply = run_helper(
+        helper,
+        profile,
+        &attempt.authorize_url(login_hint),
+        time,
+        cancel,
+    )?;
     let callback = callback_url(config, &reply)?;
     let code = attempt.complete(callback.as_str()).map_err(|e| match e {
         CallbackError::Provider { error, aadsts } => SignInError::Provider { error, aadsts },
@@ -204,6 +210,7 @@ fn run_helper(
     helper: &Path,
     profile: &Path,
     url: &Url,
+    time: Duration,
     cancel: &Cancel,
 ) -> Result<Reply, SignInError> {
     if !helper.is_file() {
@@ -227,7 +234,7 @@ fn run_helper(
     {
         let cancel = cancel.clone();
         std::thread::spawn(move || {
-            if !cancel.wait_finished(HELPER_DEADLINE) {
+            if !cancel.wait_finished(time + HELPER_GRACE) {
                 crate::app_log!("sign-in window: no answer in time, ending it");
                 cancel.cancel_and_wait(Duration::ZERO);
             }
@@ -237,7 +244,7 @@ fn run_helper(
     let request = serde_json::json!({
         "url": url.as_str(),
         "title": crate::fl!("sign-in-window-title"),
-        "timeout_ms": u64::try_from(HELPER_TIMEOUT.as_millis()).unwrap_or(u64::MAX),
+        "timeout_ms": u64::try_from(time.as_millis()).unwrap_or(u64::MAX),
     });
     let wrote = writeln!(stdin, "{request}").and_then(|()| stdin.flush());
     {
@@ -360,6 +367,7 @@ mod tests {
             &helper,
             &dir,
             None,
+            Duration::from_mins(5),
             &Cancel::default(),
         );
         std::fs::remove_dir_all(dir).unwrap();
@@ -430,6 +438,7 @@ mod tests {
             &helper,
             &dir,
             None,
+            Duration::from_mins(5),
             &Cancel::default(),
         );
         let env = std::fs::read_to_string(&out).unwrap();
@@ -458,6 +467,7 @@ mod tests {
             &helper,
             &dir,
             None,
+            Duration::from_mins(5),
             &cancel,
         );
         assert_eq!(r.unwrap_err(), SignInError::Cancelled);
@@ -481,6 +491,7 @@ mod tests {
                 &helper2,
                 &dir2,
                 None,
+                Duration::from_mins(5),
                 &c2,
             )
         });
@@ -508,6 +519,7 @@ mod tests {
             Path::new("/nonexistent/helper"),
             Path::new("/tmp"),
             None,
+            Duration::from_mins(5),
             &Cancel::default(),
         );
         assert_eq!(r.unwrap_err(), SignInError::HelperMissing);

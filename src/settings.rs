@@ -12,10 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const TIMEOUT_MIN_SECS: u32 = 10;
-pub const TIMEOUT_MAX_SECS: u32 = 600;
-
 /// One level of settings; unset fields inherit from the level above.
+/// The field names are the keys stored in the config.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionSettings {
     #[serde(default)]
@@ -34,6 +32,12 @@ pub struct ConnectionSettings {
     pub camera: Option<bool>,
     #[serde(default)]
     pub clipboard: Option<bool>,
+    /// App and account levels only.
+    #[serde(default)]
+    pub refresh_mins: Option<u32>,
+    /// App and account levels only.
+    #[serde(default)]
+    pub sign_in_mins: Option<u32>,
 }
 
 /// The on/off settings.
@@ -59,6 +63,44 @@ impl Toggle {
         Self::Camera,
         Self::Clipboard,
     ];
+}
+
+/// The number settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Number {
+    /// Time to wait for the desktop, in seconds.
+    Timeout,
+    /// How often the desktop lists refresh, in minutes.
+    Refresh,
+    /// Time allowed for signing in, in minutes.
+    SignIn,
+}
+
+impl Number {
+    pub const ALL: [Self; 3] = [Self::Timeout, Self::Refresh, Self::SignIn];
+
+    /// Smallest value, largest value, step.
+    pub fn range(self) -> (u32, u32, u32) {
+        match self {
+            Self::Timeout => (10, 600, 10),
+            // An hour is enough for a list that rarely changes; a day at
+            // most, so new assignments still show up.
+            Self::Refresh => (15, 24 * 60, 15),
+            // The sign-in window takes at most 15 min (`signin/src/protocol.rs`
+            // `MAX_TIMEOUT_MS`).
+            Self::SignIn => (2, 15, 1),
+        }
+    }
+
+    pub fn clamp(self, value: u32) -> u32 {
+        let (min, max, _) = self.range();
+        value.clamp(min, max)
+    }
+
+    /// Whether a single desktop can override it.
+    pub fn per_desktop(self) -> bool {
+        matches!(self, Self::Timeout)
+    }
 }
 
 impl ConnectionSettings {
@@ -87,8 +129,22 @@ impl ConnectionSettings {
         *slot = value;
     }
 
-    pub fn set_timeout(&mut self, secs: Option<u32>) {
-        self.timeout_secs = secs.map(|s| s.clamp(TIMEOUT_MIN_SECS, TIMEOUT_MAX_SECS));
+    pub fn number(&self, n: Number) -> Option<u32> {
+        match n {
+            Number::Timeout => self.timeout_secs,
+            Number::Refresh => self.refresh_mins,
+            Number::SignIn => self.sign_in_mins,
+        }
+    }
+
+    /// Sets a number, clamped to its range; `None` inherits.
+    pub fn set_number(&mut self, n: Number, value: Option<u32>) {
+        let slot = match n {
+            Number::Timeout => &mut self.timeout_secs,
+            Number::Refresh => &mut self.refresh_mins,
+            Number::SignIn => &mut self.sign_in_mins,
+        };
+        *slot = value.map(|v| n.clamp(v));
     }
 
     pub fn is_empty(&self) -> bool {
@@ -109,10 +165,13 @@ pub struct Effective {
     pub microphone: bool,
     pub camera: bool,
     pub clipboard: bool,
+    pub refresh_mins: u32,
+    pub sign_in_mins: u32,
 }
 
 /// Built-in defaults. 120 s: measured Entra exchanges took up to 49.8 s
 /// (docs/milestone-1.md). Microphone, camera and clipboard off (spec §9).
+/// Lists refresh hourly; signing in may take 5 min (MFA included).
 pub const DEFAULTS: Effective = Effective {
     timeout_secs: 120,
     fullscreen: false,
@@ -122,16 +181,17 @@ pub const DEFAULTS: Effective = Effective {
     microphone: false,
     camera: false,
     clipboard: false,
+    refresh_mins: 60,
+    sign_in_mins: 5,
 };
 
 impl Effective {
-    /// This level with `s` on top.
+    /// This level with `s` on top. Hand-edited values are clamped too.
     pub fn with(self, s: Option<&ConnectionSettings>) -> Self {
         let Some(s) = s else { return self };
+        let number = |n: Number, own: u32| s.number(n).map_or(own, |v| n.clamp(v));
         Self {
-            timeout_secs: s.timeout_secs.map_or(self.timeout_secs, |t| {
-                t.clamp(TIMEOUT_MIN_SECS, TIMEOUT_MAX_SECS)
-            }),
+            timeout_secs: number(Number::Timeout, self.timeout_secs),
             fullscreen: s.fullscreen.unwrap_or(self.fullscreen),
             all_monitors: s.all_monitors.unwrap_or(self.all_monitors),
             new_workspace: s.new_workspace.unwrap_or(self.new_workspace),
@@ -139,6 +199,16 @@ impl Effective {
             microphone: s.microphone.unwrap_or(self.microphone),
             camera: s.camera.unwrap_or(self.camera),
             clipboard: s.clipboard.unwrap_or(self.clipboard),
+            refresh_mins: number(Number::Refresh, self.refresh_mins),
+            sign_in_mins: number(Number::SignIn, self.sign_in_mins),
+        }
+    }
+
+    pub fn number(&self, n: Number) -> u32 {
+        match n {
+            Number::Timeout => self.timeout_secs,
+            Number::Refresh => self.refresh_mins,
+            Number::SignIn => self.sign_in_mins,
         }
     }
 
@@ -240,15 +310,32 @@ mod tests {
         assert!(!e.microphone); // default
         assert_eq!(effective(Some(&app), None, None).timeout_secs, 30);
         assert_eq!(effective(None, None, None), DEFAULTS);
+        // Account-level numbers follow the same order.
+        let app = ConnectionSettings {
+            refresh_mins: Some(30),
+            sign_in_mins: Some(10),
+            ..Default::default()
+        };
+        let account = ConnectionSettings {
+            sign_in_mins: Some(3),
+            ..Default::default()
+        };
+        let e = effective(Some(&app), Some(&account), None);
+        assert_eq!((e.refresh_mins, e.sign_in_mins), (30, 3));
     }
 
     #[test]
-    fn timeouts_are_clamped() {
+    fn numbers_are_clamped() {
         let mut s = ConnectionSettings::default();
-        s.set_timeout(Some(1));
-        assert_eq!(s.timeout_secs, Some(TIMEOUT_MIN_SECS));
-        s.set_timeout(Some(100_000));
-        assert_eq!(s.timeout_secs, Some(TIMEOUT_MAX_SECS));
+        for n in Number::ALL {
+            let (min, max, _) = n.range();
+            s.set_number(n, Some(0));
+            assert_eq!(s.number(n), Some(min));
+            s.set_number(n, Some(100_000));
+            assert_eq!(s.number(n), Some(max));
+            s.set_number(n, None);
+        }
+        assert!(s.is_empty());
         // Hand-edited config is clamped too.
         let raw = ConnectionSettings {
             timeout_secs: Some(0),
@@ -256,7 +343,7 @@ mod tests {
         };
         assert_eq!(
             effective(None, Some(&raw), None).timeout_secs,
-            TIMEOUT_MIN_SECS
+            Number::Timeout.range().0
         );
     }
 

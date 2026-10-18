@@ -42,24 +42,35 @@ impl AppModel {
             Message::AppToggle(t, on) => {
                 self.edit_settings(Level::App, "", |s| s.set_toggle(t, Some(on)));
             }
-            Message::AppTimeout(secs) => {
-                self.edit_settings(Level::App, "", |s| s.set_timeout(Some(secs)));
+            Message::AppNumber(n, value) => {
+                self.edit_settings(Level::App, "", |s| s.set_number(n, Some(value)));
+            }
+            Message::AppLogSize(mib) => {
+                let (min, max, _) = crate::log::MAX_SIZE_MIB;
+                let mib = mib.clamp(min, max);
+                crate::log::set_max_size_mib(mib);
+                match &self.config_handler {
+                    Some(handler) => {
+                        let _ = self.config.set_log_max_mib(handler, Some(mib));
+                    }
+                    None => self.config.log_max_mib = Some(mib),
+                }
             }
             Message::AccountToggle(id, t, choice) => {
                 self.edit_settings(Level::Account, &id, |s| {
                     s.set_toggle(t, choice_value(choice));
                 });
             }
-            Message::AccountTimeout(id, secs) => {
-                self.edit_settings(Level::Account, &id, |s| s.set_timeout(secs));
+            Message::AccountNumber(id, n, value) => {
+                self.edit_settings(Level::Account, &id, |s| s.set_number(n, value));
             }
             Message::DesktopToggle(key, t, choice) => {
                 self.edit_settings(Level::Desktop, &key, |s| {
                     s.set_toggle(t, choice_value(choice));
                 });
             }
-            Message::DesktopTimeout(key, secs) => {
-                self.edit_settings(Level::Desktop, &key, |s| s.set_timeout(secs));
+            Message::DesktopNumber(key, n, value) => {
+                self.edit_settings(Level::Desktop, &key, |s| s.set_number(n, value));
             }
             // `update` routes only this handler's messages here.
             other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
@@ -118,6 +129,12 @@ impl AppModel {
         )
     }
 
+    /// The app's settings with `account`'s on top; the app's alone for an
+    /// account being added.
+    pub(super) fn account_settings(&self, account: Option<&str>) -> settings::Effective {
+        self.inherited(account)
+    }
+
     /// The settings a desktop of `account` uses.
     pub(super) fn effective_settings(&self, account: &str, key: &str) -> settings::Effective {
         settings::effective(
@@ -139,11 +156,39 @@ impl AppModel {
                 )
                 .into()
         };
-        let timeout = widget::settings::item::builder(fl!("setting-timeout"))
-            .description(fl!("setting-timeout-desc"))
-            .control(timeout_spin(current.timeout_secs, Message::AppTimeout))
-            .into();
-        settings_column(fl!("app-settings-hint"), timeout, toggle)
+        let number = |n: Number| -> Element<'_, Message> {
+            let (name, description) = number_text(n);
+            widget::settings::item::builder(name)
+                .description(description)
+                .control(number_spin(n, current.number(n), move |v| {
+                    Message::AppNumber(n, v)
+                }))
+                .into()
+        };
+        let (min, max, default) = crate::log::MAX_SIZE_MIB;
+        let mib = self.config.log_max_mib.unwrap_or(default).clamp(min, max);
+        let diagnostics = widget::settings::section()
+            .title(fl!("settings-diagnostics"))
+            .add(
+                widget::settings::item::builder(fl!("setting-log-size"))
+                    .description(fl!("setting-log-size-desc"))
+                    .control(widget::spin_button(
+                        fl!("mebibytes", value = mib),
+                        fl!("setting-log-size"),
+                        mib,
+                        1,
+                        min,
+                        max,
+                        Message::AppLogSize,
+                    )),
+            );
+        settings_column(
+            fl!("app-settings-hint"),
+            true,
+            number,
+            toggle,
+            Some(diagnostics.into()),
+        )
     }
 
     pub(super) fn account_settings_view(&self, id: &str) -> Element<'_, Message> {
@@ -158,14 +203,15 @@ impl AppModel {
             own,
             labels: (&self.follow_app_on, &self.follow_app_off),
             reset_label: fl!("use-app-setting"),
-            timeout_description: |secs| fl!("setting-timeout-account-desc", value = secs),
+            follow_value: |value| fl!("follow-app-value", value = value),
         };
         let id_toggle = id.to_owned();
-        let id_timeout = id.to_owned();
+        let id_number = id.to_owned();
         rows.view(
             fl!("account-settings-hint"),
+            true,
             move |t, i| Message::AccountToggle(id_toggle.clone(), t, i),
-            move |secs| Message::AccountTimeout(id_timeout.clone(), secs),
+            move |n, v| Message::AccountNumber(id_number.clone(), n, v),
         )
     }
 
@@ -184,21 +230,22 @@ impl AppModel {
             own,
             labels: (&self.follow_account_on, &self.follow_account_off),
             reset_label: fl!("use-account-setting"),
-            timeout_description: |secs| fl!("setting-timeout-desktop-desc", value = secs),
+            follow_value: |value| fl!("follow-account-value", value = value),
         };
         let key_toggle = key.to_owned();
-        let key_timeout = key.to_owned();
+        let key_number = key.to_owned();
         rows.view(
             fl!("desktop-settings-hint", account = account.label()),
+            false,
             move |t, i| Message::DesktopToggle(key_toggle.clone(), t, i),
-            move |secs| Message::DesktopTimeout(key_timeout.clone(), secs),
+            move |n, v| Message::DesktopNumber(key_number.clone(), n, v),
         )
     }
 }
 
 /// An account or desktop page: each setting follows the level above or
 /// overrides it.
-struct OverrideRows<'a, D: Fn(u32) -> String> {
+struct OverrideRows<'a, F: Fn(String) -> String> {
     /// What the level above gives.
     inherited: settings::Effective,
     /// This level's own overrides.
@@ -206,26 +253,44 @@ struct OverrideRows<'a, D: Fn(u32) -> String> {
     /// Dropdown labels when the level above is on, and when it is off.
     labels: (&'a Vec<String>, &'a Vec<String>),
     reset_label: String,
-    timeout_description: D,
+    /// "The app setting is …" for a number's description.
+    follow_value: F,
 }
 
-impl<'a, D: Fn(u32) -> String> OverrideRows<'a, D> {
+impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
     fn view(
         self,
         hint: String,
+        account_level: bool,
         on_toggle: impl Fn(Toggle, usize) -> Message + Clone + Send + Sync + 'static,
-        on_timeout: impl Fn(Option<u32>) -> Message + Clone + 'static,
+        on_number: impl Fn(Number, Option<u32>) -> Message + Clone + 'static,
     ) -> Element<'a, Message> {
         let Self {
             inherited,
             own,
             labels,
             reset_label,
-            timeout_description,
+            follow_value,
         } = self;
         let current = inherited.with(Some(&own));
-        let has_own_timeout = own.timeout_secs.is_some();
-        let toggle = move |t: Toggle| -> Element<'a, Message> {
+        let number = |n: Number| -> Element<'a, Message> {
+            let (name, description) = number_text(n);
+            let set = on_number.clone();
+            let mut row = widget::row::with_capacity(2)
+                .spacing(cosmic::theme::spacing().space_xs)
+                .align_y(Alignment::Center)
+                .push(number_spin(n, current.number(n), move |v| set(n, Some(v))));
+            if own.number(n).is_some() {
+                row = row
+                    .push(widget::button::text(reset_label.clone()).on_press(on_number(n, None)));
+            }
+            let inherited_value = number_label(n, inherited.number(n));
+            widget::settings::item::builder(name)
+                .description(format!("{description} {}", follow_value(inherited_value)))
+                .control(row)
+                .into()
+        };
+        let toggle = |t: Toggle| -> Element<'a, Message> {
             let (name, description) = toggle_text(t);
             let options = if inherited.toggle(t) {
                 labels.0
@@ -245,34 +310,33 @@ impl<'a, D: Fn(u32) -> String> OverrideRows<'a, D> {
                 }))
                 .into()
         };
-        let set_timeout = on_timeout.clone();
-        let mut timeout_row = widget::row::with_capacity(2)
-            .spacing(cosmic::theme::spacing().space_xs)
-            .align_y(Alignment::Center)
-            .push(timeout_spin(current.timeout_secs, move |v| {
-                set_timeout(Some(v))
-            }));
-        if has_own_timeout {
-            timeout_row =
-                timeout_row.push(widget::button::text(reset_label).on_press(on_timeout(None)));
-        }
-        let timeout = widget::settings::item::builder(fl!("setting-timeout"))
-            .description(timeout_description(inherited.timeout_secs))
-            .control(timeout_row)
-            .into();
-        settings_column(hint, timeout, toggle)
+        settings_column(hint, account_level, number, toggle, None)
     }
 }
 
-/// A settings page: hint, then the connection, display and device sections.
+/// A settings page: hint, the account section (app and account pages),
+/// the connection, display and device sections, then `last`.
 fn settings_column<'a>(
     hint: String,
-    timeout: Element<'a, Message>,
+    account_level: bool,
+    number: impl Fn(Number) -> Element<'a, Message>,
     toggle: impl Fn(Toggle) -> Element<'a, Message>,
+    last: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let connection = widget::settings::section()
-        .title(fl!("settings-connection"))
-        .add(timeout);
+    let mut column = vec![widget::text::body(hint).into()];
+    if account_level {
+        column.push(
+            widget::settings::section()
+                .title(fl!("settings-account"))
+                .add(number(Number::SignIn))
+                .add(number(Number::Refresh))
+                .into(),
+        );
+    }
+    let mut connection = widget::settings::section().title(fl!("settings-connection"));
+    for n in Number::ALL.into_iter().filter(|n| n.per_desktop()) {
+        connection = connection.add(number(n));
+    }
     let display = widget::settings::section()
         .title(fl!("settings-display"))
         .add(toggle(Toggle::Fullscreen))
@@ -284,30 +348,44 @@ fn settings_column<'a>(
         .add(toggle(Toggle::Microphone))
         .add(toggle(Toggle::Camera))
         .add(toggle(Toggle::Clipboard));
-    widget::settings::view_column(vec![
-        widget::text::body(hint).into(),
-        connection.into(),
-        display.into(),
-        devices.into(),
-    ])
-    .into()
+    column.extend([connection.into(), display.into(), devices.into()]);
+    column.extend(last);
+    widget::settings::view_column(column).into()
 }
 
-/// The "time to wait" spin button: seconds, in steps of 10, within the
-/// allowed range.
-fn timeout_spin<'a>(
-    secs: u32,
+/// A number's spin button, within its range and in its steps.
+fn number_spin<'a>(
+    n: Number,
+    value: u32,
     on_change: impl Fn(u32) -> Message + 'static,
 ) -> widget::SpinButton<'a, u32, Message> {
+    let (min, max, step) = n.range();
     widget::spin_button(
-        fl!("seconds", value = secs),
-        fl!("setting-timeout"),
-        secs,
-        10,
-        settings::TIMEOUT_MIN_SECS,
-        settings::TIMEOUT_MAX_SECS,
+        number_label(n, value),
+        number_text(n).0,
+        value,
+        step,
+        min,
+        max,
         on_change,
     )
+}
+
+/// A number with its unit.
+fn number_label(n: Number, value: u32) -> String {
+    match n {
+        Number::Timeout => fl!("seconds", value = value),
+        Number::Refresh | Number::SignIn => fl!("minutes", value = value),
+    }
+}
+
+/// Name and description of a number setting.
+fn number_text(n: Number) -> (String, String) {
+    match n {
+        Number::Timeout => (fl!("setting-timeout"), fl!("setting-timeout-desc")),
+        Number::Refresh => (fl!("setting-refresh"), fl!("setting-refresh-desc")),
+        Number::SignIn => (fl!("setting-sign-in"), fl!("setting-sign-in-desc")),
+    }
 }
 
 /// Name and description of an on/off setting.

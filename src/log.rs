@@ -5,7 +5,8 @@
 //!
 //! - `$XDG_STATE_HOME/cosmic-ext-deskfeed/app.log` (usually
 //!   `~/.local/state/cosmic-ext-deskfeed/`), folder 0700, file 0600.
-//! - Rotated at 1 MiB; one older file (`app.log.1`) is kept.
+//! - Rotated at a size set in the app's settings (default 1 MiB,
+//!   [`MAX_SIZE_MIB`]); one older file (`app.log.1`) is kept.
 //! - Lines also go to stderr, for runs from a terminal.
 //! - Callers never log secrets or tenant data. As a last guard every line
 //!   is redacted before it is written (`redact`): tokens, IDs, user names,
@@ -16,12 +17,25 @@ use std::io::Write;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const FILE: &str = "app.log";
 const OLD: &str = "app.log.1";
-const MAX_SIZE: u64 = 1024 * 1024;
+/// Smallest, largest and default rotation size, in MiB.
+pub const MAX_SIZE_MIB: (u32, u32, u32) = (1, 100, 1);
+static MAX_SIZE: AtomicU64 = AtomicU64::new(1024 * 1024);
 const MAX_LINE: usize = 2000;
+
+/// Sets the rotation size (App settings → Diagnostics), clamped to
+/// [`MAX_SIZE_MIB`].
+pub fn set_max_size_mib(mib: u32) {
+    let (min, max, _) = MAX_SIZE_MIB;
+    MAX_SIZE.store(
+        u64::from(mib.clamp(min, max)) * 1024 * 1024,
+        Ordering::Relaxed,
+    );
+}
 
 /// Writes one log line: `crate::app_log!("format {}", args)`.
 #[macro_export]
@@ -51,7 +65,10 @@ pub fn write(message: &str) {
     }
     let Some(file) = out.as_mut() else { return };
     let _ = writeln!(file, "{line}");
-    if file.metadata().is_ok_and(|m| m.len() > MAX_SIZE) {
+    if file
+        .metadata()
+        .is_ok_and(|m| m.len() > MAX_SIZE.load(Ordering::Relaxed))
+    {
         *out = None;
         rotate();
         *out = dir().and_then(|d| open_in(&d));

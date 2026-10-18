@@ -246,14 +246,16 @@ pub enum Message {
     OpenAccountSettings(String),
     OpenDesktopSettings(String),
     AppToggle(Toggle, bool),
-    AppTimeout(u32),
+    AppNumber(Number, u32),
+    /// Log rotation size in MiB.
+    AppLogSize(u32),
     /// Account override: 0 follows the app's setting, 1 on, 2 off.
     AccountToggle(String, Toggle, usize),
-    AccountTimeout(String, Option<u32>),
+    AccountNumber(String, Number, Option<u32>),
     /// Resource key, setting, dropdown choice (0: follow the account).
     DesktopToggle(String, Toggle, usize),
     /// `None`: follow the account.
-    DesktopTimeout(String, Option<u32>),
+    DesktopNumber(String, Number, Option<u32>),
     /// Resource key; outcome of "open on a new workspace" (log text).
     WorkspaceMoved(String, Result<(), String>),
     /// The window's close button or the desktop asked the app to close.

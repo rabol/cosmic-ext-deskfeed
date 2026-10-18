@@ -33,7 +33,7 @@ use crate::service::http::{Http, HttpError};
 use crate::service::icons;
 use crate::sessions::launcher::{self, LaunchSpec, LogonSetting, SessionEnd, SessionEvent};
 use crate::sessions::rdpfile::{CameraPolicy, ConnectionFile, RdpError};
-use crate::settings::{self, ConnectionSettings, Toggle};
+use crate::settings::{self, ConnectionSettings, Number, Toggle};
 
 mod account_flow;
 mod connect;
@@ -118,7 +118,6 @@ pub struct AppModel {
 }
 
 /// Desktop lists are refreshed this often (spec §7: hourly)...
-const REFRESH_EVERY: Duration = Duration::from_hours(1);
 /// ...checked this often.
 const REFRESH_CHECK: Duration = Duration::from_mins(5);
 
@@ -170,6 +169,7 @@ impl cosmic::Application for AppModel {
                 Ok(config) | Err((_, config)) => config,
             })
             .unwrap_or_default();
+        crate::log::set_max_size_mib(config.log_max_mib.unwrap_or(crate::log::MAX_SIZE_MIB.2));
 
         let mut app = AppModel {
             core,
@@ -477,11 +477,12 @@ impl cosmic::Application for AppModel {
             Message::OpenAccountSettings(..)
             | Message::OpenDesktopSettings(..)
             | Message::AppToggle(..)
-            | Message::AppTimeout(..)
+            | Message::AppNumber(..)
+            | Message::AppLogSize(..)
             | Message::AccountToggle(..)
-            | Message::AccountTimeout(..)
+            | Message::AccountNumber(..)
             | Message::DesktopToggle(..)
-            | Message::DesktopTimeout(..) => self.settings_message(message),
+            | Message::DesktopNumber(..) => self.settings_message(message),
             other => self.app_message(other),
         }
     }

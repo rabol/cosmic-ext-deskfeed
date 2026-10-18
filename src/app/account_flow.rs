@@ -252,6 +252,9 @@ impl AppModel {
         cancel: Cancel,
     ) -> Task<cosmic::Action<Message>> {
         let http = self.http.clone();
+        let time = Duration::from_secs(
+            u64::from(self.account_settings(origin.as_deref()).sign_in_mins) * 60,
+        );
         cosmic::task::future(async move {
             let used = profile.clone();
             let result = tokio::task::spawn_blocking(move || {
@@ -261,6 +264,7 @@ impl AppModel {
                     &helper,
                     &profile,
                     login_hint.as_deref(),
+                    time,
                     &cancel,
                 )
             })
@@ -434,15 +438,19 @@ impl AppModel {
         })
     }
 
-    /// Refreshes the desktop lists not refreshed for [`REFRESH_EVERY`].
+    /// Refreshes the desktop lists not refreshed for their account's
+    /// refresh interval.
     pub(super) fn refresh_due(&mut self) -> Task<cosmic::Action<Message>> {
         let due: Vec<String> = self
             .accounts
             .iter()
             .filter(|a| {
+                let every = Duration::from_secs(
+                    u64::from(self.account_settings(Some(&a.id)).refresh_mins) * 60,
+                );
                 matches!(a.state, AccountState::Ready { loading: false, .. })
                     && a.last_load
-                        .is_none_or(|t| t.elapsed().map_or(true, |d| d >= REFRESH_EVERY))
+                        .is_none_or(|t| t.elapsed().map_or(true, |d| d >= every))
             })
             .map(|a| a.id.clone())
             .collect();
