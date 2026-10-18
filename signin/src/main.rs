@@ -54,7 +54,7 @@ fn main() -> ExitCode {
     if view::private_dir(&profile).is_err() {
         return fail("profile_dir", 1);
     }
-    if gtk::init().is_err() {
+    if view::init_gtk().is_err() {
         return fail("no_display", 1);
     }
     run_app_mode(&profile, &request)

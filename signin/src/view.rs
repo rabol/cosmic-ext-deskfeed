@@ -64,6 +64,17 @@ pub struct SignInView(Rc<Inner>);
 /// Uses a folder the app prepared, keeping it private (0700). Never creates
 /// one: after a sign-out the app deletes the account's folders, and a
 /// helper that is still finishing must not bring them back (spec §6).
+/// The app's ID, so COSMIC shows the sign-in window as part of Deskfeed
+/// (dock icon and grouping). Without an application GTK takes the program
+/// name, else "GTK Application" (GTK 4.24 `gdk/wayland/gdktoplevel-wayland.c`).
+const APP_ID: &str = "io.github.rabol.cosmic-ext-deskfeed";
+
+/// Starts GTK with the app's ID as the program name.
+pub fn init_gtk() -> Result<(), glib::BoolError> {
+    glib::set_prgname(Some(APP_ID));
+    gtk::init()
+}
+
 pub fn private_dir(dir: &Path) -> std::io::Result<()> {
     if !fs::symlink_metadata(dir)?.is_dir() {
         return Err(std::io::Error::other("profile path is not a directory"));
@@ -346,10 +357,15 @@ fn build_window(webview: &WebView, title: &str) -> gtk::Window {
     let header = gtk::HeaderBar::new();
     header.set_title_widget(Some(&title_box));
 
+    // Fixed size: COSMIC then floats it centred like a dialog
+    // (cosmic-comp `src/shell/layout/mod.rs`, `is_dialog`: equal minimum
+    // and maximum size), instead of tiling it and resizing the other
+    // windows while it's open (measured 2026-10-18).
     let window = gtk::Window::builder()
         .title(title)
         .default_width(480)
         .default_height(640)
+        .resizable(false)
         .child(webview)
         .build();
     window.set_titlebar(Some(&header));

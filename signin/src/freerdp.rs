@@ -183,7 +183,7 @@ pub fn run(args: &[String]) -> ExitCode {
     let usable = profile
         .as_deref()
         .is_some_and(|p| p.is_absolute() && view::private_dir(p).is_ok());
-    if !usable || gtk::init().is_err() {
+    if !usable || view::init_gtk().is_err() {
         // Answer hello with an error, so FreeRDP reports a clear failure
         // instead of waiting.
         serve_errors(cmd_in, &send);
