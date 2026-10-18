@@ -21,6 +21,7 @@ impl AppModel {
                     Err(StepError::Show(e)) => Err(e),
                     Err(StepError::SignInAgain(e)) => {
                         self.connections.remove(&key);
+                        self.reconnects.remove(&key);
                         self.needs_sign_in(&id, e);
                         return Task::none();
                     }
@@ -58,6 +59,7 @@ impl AppModel {
                 return self.launched(&id, epoch, key, attempt, result);
             }
             Message::ConnectDeadline(key, attempt) => self.connect_deadline(key, attempt),
+            Message::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
             Message::QuitRequested
             | Message::QuitConfirm
             | Message::QuitCancel
@@ -68,10 +70,19 @@ impl AppModel {
                 if self.account(&id).is_some_and(|a| a.epoch == epoch)
                     && self.running.get(&key).is_some_and(|r| r.attempt == attempt)
                 {
-                    self.session_event(&key, event);
+                    return self.session_event(&key, event);
                 }
             }
             Message::Disconnect(key) => {
+                // Stop also ends reconnecting.
+                if self.reconnects.remove(&key).is_some()
+                    && matches!(
+                        self.connections.get(&key),
+                        Some(Connection::Reconnecting { .. })
+                    )
+                {
+                    self.connections.remove(&key);
+                }
                 if let Some(r) = self.running.get(&key) {
                     r.session.disconnect();
                 } else if let Some(l) = self.launching.get_mut(&key) {
@@ -173,6 +184,8 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         let connection = match result {
             Ok(c) => c,
+            // Offline or a network error while reconnecting: try later.
+            Err(_) if self.reconnects.contains_key(&key) => return self.schedule_reconnect(&key),
             Err(e) => {
                 self.connections.insert(key, Connection::Failed(e));
                 return Task::none();
@@ -184,6 +197,12 @@ impl AppModel {
         ) {
             decide::FirstStep::Entra => {
                 return self.launch(account, &key, &connection, LogonSetting::EntraSignIn, None);
+            }
+            // Reconnecting never opens the password dialog by itself.
+            decide::FirstStep::AskPassword(_) if self.reconnects.remove(&key).is_some() => {
+                self.connections
+                    .insert(key, Connection::Failed(fl!("error-connection-lost")));
+                return Task::none();
             }
             decide::FirstStep::AskPassword(setting) => setting,
         };
@@ -503,6 +522,8 @@ impl AppModel {
                 if let Some(stop) = self.movers.remove(&key) {
                     stop.store(true, Ordering::SeqCst);
                 }
+                // A local problem (FreeRDP missing, …): retrying won't help.
+                self.reconnects.remove(&key);
                 self.pending_logon.remove(&key);
                 if current {
                     self.connections.insert(key, Connection::Failed(text));
@@ -566,9 +587,16 @@ impl AppModel {
             .into()
     }
 
-    pub(super) fn session_event(&mut self, key: &str, event: SessionEvent) {
+    pub(super) fn session_event(
+        &mut self,
+        key: &str,
+        event: SessionEvent,
+    ) -> Task<cosmic::Action<Message>> {
         match event {
             SessionEvent::Connected => {
+                if let Some(r) = self.reconnects.remove(key) {
+                    crate::app_log!("reconnected (attempt {})", r.attempt);
+                }
                 self.connections
                     .insert(key.to_owned(), Connection::Connected);
                 self.entra_failed.remove(key);
@@ -592,17 +620,32 @@ impl AppModel {
                         crate::app_log!("  {line}");
                     }
                 }
+                let was_connected =
+                    matches!(self.connections.get(key), Some(Connection::Connected));
+                let tried = pending.as_ref().map(|(logon, _)| logon);
+                let reconnecting = self.reconnects.contains_key(key);
+                let wanted = self
+                    .account_of_resource(key)
+                    .is_some_and(|a| self.effective_settings(&a.id, key).reconnect);
+                let timed_out = self.timed_out.contains(key);
+                if wanted
+                    && self.quit == Quit::No
+                    && ((timed_out && reconnecting)
+                        || (!timed_out
+                            && decide::reconnects(&end, was_connected, reconnecting, tried)))
+                {
+                    self.timed_out.remove(key);
+                    return self.schedule_reconnect(key);
+                }
+                self.reconnects.remove(key);
                 if self.timed_out.remove(key) {
                     // Ended by the app: not about how the user logged on.
                     self.connections.insert(
                         key.to_owned(),
                         Connection::Failed(fl!("error-connect-too-long")),
                     );
-                    return;
+                    return Task::none();
                 }
-                let was_connected =
-                    matches!(self.connections.get(key), Some(Connection::Connected));
-                let tried = pending.as_ref().map(|(logon, _)| logon);
                 let outcome = decide::end_outcome(
                     &end,
                     was_connected,
@@ -654,6 +697,68 @@ impl AppModel {
                 }
             }
         }
+        Task::none()
+    }
+
+    /// Waits, then starts the next reconnect attempt; gives up after the
+    /// desktop's "Reconnect attempts".
+    pub(super) fn schedule_reconnect(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
+        let Some(of) = self
+            .account_of_resource(key)
+            .map(|a| self.effective_settings(&a.id, key).reconnect_attempts)
+        else {
+            self.reconnects.remove(key);
+            return Task::none();
+        };
+        let timer = self.next();
+        let r = self
+            .reconnects
+            .entry(key.to_owned())
+            .or_insert(Reconnect { attempt: 0, timer });
+        r.attempt += 1;
+        r.timer = timer;
+        let attempt = r.attempt;
+        if attempt > of {
+            self.reconnects.remove(key);
+            crate::app_log!("connection lost; gave up after {of} reconnect attempts");
+            self.connections.insert(
+                key.to_owned(),
+                Connection::Failed(fl!("error-reconnect-gave-up")),
+            );
+            return Task::none();
+        }
+        let wait = decide::reconnect_delay(attempt);
+        crate::app_log!(
+            "connection lost; reconnect attempt {attempt} of {of} in {} s",
+            wait.as_secs()
+        );
+        self.connections
+            .insert(key.to_owned(), Connection::Reconnecting { attempt, of });
+        let key = key.to_owned();
+        cosmic::task::future(async move {
+            tokio::time::sleep(wait).await;
+            Message::ReconnectDue(key, timer)
+        })
+    }
+
+    /// The wait is over: connect again, unless stopped or replaced
+    /// meanwhile (Stop, Connect, sign-out).
+    fn reconnect_due(&mut self, key: &str, timer: u64) -> Task<cosmic::Action<Message>> {
+        if self.reconnects.get(key).is_none_or(|r| r.timer != timer)
+            || !matches!(
+                self.connections.get(key),
+                Some(Connection::Reconnecting { .. })
+            )
+        {
+            return Task::none();
+        }
+        self.connections.remove(key);
+        let task = self.prepare_connection(key);
+        // Nothing started (signed out, quitting, …): stop reconnecting.
+        if !self.connections.contains_key(key) {
+            self.reconnects.remove(key);
+        }
+        task
     }
 
     pub(super) fn remember_logon(&mut self, key: &str, logon: LogonSetting) {

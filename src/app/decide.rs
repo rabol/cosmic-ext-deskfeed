@@ -86,6 +86,47 @@ pub(super) fn end_outcome(
     }
 }
 
+/// Whether an ended session is reconnected by the app (ADR 0014).
+///
+/// - A connected session that lost its connection starts reconnecting.
+/// - During reconnecting, an attempt that failed for a reason a later try
+///   may not have (network, timeout, FreeRDP failure) is tried again.
+/// - Never after a normal end, a cancel, or anything about credentials:
+///   repeating those could lock the account (ADR 0005).
+///
+/// Only Entra sign-in reconnects by itself; the password isn't kept.
+pub(super) fn reconnects(
+    end: &SessionEnd,
+    was_connected: bool,
+    reconnecting: bool,
+    tried: Option<&LogonSetting>,
+) -> bool {
+    if tried != Some(&LogonSetting::EntraSignIn) {
+        return false;
+    }
+    match end {
+        SessionEnd::ConnectionLost => was_connected || reconnecting,
+        SessionEnd::DnsFailed
+        | SessionEnd::TlsFailed
+        | SessionEnd::Failed { .. }
+        | SessionEnd::Crashed => reconnecting,
+        SessionEnd::Closed
+        | SessionEnd::Cancelled
+        | SessionEnd::LogonFailed
+        | SessionEnd::AccountLockedOut
+        | SessionEnd::PasswordExpired
+        | SessionEnd::AccountDisabled
+        | SessionEnd::AuthenticationFailed => false,
+    }
+}
+
+/// How long to wait before reconnect attempt `attempt` (1-based): 5 s,
+/// doubling, at most a minute.
+pub(super) fn reconnect_delay(attempt: u32) -> std::time::Duration {
+    let secs = 5u64.saturating_mul(1 << attempt.saturating_sub(1).min(6));
+    std::time::Duration::from_secs(secs.min(60))
+}
+
 /// What a finished sign-in changes besides the signed-in account itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum AfterSignIn {
@@ -238,5 +279,43 @@ mod tests {
             after_sign_in(Some("a"), "b"),
             AfterSignIn::ResetOther("a".into())
         );
+    }
+
+    #[test]
+    fn reconnects_only_lost_entra_sessions() {
+        let lost = SessionEnd::ConnectionLost;
+        assert!(reconnects(&lost, true, false, Some(&ENTRA)));
+        // Not connected yet and not reconnecting: a failed connect, shown.
+        assert!(!reconnects(&lost, false, false, Some(&ENTRA)));
+        // Password logons never retry by themselves.
+        assert!(!reconnects(&lost, true, false, Some(&PASSWORD)));
+        assert!(!reconnects(&lost, true, false, None));
+        // While reconnecting, network-type failures are tried again ...
+        for end in [
+            SessionEnd::DnsFailed,
+            SessionEnd::Failed { code: 147 },
+            SessionEnd::Crashed,
+            SessionEnd::ConnectionLost,
+        ] {
+            assert!(reconnects(&end, false, true, Some(&ENTRA)), "{end:?}");
+        }
+        // ... but never credentials, a normal end or a cancel.
+        for end in [
+            SessionEnd::Closed,
+            SessionEnd::Cancelled,
+            SessionEnd::LogonFailed,
+            SessionEnd::AuthenticationFailed,
+            SessionEnd::AccountLockedOut,
+        ] {
+            assert!(!reconnects(&end, true, true, Some(&ENTRA)), "{end:?}");
+        }
+    }
+
+    #[test]
+    fn reconnect_waits_grow_to_a_minute() {
+        let secs: Vec<u64> = (1..=8).map(|a| reconnect_delay(a).as_secs()).collect();
+        assert_eq!(secs, [5, 10, 20, 40, 60, 60, 60, 60]);
+        assert_eq!(reconnect_delay(0).as_secs(), 5);
+        assert_eq!(reconnect_delay(u32::MAX).as_secs(), 60);
     }
 }

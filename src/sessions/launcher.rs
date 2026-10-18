@@ -37,6 +37,13 @@ use crate::service::http::BearerToken;
 const FREERDP_BINARIES: &[&str] = &["xfreerdp3", "xfreerdp"];
 /// Log line FreeRDP writes once the session is set up.
 const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
+/// FreeRDP lost a connected session (`client/common/client.c`,
+/// `client_auto_reconnect_ex`): logged before it checks whether it may
+/// reconnect, so also with its reconnect off.
+const LOST_MARKERS: &[&str] = &[
+    "client_auto_reconnect_ex]: Network disconnect!",
+    "client_auto_reconnect_ex]: Disconnected by server hitting a bug",
+];
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
 /// Longest FreeRDP output line looked at; the rest of a line is skipped.
@@ -207,6 +214,8 @@ pub enum SessionEnd {
     DnsFailed,
     TlsFailed,
     Cancelled,
+    /// A connected session lost its connection (network, sleep, server).
+    ConnectionLost,
     Failed {
         code: i32,
     },
@@ -281,6 +290,11 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
     args.extend([
         "/dynamic-resolution".to_owned(),
         "/log-level:info".to_owned(),
+        // The app reconnects, with a fresh connection file and gateway
+        // token (ADR 0014). FreeRDP's own loop reuses the first token and
+        // shows its own window; this also overrides the feed's
+        // `autoreconnection enabled`.
+        "-auto-reconnect".to_owned(),
     ]);
     // Display, devices and `/timeout`. FreeRDP waits `TcpAckTimeout`
     // (default 9 s) for the session host to finish activation, including
@@ -305,10 +319,17 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
     Ok(args)
 }
 
-pub fn classify_exit(code: Option<i32>, log_says_logon_failure: bool) -> SessionEnd {
+/// How a session ended. `connection_lost`: FreeRDP said a connected
+/// session lost its connection (exit code 147, or 0 when it knew no error).
+pub fn classify_exit(
+    code: Option<i32>,
+    log_says_logon_failure: bool,
+    connection_lost: bool,
+) -> SessionEnd {
     match code {
         None => SessionEnd::Crashed,
         _ if log_says_logon_failure => SessionEnd::LogonFailed,
+        _ if connection_lost => SessionEnd::ConnectionLost,
         Some(0..=3 | 11 | 12) => SessionEnd::Closed,
         Some(134) => SessionEnd::LogonFailed,
         Some(135) => SessionEnd::AccountLockedOut,
@@ -681,7 +702,7 @@ fn supervise(
         }
         drop(dir); // removes the connection file
         let log = std::mem::take(&mut *log.lock().expect("not poisoned"));
-        let end = classify_exit(status.code(), log.logon_failure);
+        let end = classify_exit(status.code(), log.logon_failure, log.connected && log.lost);
         ended.store(true, std::sync::atomic::Ordering::SeqCst);
         events(SessionEvent::Ended {
             end,
@@ -702,6 +723,8 @@ struct Log {
     lines: Vec<String>,
     connected: bool,
     logon_failure: bool,
+    /// The connection was lost (`LOST_MARKERS`).
+    lost: bool,
 }
 
 impl Log {
@@ -710,6 +733,9 @@ impl Log {
     fn push(&mut self, line: &str) -> bool {
         if line.contains("LOGON_FAILURE") {
             self.logon_failure = true;
+        }
+        if LOST_MARKERS.iter().any(|m| line.contains(m)) {
+            self.lost = true;
         }
         if line.contains("[ERROR]") || line.contains("[WARN]") || is_state_change(line) {
             if self.lines.len() == MAX_LOG_LINES {
@@ -934,21 +960,43 @@ mod tests {
 
     #[test]
     fn exit_codes() {
-        assert_eq!(classify_exit(Some(0), false), SessionEnd::Closed);
-        assert_eq!(classify_exit(Some(11), false), SessionEnd::Closed);
-        assert_eq!(classify_exit(Some(134), false), SessionEnd::LogonFailed);
-        assert_eq!(classify_exit(Some(131), true), SessionEnd::LogonFailed);
+        assert_eq!(classify_exit(Some(0), false, false), SessionEnd::Closed);
+        // A lost connection, whatever FreeRDP's exit code says.
         assert_eq!(
-            classify_exit(Some(135), false),
+            classify_exit(Some(147), false, true),
+            SessionEnd::ConnectionLost
+        );
+        assert_eq!(
+            classify_exit(Some(0), false, true),
+            SessionEnd::ConnectionLost
+        );
+        assert_eq!(classify_exit(None, false, true), SessionEnd::Crashed);
+        assert_eq!(classify_exit(Some(11), false, false), SessionEnd::Closed);
+        assert_eq!(
+            classify_exit(Some(134), false, false),
+            SessionEnd::LogonFailed
+        );
+        assert_eq!(
+            classify_exit(Some(131), true, false),
+            SessionEnd::LogonFailed
+        );
+        assert_eq!(
+            classify_exit(Some(135), false, false),
             SessionEnd::AccountLockedOut
         );
-        assert_eq!(classify_exit(Some(149), false), SessionEnd::PasswordExpired);
-        assert_eq!(classify_exit(Some(140), false), SessionEnd::DnsFailed);
         assert_eq!(
-            classify_exit(Some(131), false),
+            classify_exit(Some(149), false, false),
+            SessionEnd::PasswordExpired
+        );
+        assert_eq!(
+            classify_exit(Some(140), false, false),
+            SessionEnd::DnsFailed
+        );
+        assert_eq!(
+            classify_exit(Some(131), false, false),
             SessionEnd::Failed { code: 131 }
         );
-        assert_eq!(classify_exit(None, false), SessionEnd::Crashed);
+        assert_eq!(classify_exit(None, false, false), SessionEnd::Crashed);
     }
 
     #[test]
@@ -961,6 +1009,10 @@ mod tests {
         assert!(!log.push(
             "[INFO][com.freerdp.channels.drdynvc.client] - Loading Dynamic Virtual Channel rdpsnd"
         ));
+        assert!(!log.lost);
+        // As xfreerdp3 3.32.2 printed it when the local test server went away.
+        log.push("[14:13:52:196] [664309:000a22f0] [INFO][com.freerdp.client.common] - [client_auto_reconnect_ex]: Network disconnect!");
+        assert!(log.lost);
         log.push("[ERROR][com.freerdp.core.rdstls] - RDSTLS_RESULT_LOGON_FAILURE [0x0000052E]");
         assert!(log.logon_failure);
         assert_eq!(log.lines.len(), 1);
@@ -1164,7 +1216,9 @@ sleep 300
     /// local test server (`research/rdp-test-server/README.md`):
     /// `DESKFEED_TEST_SERVER=<its socket> cargo test --release
     /// local_test_server_session -- --ignored`. Runs `DESKFEED_TEST_SECS`
-    /// (default 20) seconds, with the camera when `DESKFEED_TEST_CAMERA=1`;
+    /// (default 20) seconds, with the camera when `DESKFEED_TEST_CAMERA=1`.
+    /// With `DESKFEED_TEST_EXPECT_LOST=1` it instead expects the session to
+    /// end as a lost connection within that time (stop the server);
     /// the window's tiling and the server's resize log
     /// are checked from outside.
     #[test]
@@ -1231,7 +1285,22 @@ sleep 300
             rx.recv_timeout(Duration::from_secs(15)).unwrap(),
             SessionEvent::Connected
         );
-        std::thread::sleep(Duration::from_secs(secs));
+        if std::env::var("DESKFEED_TEST_EXPECT_LOST").is_ok_and(|v| v == "1") {
+            // The server is stopped from outside meanwhile.
+            let ended = rx.recv_timeout(Duration::from_secs(secs)).unwrap();
+            assert!(
+                matches!(
+                    ended,
+                    SessionEvent::Ended {
+                        end: SessionEnd::ConnectionLost,
+                        ..
+                    }
+                ),
+                "{ended:?}"
+            );
+        } else {
+            std::thread::sleep(Duration::from_secs(secs));
+        }
         stop_all(&[session], STOP_GRACE);
         fs::remove_dir_all(dir).unwrap();
     }

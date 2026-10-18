@@ -731,6 +731,7 @@ impl AppModel {
             self.connections.remove(&key);
             self.pending_logon.remove(&key);
             self.last_failure.remove(&key);
+            self.reconnects.remove(&key);
             self.entra_failed.remove(&key);
             self.entra_failures.remove(&key);
         }

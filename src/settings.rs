@@ -41,6 +41,10 @@ pub struct ConnectionSettings {
     /// App and account levels only.
     #[serde(default)]
     pub offline_days: Option<u32>,
+    #[serde(default)]
+    pub reconnect: Option<bool>,
+    #[serde(default)]
+    pub reconnect_attempts: Option<u32>,
 }
 
 /// The on/off settings.
@@ -53,11 +57,12 @@ pub enum Toggle {
     Microphone,
     Camera,
     Clipboard,
+    Reconnect,
 }
 
 impl Toggle {
     #[cfg(test)]
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Fullscreen,
         Self::AllMonitors,
         Self::NewWorkspace,
@@ -65,6 +70,7 @@ impl Toggle {
         Self::Microphone,
         Self::Camera,
         Self::Clipboard,
+        Self::Reconnect,
     ];
 }
 
@@ -79,11 +85,15 @@ pub enum Number {
     SignIn,
     /// How long the offline desktop list is kept, in days.
     OfflineDays,
+    /// How many times a lost connection is retried.
+    ReconnectAttempts,
 }
 
 impl Number {
-    pub const ALL: [Self; 4] = [
+    #[cfg(test)]
+    pub const ALL: [Self; 5] = [
         Self::Timeout,
+        Self::ReconnectAttempts,
         Self::Refresh,
         Self::SignIn,
         Self::OfflineDays,
@@ -101,17 +111,13 @@ impl Number {
             Self::SignIn => (2, 15, 1),
             // Spec §10: cached metadata has an age limit.
             Self::OfflineDays => (1, 90, 1),
+            Self::ReconnectAttempts => (1, 10, 1),
         }
     }
 
     pub fn clamp(self, value: u32) -> u32 {
         let (min, max, _) = self.range();
         value.clamp(min, max)
-    }
-
-    /// Whether a single desktop can override it.
-    pub fn per_desktop(self) -> bool {
-        matches!(self, Self::Timeout)
     }
 }
 
@@ -125,6 +131,7 @@ impl ConnectionSettings {
             Toggle::Microphone => self.microphone,
             Toggle::Camera => self.camera,
             Toggle::Clipboard => self.clipboard,
+            Toggle::Reconnect => self.reconnect,
         }
     }
 
@@ -137,6 +144,7 @@ impl ConnectionSettings {
             Toggle::Microphone => &mut self.microphone,
             Toggle::Camera => &mut self.camera,
             Toggle::Clipboard => &mut self.clipboard,
+            Toggle::Reconnect => &mut self.reconnect,
         };
         *slot = value;
     }
@@ -147,6 +155,7 @@ impl ConnectionSettings {
             Number::Refresh => self.refresh_mins,
             Number::SignIn => self.sign_in_mins,
             Number::OfflineDays => self.offline_days,
+            Number::ReconnectAttempts => self.reconnect_attempts,
         }
     }
 
@@ -157,6 +166,7 @@ impl ConnectionSettings {
             Number::Refresh => &mut self.refresh_mins,
             Number::SignIn => &mut self.sign_in_mins,
             Number::OfflineDays => &mut self.offline_days,
+            Number::ReconnectAttempts => &mut self.reconnect_attempts,
         };
         *slot = value.map(|v| n.clamp(v));
     }
@@ -182,12 +192,14 @@ pub struct Effective {
     pub refresh_mins: u32,
     pub sign_in_mins: u32,
     pub offline_days: u32,
+    pub reconnect: bool,
+    pub reconnect_attempts: u32,
 }
 
 /// Built-in defaults. 120 s: measured Entra exchanges took up to 49.8 s
 /// (docs/milestone-1.md). Microphone, camera and clipboard off (spec §9).
 /// Lists refresh hourly; signing in may take 5 min (MFA included); the
-/// offline list is kept 30 days.
+/// offline list is kept 30 days; a lost connection is retried 5 times.
 pub const DEFAULTS: Effective = Effective {
     timeout_secs: 120,
     fullscreen: false,
@@ -200,6 +212,8 @@ pub const DEFAULTS: Effective = Effective {
     refresh_mins: 60,
     sign_in_mins: 5,
     offline_days: 30,
+    reconnect: true,
+    reconnect_attempts: 5,
 };
 
 impl Effective {
@@ -219,6 +233,8 @@ impl Effective {
             refresh_mins: number(Number::Refresh, self.refresh_mins),
             sign_in_mins: number(Number::SignIn, self.sign_in_mins),
             offline_days: number(Number::OfflineDays, self.offline_days),
+            reconnect: s.reconnect.unwrap_or(self.reconnect),
+            reconnect_attempts: number(Number::ReconnectAttempts, self.reconnect_attempts),
         }
     }
 
@@ -228,6 +244,7 @@ impl Effective {
             Number::Refresh => self.refresh_mins,
             Number::SignIn => self.sign_in_mins,
             Number::OfflineDays => self.offline_days,
+            Number::ReconnectAttempts => self.reconnect_attempts,
         }
     }
 
@@ -240,6 +257,7 @@ impl Effective {
             Toggle::Microphone => self.microphone,
             Toggle::Camera => self.camera,
             Toggle::Clipboard => self.clipboard,
+            Toggle::Reconnect => self.reconnect,
         }
     }
 

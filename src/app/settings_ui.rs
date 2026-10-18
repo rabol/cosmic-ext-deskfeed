@@ -334,10 +334,11 @@ fn settings_column<'a>(
                 .into(),
         );
     }
-    let mut connection = widget::settings::section().title(fl!("settings-connection"));
-    for n in Number::ALL.into_iter().filter(|n| n.per_desktop()) {
-        connection = connection.add(number(n));
-    }
+    let connection = widget::settings::section()
+        .title(fl!("settings-connection"))
+        .add(number(Number::Timeout))
+        .add(toggle(Toggle::Reconnect))
+        .add(number(Number::ReconnectAttempts));
     let display = widget::settings::section()
         .title(fl!("settings-display"))
         .add(toggle(Toggle::Fullscreen))
@@ -378,6 +379,7 @@ fn number_label(n: Number, value: u32) -> String {
         Number::Timeout => fl!("seconds", value = value),
         Number::Refresh | Number::SignIn => fl!("minutes", value = value),
         Number::OfflineDays => fl!("days", value = value),
+        Number::ReconnectAttempts => value.to_string(),
     }
 }
 
@@ -388,6 +390,10 @@ fn number_text(n: Number) -> (String, String) {
         Number::Refresh => (fl!("setting-refresh"), fl!("setting-refresh-desc")),
         Number::SignIn => (fl!("setting-sign-in"), fl!("setting-sign-in-desc")),
         Number::OfflineDays => (fl!("setting-offline"), fl!("setting-offline-desc")),
+        Number::ReconnectAttempts => (
+            fl!("setting-reconnect-attempts"),
+            fl!("setting-reconnect-attempts-desc"),
+        ),
     }
 }
 
@@ -407,5 +413,6 @@ pub(super) fn toggle_text(t: Toggle) -> (String, String) {
         Toggle::Microphone => (fl!("setting-microphone"), fl!("setting-microphone-desc")),
         Toggle::Camera => (fl!("setting-camera"), fl!("setting-camera-desc")),
         Toggle::Clipboard => (fl!("setting-clipboard"), fl!("setting-clipboard-desc")),
+        Toggle::Reconnect => (fl!("setting-reconnect"), fl!("setting-reconnect-desc")),
     }
 }

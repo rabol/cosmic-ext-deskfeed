@@ -151,7 +151,20 @@ pub(super) enum Connection {
     Preparing,
     Connecting,
     Connected,
+    /// Waiting before reconnect attempt `attempt` of `of`.
+    Reconnecting {
+        attempt: u32,
+        of: u32,
+    },
     Failed(String),
+}
+
+/// A desktop the app is reconnecting (ADR 0014).
+pub(super) struct Reconnect {
+    /// Attempts started so far.
+    pub(super) attempt: u32,
+    /// The pending wait; a wait that isn't this one is stale.
+    pub(super) timer: u64,
 }
 
 pub(super) struct PasswordDialog {
@@ -244,6 +257,8 @@ pub enum Message {
     Session(String, u64, String, u64, SessionEvent),
     /// Resource key, attempt: the time to connect is up.
     ConnectDeadline(String, u64),
+    /// Resource key, wait: time for the next reconnect attempt.
+    ReconnectDue(String, u64),
     Disconnect(String),
     CheckDependencies,
     DependenciesChecked(Vec<Check>),

@@ -18,6 +18,8 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Microphone | off | A, Ac, C | `settings.rs` | Done |
 | Camera | off | A, Ac, C | `settings.rs` | Done |
 | Clipboard | off | A, Ac, C | `settings.rs` | Done |
+| Reconnect after a lost connection | on | A, Ac, C | `settings.rs` `Toggle::Reconnect` | Done |
+| Reconnect attempts | 5 (1–10) | A, Ac, C | `settings.rs` `Number::ReconnectAttempts` | Done |
 | Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | With roadmap item 5: the alternative, scaling the picture (`/smart-sizing`), gives Windows a fixed 1 024×768 desktop unless a size is set too (`client/X11/xf_client.c`), so it needs a desktop-size setting beside it |
 | Refresh desktop lists every | 60 min (15–1 440, steps of 15) | A, Ac | `settings.rs` `Number::Refresh` | Done |
 | Time allowed for signing in | 5 min (2–15) | A, Ac | `settings.rs` `Number::SignIn` | Done |
@@ -45,6 +47,8 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Keyring payload 64 KiB; keyring prompt wait 2 min | `secrets.rs` | Bound; the prompt is the keyring's own |
 | ID token clock skew 5 min; token renewal 5 min before expiry; sign-in attempt lifetime 10 min | `auth/` | Protocol safety margins |
 | Silent sign-in attempt 20 s; sign-in page wait 180 s (FreeRDP's own); sign-in window shown after 1.5 s | `signin/src/` | Follow FreeRDP and Microsoft behaviour; the overall sign-in time is a setting |
+| Waits between reconnect attempts: 5 s, doubling, at most 60 s | `app/decide.rs` `reconnect_delay` | Bounded backoff (spec §8); the number of attempts is the setting |
+| FreeRDP's own reconnect off (`-auto-reconnect`) | `sessions/launcher.rs` `build_args` | ADR 0014 |
 | Connection deadline = wait + 2 × 180 s + 60 s | `app/connect.rs` | Derived from the wait setting and FreeRDP's sign-in limit |
 | FreeRDP ≥ 3.32.2; binaries `xfreerdp3`, `xfreerdp` | `deps.rs`, `sessions/launcher.rs` | The tested backend (ADR 0004) |
 | FreeRDP stop grace 5 s; 60 kept log lines; 4 096-char output lines | `sessions/launcher.rs` | Internal process handling |

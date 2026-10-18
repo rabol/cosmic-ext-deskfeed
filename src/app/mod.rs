@@ -87,6 +87,8 @@ pub struct AppModel {
     /// Why a running session doesn't have something the user turned on
     /// (the camera, when the desktop's policy doesn't allow it).
     session_notes: HashMap<String, String>,
+    /// Desktops being reconnected after a lost connection.
+    reconnects: HashMap<String, Reconnect>,
     /// The search field's text; filters the desktop list.
     search: String,
     /// Where offline desktop lists live (`None` without a cache folder).
@@ -195,6 +197,7 @@ impl cosmic::Application for AppModel {
             signing_out: HashSet::new(),
             timed_out: HashSet::new(),
             session_notes: HashMap::new(),
+            reconnects: HashMap::new(),
             search: String::new(),
             cache: crate::cache::Store::user(),
             icons: HashMap::new(),
@@ -475,6 +478,7 @@ impl cosmic::Application for AppModel {
             | Message::Launched(..)
             | Message::Session(..)
             | Message::ConnectDeadline(..)
+            | Message::ReconnectDue(..)
             | Message::Disconnect(..)
             | Message::WorkspaceMoved(..)
             | Message::QuitRequested

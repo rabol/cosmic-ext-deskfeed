@@ -252,6 +252,12 @@ impl AppModel {
                     .on_press(Message::Disconnect(r.key.clone()))
                     .into(),
             ),
+            Some(Connection::Reconnecting { attempt, of }) => (
+                Some(fl!("status-reconnecting", attempt = attempt, of = of)),
+                widget::button::standard(fl!("stop"))
+                    .on_press(Message::Disconnect(r.key.clone()))
+                    .into(),
+            ),
             Some(Connection::Failed(e)) => (
                 Some(e.clone()),
                 widget::button::suggested(fl!("connect"))
