@@ -571,6 +571,17 @@ fn spawn_freerdp(
         cmd.env("no_proxy", n);
     }
     cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_PROFILE", profile);
+    // Native Wayland, not XWayland. SDL 3 picks XWayland when the
+    // compositor lacks `wp_fifo_manager_v1` (SDL 3.4.18
+    // `src/video/wayland/SDL_waylandvideo.c`), which COSMIC does: the
+    // window then had a Latin-1-mangled title, no Wayland app ID (so the
+    // refit and "open on a new workspace" couldn't find it) and X11's
+    // handling of tiling. A list: X11 still works without Wayland
+    // (`SDL_HINT_VIDEO_DRIVER`, SDL_hints.h). The user's own choice wins.
+    cmd.env(
+        "SDL_VIDEO_DRIVER",
+        std::env::var_os("SDL_VIDEO_DRIVER").unwrap_or_else(|| "wayland,x11".into()),
+    );
     // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it
     // stopped. This logger prints no names, passwords or tokens (FreeRDP
     // 3.32.2 `libfreerdp/core/rdp.c`). An environment variable, because
@@ -1009,6 +1020,7 @@ mod tests {
                  env | grep -q AVD_TEST_SECRET && echo LEAKED_ENV >> \"$out\"\n\
                  env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
                  env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG,com.freerdp.client.sdl.disp:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
+                 env | grep -q '^SDL_VIDEO_DRIVER=wayland,x11$' && echo WAYLAND_OK >> \"$out\"\n\
                  echo '[INFO][x] - Loading Dynamic Virtual Channel rdpgfx'\n\
                  echo '[DEBUG][com.freerdp.client.sdl.disp] - [DisplayControlCaps]: DisplayControlCapsPdu: setting the window as resizable'\n\
                  exit 0\n",
@@ -1051,6 +1063,7 @@ mod tests {
         assert!(got.contains("DIRMODE:700"), "{got}");
         assert!(got.contains("PROFILE_OK"), "{got}");
         assert!(got.contains("FILTER_OK"), "{got}");
+        assert!(got.contains("WAYLAND_OK"), "{got}");
         assert!(!got.contains("DRIVES"));
         assert!(!got.contains("LEAKED_ENV"));
         // The connection file and its folder are gone.
