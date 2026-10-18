@@ -38,6 +38,7 @@ use crate::settings::{self, Choice, ConnectionSettings, Number, Toggle};
 mod account_flow;
 mod connect;
 mod decide;
+mod diagnostics;
 mod errors;
 mod model;
 mod settings_ui;
@@ -91,6 +92,10 @@ pub struct AppModel {
     reconnects: HashMap<String, Reconnect>,
     /// The search field's text; filters the desktop list.
     search: String,
+    /// The diagnostics report while its page is open (`None`: building).
+    diagnostics: Option<String>,
+    /// Where the report was saved, or why it wasn't.
+    diagnostics_status: Option<String>,
     /// Where offline desktop lists live (`None` without a cache folder).
     cache: Option<crate::cache::Store>,
     /// Resource icons per account and URL; the feed versions its icon
@@ -204,6 +209,8 @@ impl cosmic::Application for AppModel {
             session_notes: HashMap::new(),
             reconnects: HashMap::new(),
             search: String::new(),
+            diagnostics: None,
+            diagnostics_status: None,
             cache: crate::cache::Store::user(),
             icons: HashMap::new(),
             quit: Quit::No,
@@ -271,6 +278,7 @@ impl cosmic::Application for AppModel {
                         menu::Item::Button(fl!("settings"), None, MenuAction::Settings),
                         menu::Item::Button(fl!("dependencies"), None, MenuAction::Dependencies),
                         menu::Item::Button(fl!("open-log-folder"), None, MenuAction::OpenLogFolder),
+                        menu::Item::Button(fl!("diagnostics"), None, MenuAction::Diagnostics),
                         menu::Item::Button(fl!("about"), None, MenuAction::About),
                     ],
                 ),
@@ -326,6 +334,29 @@ impl cosmic::Application for AppModel {
                 }
                 b
             }),
+            ContextPage::Diagnostics => {
+                let space = cosmic::theme::spacing();
+                let mut col = widget::column::with_capacity(3)
+                    .spacing(space.space_s)
+                    .push(widget::text::body(fl!("diagnostics-hint")));
+                if let Some(status) = &self.diagnostics_status {
+                    col = col.push(widget::text::body(status.clone()));
+                }
+                col = col.push(match &self.diagnostics {
+                    None => Element::from(widget::text::body(fl!("diagnostics-building"))),
+                    Some(text) => widget::text::monotext(text.clone()).size(12).into(),
+                });
+                let mut save = widget::button::suggested(fl!("diagnostics-save"));
+                if self.diagnostics.is_some() {
+                    save = save.on_press(Message::SaveDiagnostics);
+                }
+                context_drawer::context_drawer(
+                    col,
+                    Message::ToggleContextPage(ContextPage::Diagnostics),
+                )
+                .title(fl!("diagnostics"))
+                .actions(save)
+            }
             ContextPage::AppSettings => context_drawer::context_drawer(
                 self.app_settings_view(),
                 Message::ToggleContextPage(ContextPage::AppSettings),
@@ -536,6 +567,53 @@ impl AppModel {
     pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::SearchInput(text) => self.search = text,
+            Message::OpenDiagnostics => {
+                self.context_page = ContextPage::Diagnostics;
+                self.core.window.show_context = true;
+                self.diagnostics = None;
+                self.diagnostics_status = None;
+                let inputs = self.diagnostics_inputs();
+                return cosmic::task::future(async move {
+                    let text = tokio::task::spawn_blocking(move || diagnostics::build(inputs))
+                        .await
+                        .unwrap_or_default();
+                    Message::DiagnosticsReady(text)
+                });
+            }
+            Message::DiagnosticsReady(text) => self.diagnostics = Some(text),
+            Message::SaveDiagnostics => {
+                // Saved exactly as shown.
+                let Some(text) = self.diagnostics.clone() else {
+                    return Task::none();
+                };
+                return cosmic::task::future(async move {
+                    let dialog = cosmic::dialog::file_chooser::save::Dialog::new()
+                        .title(fl!("diagnostics-save"))
+                        .file_name("deskfeed-diagnostics.txt".to_owned());
+                    let result = match dialog.save_file().await {
+                        Ok(response) => match response.url().and_then(|u| u.to_file_path().ok()) {
+                            Some(path) => tokio::task::spawn_blocking(move || {
+                                diagnostics::save(&path, &text)
+                                    .map(|()| path.display().to_string())
+                                    .map_err(|e| Some(e.kind().to_string()))
+                            })
+                            .await
+                            .unwrap_or_else(|_| Err(Some("task".into()))),
+                            None => Err(Some("no file chosen".into())),
+                        },
+                        Err(cosmic::dialog::file_chooser::Error::Cancelled) => Err(None),
+                        Err(e) => Err(Some(e.to_string())),
+                    };
+                    Message::DiagnosticsSaved(result)
+                });
+            }
+            Message::DiagnosticsSaved(result) => {
+                self.diagnostics_status = match result {
+                    Ok(path) => Some(fl!("diagnostics-saved", path = path)),
+                    Err(Some(e)) => Some(fl!("diagnostics-not-saved", detail = e)),
+                    Err(None) => None,
+                };
+            }
             Message::ToggleFavorite(key) => {
                 let mut favorites = self.config.favorites.clone();
                 if !favorites.remove(&key) {
@@ -676,6 +754,7 @@ pub enum ContextPage {
     About,
     Dependencies,
     AppSettings,
+    Diagnostics,
     AccountSettings,
     DesktopSettings,
 }
@@ -684,6 +763,7 @@ pub enum ContextPage {
 pub enum MenuAction {
     About,
     Settings,
+    Diagnostics,
     Dependencies,
     AddAccount,
     SignOut,
@@ -697,6 +777,7 @@ impl menu::action::MenuAction for MenuAction {
         match self {
             MenuAction::About => Message::ToggleContextPage(ContextPage::About),
             MenuAction::Settings => Message::ToggleContextPage(ContextPage::AppSettings),
+            MenuAction::Diagnostics => Message::OpenDiagnostics,
             MenuAction::Dependencies => Message::ToggleContextPage(ContextPage::Dependencies),
             MenuAction::AddAccount => Message::AddAccount,
             MenuAction::SignOut => Message::SignOutSelected,

@@ -460,18 +460,34 @@ pub(super) fn search_matches(query: &str, ws: &WorkspaceView, r: &ResourceView) 
         || ws.name.to_lowercase().contains(query)
 }
 
+/// `t` in local time (`localtime_r`; no date crate needed).
+fn local(t: SystemTime) -> Option<libc::tm> {
+    let secs =
+        libc::time_t::try_from(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()).ok()?;
+    // SAFETY: `localtime_r` writes only into `tm`, which outlives the
+    // call; a null result means failure.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let ok = unsafe { !libc::localtime_r(&raw const secs, &raw mut tm).is_null() };
+    ok.then_some(tm)
+}
+
+/// "2026-10-18 14:05", local time.
+pub(super) fn date_time_label(t: SystemTime) -> String {
+    local(t).map_or_else(String::new, |tm| {
+        format!(
+            "{:04}-{:02}-{:02} {:02}:{:02}",
+            tm.tm_year + 1900,
+            tm.tm_mon + 1,
+            tm.tm_mday,
+            tm.tm_hour,
+            tm.tm_min
+        )
+    })
+}
+
 /// "14:05" for today, "2026-10-17 14:05" for an earlier day, in local
 /// time (`localtime_r`; no date crate needed).
 pub(super) fn clock_label(t: SystemTime) -> String {
-    fn local(t: SystemTime) -> Option<libc::tm> {
-        let secs =
-            libc::time_t::try_from(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()).ok()?;
-        // SAFETY: `localtime_r` writes only into `tm`, which outlives the
-        // call; a null result means failure.
-        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        let ok = unsafe { !libc::localtime_r(&raw const secs, &raw mut tm).is_null() };
-        ok.then_some(tm)
-    }
     let Some(tm) = local(t) else {
         return String::new();
     };

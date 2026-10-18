@@ -21,7 +21,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
     - ~~Light/dark theme override (§5).~~ Done (2026-10-18): View → Settings → Appearance.
     - ~~The sign-in helper's "Sign in" strings aren't localized~~ Done (2026-10-18): the app passes its translated title to the helper (`COSMIC_EXT_DESKFEED_SIGNIN_TITLE`); "Sign in" stays only as the fallback.
     - Capturing system shortcuts (Super, Alt+Tab) in a session and a visible way to release them: unverified with `xfreerdp3` (§9).
-    - Diagnostics support export, previewable and redacted (§12).
+    - ~~Diagnostics support export, previewable and redacted (§12).~~ Done (2026-10-18): View → Diagnostics shows the whole report, Save writes exactly it (0600). Versions, dependency check, settings, counts per account, the last 300 log lines redacted again, known account, workspace and desktop names replaced. A report from the owner's real log had no IDs, e-mail addresses, tokens or host names.
 
 ## Parity work the spec allows later (§3)
 

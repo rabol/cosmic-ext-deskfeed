@@ -316,6 +316,12 @@ pub enum Message {
     OpenLogFolder,
     /// An account's offline list was read (account, epoch, list).
     CacheLoaded(String, u64, Option<crate::cache::Cached>),
+    /// View → Diagnostics: build the report and show it.
+    OpenDiagnostics,
+    DiagnosticsReady(String),
+    SaveDiagnostics,
+    /// Where it was saved, or why not (`None`: cancelled).
+    DiagnosticsSaved(Result<String, Option<String>>),
     /// The search field's text.
     SearchInput(String),
     /// Resource key.
