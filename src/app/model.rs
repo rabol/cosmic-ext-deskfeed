@@ -200,6 +200,8 @@ pub(super) struct PasswordDialog {
     pub(super) logon: usize,
     pub(super) custom_domain: String,
     pub(super) error: Option<String>,
+    /// "Remember this password" (off unless the user ticks it).
+    pub(super) remember: bool,
 }
 
 /// Text from the password field; never shown in `Debug` output.
@@ -280,6 +282,22 @@ pub enum Message {
     Session(String, u64, String, u64, SessionEvent),
     /// Resource key, attempt: the time to connect is up.
     ConnectDeadline(String, u64),
+    /// The password dialog's "Remember this password".
+    ToggleRememberPassword(bool),
+    /// A remembered password was read (account, epoch, key, logon
+    /// setting, connection file, result).
+    SavedPasswordLoaded(
+        String,
+        u64,
+        String,
+        LogonSetting,
+        Arc<ConnectionFile>,
+        Result<Option<Secret>, String>,
+    ),
+    /// Resource key; whether its password was remembered.
+    PasswordSaved(String, Result<(), String>),
+    /// Resource key: forget its remembered password.
+    ForgetPassword(String),
     /// Trust the certificate in the certificate dialog and connect.
     TrustCertificate,
     /// Close the certificate dialog.

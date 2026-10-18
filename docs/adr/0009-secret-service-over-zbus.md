@@ -23,3 +23,14 @@ Candidates: the `oo7`, `secret-service` and `keyring` crates, or the D-Bus API d
 
 - No new crates. Tested against `oo7-daemon` 0.6 with an opt-in test (`cargo test -- --ignored keyring`) that uses a test client ID.
 - No Flatpak ([ADR 0010](0010-native-only-and-dependency-check.md)), so no sandbox permission is needed.
+
+## Addendum (2026-10-18): remembered Windows passwords
+
+Roadmap item 8, spec §8. For desktops that log on with a Windows password, the password dialog has "Remember this password in the keyring", off by default.
+
+- One item per account and desktop, type `windows-password` (sign-ins are `refresh-token`, so neither search sees the other), attributes app, tenant, account object ID and the desktop's opaque resource key; the secret is the password only, at most 1 024 bytes. No file fallback. The config only records which desktops have one (`saved_passwords`), never the password.
+- Stored only after the connection with it worked, so a mistyped password is never kept.
+- Next time it is read and used without the dialog; that also lets such desktops reconnect by themselves (ADR 0014).
+- If Windows rejects it, it is deleted at once and the dialog asks; it is never tried again (ADR 0005).
+- Deleted on sign-out (all of the account's) and with Security → Remembered password → Remove in the desktop's settings.
+- Checked against the session's real keyring (oo7 0.6): store, replace, read, delete; the sign-in list never shows it (`secrets::tests::real_keyring_password`).

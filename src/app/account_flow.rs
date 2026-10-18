@@ -732,6 +732,8 @@ impl AppModel {
             self.pending_logon.remove(&key);
             self.last_failure.remove(&key);
             self.reconnects.remove(&key);
+            self.pending_password.remove(&key);
+            self.set_saved_password(&key, false);
             self.entra_failed.remove(&key);
             self.entra_failures.remove(&key);
         }
@@ -763,9 +765,18 @@ impl AppModel {
         // own.
         let identity = account.identity;
         let keyring = cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || accounts::delete(&identity))
-                .await
-                .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
+            let result = tokio::task::spawn_blocking(move || {
+                // Remembered Windows passwords go with the account (spec §8).
+                let passwords = crate::secrets::delete_passwords(&identity, None);
+                crate::app_log!(
+                    "remembered passwords deleted (sign-out): {:?}",
+                    passwords.is_ok()
+                );
+                let signed_out = accounts::delete(&identity);
+                signed_out.and(passwords.map_err(|_| fl!("error-sign-out-incomplete")))
+            })
+            .await
+            .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
             Message::SignOutFinished(result)
         });
         Task::batch([files, keyring])

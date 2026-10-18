@@ -13,6 +13,9 @@
 //! - Blocking: call from `spawn_blocking`, never on the UI thread.
 //! - Never falls back to files (spec §6): errors go to the caller, which
 //!   then runs a memory-only session.
+//! - Windows passwords the user chose to remember (spec §8): one item per
+//!   account and desktop, of their own type, so sign-in code never sees
+//!   them; deleted with the account on sign-out.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -34,6 +37,9 @@ const PROMPT: &str = "org.freedesktop.Secret.Prompt";
 /// Identifies our items; the app ID.
 const APPLICATION: &str = "io.github.rabol.cosmic-ext-deskfeed";
 const KIND: &str = "refresh-token";
+const PASSWORD_KIND: &str = "windows-password";
+/// Longer passwords aren't stored (Windows allows 256 characters).
+const MAX_PASSWORD: usize = 1024;
 const PAYLOAD_VERSION: u32 = 1;
 const MAX_PAYLOAD: usize = 64 * 1024;
 
@@ -251,6 +257,14 @@ impl Keyring {
         decode(&attributes, &value)
     }
 
+    /// An item's raw secret.
+    fn read_secret(&self, item: &OwnedObjectPath) -> Result<Vec<u8>, SecretsError> {
+        let (_, _, value, _): SecretStruct = self
+            .proxy(item.as_str(), ITEM)?
+            .call("GetSecret", &(&self.session,))?;
+        Ok(value)
+    }
+
     fn delete(&self, item: &OwnedObjectPath) -> Result<(), SecretsError> {
         let prompt: OwnedObjectPath = self.proxy(item.as_str(), ITEM)?.call("Delete", &())?;
         if prompt.as_str() != "/" {
@@ -335,6 +349,97 @@ pub fn save(
 pub fn delete(config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
     let keyring = Keyring::open()?;
     for item in keyring.search(&account_attributes(config, identity))? {
+        keyring.delete(&item)?;
+    }
+    Ok(())
+}
+
+/// Attributes of an account's remembered passwords; with `desktop`, of
+/// one desktop's (`desktop` is the opaque resource key).
+fn password_attributes<'a>(
+    identity: &'a Identity,
+    desktop: Option<&'a str>,
+) -> HashMap<&'a str, &'a str> {
+    let mut a = HashMap::from([
+        ("application", APPLICATION),
+        ("type", PASSWORD_KIND),
+        ("tenant", identity.tenant_id.as_str()),
+        ("account", identity.object_id.as_str()),
+    ]);
+    if let Some(d) = desktop {
+        a.insert("desktop", d);
+    }
+    a
+}
+
+/// Remembers a desktop's Windows password, replacing an earlier one.
+/// The label names the desktop, so the user recognises it in a keyring
+/// manager.
+pub fn save_password(
+    identity: &Identity,
+    desktop: &str,
+    desktop_title: &str,
+    password: &Secret,
+) -> Result<(), SecretsError> {
+    if password.expose().len() > MAX_PASSWORD {
+        return Err(SecretsError::Malformed);
+    }
+    let keyring = Keyring::open()?;
+    let collection = keyring.default_collection()?;
+    let attributes = password_attributes(identity, Some(desktop));
+    let title: String = desktop_title
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(80)
+        .collect();
+    let properties: HashMap<&str, Value<'_>> = HashMap::from([
+        (
+            "org.freedesktop.Secret.Item.Label",
+            Value::from(format!("Deskfeed Windows password ({title})")),
+        ),
+        (
+            "org.freedesktop.Secret.Item.Attributes",
+            Value::from(attributes.clone()),
+        ),
+    ]);
+    let secret = (
+        keyring.session.as_ref(),
+        Vec::<u8>::new(),
+        password.expose().as_bytes().to_vec(),
+        "text/plain",
+    );
+    let (item, prompt): (OwnedObjectPath, OwnedObjectPath) = keyring
+        .proxy(collection.as_str(), COLLECTION)?
+        .call("CreateItem", &(properties, secret, true))?;
+    if item.as_str() == "/" && prompt.as_str() != "/" {
+        keyring.prompt(&prompt)?;
+    }
+    Ok(())
+}
+
+/// A desktop's remembered password, if there is one.
+pub fn load_password(identity: &Identity, desktop: &str) -> Result<Option<Secret>, SecretsError> {
+    let keyring = Keyring::open()?;
+    let Some(item) = keyring
+        .search(&password_attributes(identity, Some(desktop)))?
+        .into_iter()
+        .next()
+    else {
+        return Ok(None);
+    };
+    let value = keyring.read_secret(&item)?;
+    if value.len() > MAX_PASSWORD || value.contains(&0) {
+        return Err(SecretsError::Malformed);
+    }
+    let text = String::from_utf8(value).map_err(|_| SecretsError::Malformed)?;
+    Ok(Some(Secret::new(text)))
+}
+
+/// Forgets a desktop's password, or with `None` all of the account's
+/// (sign-out).
+pub fn delete_passwords(identity: &Identity, desktop: Option<&str>) -> Result<(), SecretsError> {
+    let keyring = Keyring::open()?;
+    for item in keyring.search(&password_attributes(identity, desktop))? {
         keyring.delete(&item)?;
     }
     Ok(())
@@ -447,6 +552,62 @@ mod tests {
         assert_eq!(
             decode(&HashMap::new(), br#"{"v":1,"refresh_token":"x"}"#).unwrap_err(),
             SecretsError::Malformed
+        );
+    }
+
+    #[test]
+    fn password_items_are_apart_from_sign_ins() {
+        let id = identity();
+        let config = ClientConfig::public_remote_desktop();
+        let sign_in = account_attributes(&config, &id);
+        let one = password_attributes(&id, Some("key1"));
+        let all = password_attributes(&id, None);
+        // A search for sign-ins never matches a password, and back.
+        assert_ne!(sign_in.get("type"), one.get("type"));
+        // Sign-out's search (no desktop) matches every desktop's item.
+        assert!(all.iter().all(|(k, v)| one.get(k) == Some(v)));
+        assert_eq!(one.get("desktop"), Some(&"key1"));
+        // Nothing secret or personal in the searchable attributes.
+        assert!(!one.values().any(|v| v.contains('@')));
+    }
+
+    /// Against the real keyring: `cargo test --release
+    /// real_keyring_password -- --ignored`. Leaves nothing behind.
+    #[test]
+    #[ignore = "uses the session's real keyring"]
+    fn real_keyring_password() {
+        let mut id = identity();
+        id.object_id = "00000000-0000-0000-0000-00000000test".into();
+        save_password(
+            &id,
+            "desk-test",
+            "Test desktop",
+            &Secret::new("p@ss w0rd".into()),
+        )
+        .unwrap();
+        let back = load_password(&id, "desk-test").unwrap().unwrap();
+        assert_eq!(back.expose(), "p@ss w0rd");
+        // Replaced, not added.
+        save_password(
+            &id,
+            "desk-test",
+            "Test desktop",
+            &Secret::new("second".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            load_password(&id, "desk-test").unwrap().unwrap().expose(),
+            "second"
+        );
+        assert!(load_password(&id, "other").unwrap().is_none());
+        delete_passwords(&id, None).unwrap();
+        assert!(load_password(&id, "desk-test").unwrap().is_none());
+        // The sign-in list never shows it.
+        assert!(
+            load_all(&ClientConfig::public_remote_desktop())
+                .unwrap()
+                .iter()
+                .all(|s| s.identity.object_id != id.object_id)
         );
     }
 }

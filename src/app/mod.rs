@@ -102,6 +102,10 @@ pub struct AppModel {
     pending_logon: HashMap<String, (LogonSetting, Arc<ConnectionFile>)>,
     dialog: Option<PasswordDialog>,
     certificate_dialog: Option<CertificateDialog>,
+    /// Passwords to remember once their connection worked (resource keys).
+    pending_password: HashMap<String, Secret>,
+    /// Connections that use a remembered password.
+    used_saved_password: HashSet<String>,
     /// Why the last attempt for a resource failed, shown at the top of the
     /// next password dialog.
     last_failure: HashMap<String, String>,
@@ -206,6 +210,8 @@ impl cosmic::Application for AppModel {
             pending_logon: HashMap::new(),
             dialog: None,
             certificate_dialog: None,
+            pending_password: HashMap::new(),
+            used_saved_password: HashSet::new(),
             last_failure: HashMap::new(),
             entra_failed: HashSet::new(),
             entra_failures: HashMap::new(),
@@ -403,6 +409,13 @@ impl cosmic::Application for AppModel {
                     .on_input(Message::CustomDomainInput),
             );
         }
+        if d.logon != LOGON_ENTRA {
+            controls = controls.push(
+                widget::checkbox(d.remember)
+                    .label(fl!("remember-password"))
+                    .on_toggle(Message::ToggleRememberPassword),
+            );
+        }
         controls = controls.push(widget::text::caption(fl!("password-explainer")));
 
         Some(
@@ -485,6 +498,10 @@ impl cosmic::Application for AppModel {
             | Message::ConnectDeadline(..)
             | Message::ReconnectDue(..)
             | Message::ShowSession(..)
+            | Message::ToggleRememberPassword(..)
+            | Message::SavedPasswordLoaded(..)
+            | Message::PasswordSaved(..)
+            | Message::ForgetPassword(..)
             | Message::TrustCertificate
             | Message::CloseCertificateDialog
             | Message::ForgetCertificate(..)

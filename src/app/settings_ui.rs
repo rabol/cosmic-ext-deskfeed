@@ -263,25 +263,37 @@ impl AppModel {
         let key_toggle = key.to_owned();
         let key_number = key.to_owned();
         let key_choice = key.to_owned();
-        let pin = self.config.certificate_pins.get(key).map(|fp| {
+        let mut security = widget::settings::section().title(fl!("settings-security"));
+        let mut any = false;
+        if let Some(fp) = self.config.certificate_pins.get(key) {
             // The start and end are enough to recognize it.
             let short = format!(
                 "{}…{}",
                 &fp[..11.min(fp.len())],
                 &fp[fp.len().saturating_sub(11)..]
             );
-            widget::settings::section()
-                .title(fl!("settings-security"))
-                .add(
-                    widget::settings::item::builder(fl!("setting-certificate"))
-                        .description(fl!("setting-certificate-desc", fingerprint = short))
-                        .control(
-                            widget::button::destructive(fl!("forget-certificate"))
-                                .on_press(Message::ForgetCertificate(key.to_owned())),
-                        ),
-                )
-                .into()
-        });
+            security = security.add(
+                widget::settings::item::builder(fl!("setting-certificate"))
+                    .description(fl!("setting-certificate-desc", fingerprint = short))
+                    .control(
+                        widget::button::destructive(fl!("remove"))
+                            .on_press(Message::ForgetCertificate(key.to_owned())),
+                    ),
+            );
+            any = true;
+        }
+        if self.config.saved_passwords.contains(key) {
+            security = security.add(
+                widget::settings::item::builder(fl!("setting-saved-password"))
+                    .description(fl!("setting-saved-password-desc"))
+                    .control(
+                        widget::button::destructive(fl!("remove"))
+                            .on_press(Message::ForgetPassword(key.to_owned())),
+                    ),
+            );
+            any = true;
+        }
+        let pin = any.then(|| security.into());
         rows.view_with(
             pin,
             fl!("desktop-settings-hint", account = account.label()),

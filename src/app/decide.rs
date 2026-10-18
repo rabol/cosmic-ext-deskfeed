@@ -94,14 +94,22 @@ pub(super) fn end_outcome(
 /// - Never after a normal end, a cancel, or anything about credentials:
 ///   repeating those could lock the account (ADR 0005).
 ///
-/// Only Entra sign-in reconnects by itself; the password isn't kept.
+/// Entra sign-in reconnects by itself, a password logon only with a
+/// remembered password (`password_saved`); otherwise there's no password
+/// to use.
 pub(super) fn reconnects(
     end: &SessionEnd,
     was_connected: bool,
     reconnecting: bool,
     tried: Option<&LogonSetting>,
+    password_saved: bool,
 ) -> bool {
-    if tried != Some(&LogonSetting::EntraSignIn) {
+    let can = match tried {
+        Some(LogonSetting::EntraSignIn) => true,
+        Some(other) => other.needs_password() && password_saved,
+        None => false,
+    };
+    if !can {
         return false;
     }
     match end {
@@ -305,12 +313,21 @@ mod tests {
     #[test]
     fn reconnects_only_lost_entra_sessions() {
         let lost = SessionEnd::ConnectionLost;
-        assert!(reconnects(&lost, true, false, Some(&ENTRA)));
+        assert!(reconnects(&lost, true, false, Some(&ENTRA), false));
         // Not connected yet and not reconnecting: a failed connect, shown.
-        assert!(!reconnects(&lost, false, false, Some(&ENTRA)));
-        // Password logons never retry by themselves.
-        assert!(!reconnects(&lost, true, false, Some(&PASSWORD)));
-        assert!(!reconnects(&lost, true, false, None));
+        assert!(!reconnects(&lost, false, false, Some(&ENTRA), false));
+        // Password logons only with a remembered password.
+        assert!(!reconnects(&lost, true, false, Some(&PASSWORD), false));
+        assert!(reconnects(&lost, true, false, Some(&PASSWORD), true));
+        // ... and never after Windows rejected it.
+        assert!(!reconnects(
+            &SessionEnd::LogonFailed,
+            false,
+            true,
+            Some(&PASSWORD),
+            true
+        ));
+        assert!(!reconnects(&lost, true, false, None, false));
         // While reconnecting, network-type failures are tried again ...
         for end in [
             SessionEnd::DnsFailed,
@@ -318,7 +335,10 @@ mod tests {
             SessionEnd::Crashed,
             SessionEnd::ConnectionLost,
         ] {
-            assert!(reconnects(&end, false, true, Some(&ENTRA)), "{end:?}");
+            assert!(
+                reconnects(&end, false, true, Some(&ENTRA), false),
+                "{end:?}"
+            );
         }
         // ... but never credentials, a normal end or a cancel.
         for end in [
@@ -328,7 +348,10 @@ mod tests {
             SessionEnd::AuthenticationFailed,
             SessionEnd::AccountLockedOut,
         ] {
-            assert!(!reconnects(&end, true, true, Some(&ENTRA)), "{end:?}");
+            assert!(
+                !reconnects(&end, true, true, Some(&ENTRA), false),
+                "{end:?}"
+            );
         }
     }
 
@@ -360,6 +383,6 @@ mod tests {
             fingerprint: a,
         });
         // Never retried by itself.
-        assert!(!reconnects(&cert, false, true, Some(&ENTRA)));
+        assert!(!reconnects(&cert, false, true, Some(&ENTRA), false));
     }
 }

@@ -20,6 +20,9 @@ pub struct Config {
     /// Session host certificates the user approved, per desktop (resource
     /// keys; sha256 fingerprints), ADR 0016.
     pub certificate_pins: BTreeMap<String, String>,
+    /// Desktops with a Windows password remembered in the keyring (resource
+    /// keys; the passwords themselves are only in the keyring).
+    pub saved_passwords: BTreeSet<String>,
     /// Favorite desktops (resource keys, as above).
     pub favorites: BTreeSet<String>,
     /// Log rotation size in MiB (App settings → Diagnostics); `None` is

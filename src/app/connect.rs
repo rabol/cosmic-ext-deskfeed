@@ -62,6 +62,26 @@ impl AppModel {
             Message::ConnectDeadline(key, attempt) => self.connect_deadline(key, attempt),
             Message::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
             Message::ShowSession(key) => return self.show_session(&key),
+            Message::ToggleRememberPassword(on) => {
+                if let Some(d) = &mut self.dialog {
+                    d.remember = on;
+                }
+            }
+            Message::SavedPasswordLoaded(account, epoch, key, logon, connection, result) => {
+                return self.saved_password_loaded(&account, epoch, key, logon, connection, result);
+            }
+            Message::PasswordSaved(key, result) => match result {
+                Ok(()) => {
+                    crate::app_log!("Windows password remembered for a desktop");
+                    self.set_saved_password(&key, true);
+                }
+                Err(e) => {
+                    crate::app_log!("Windows password not remembered ({e})");
+                    self.session_notes
+                        .insert(key, fl!("password-not-saved", detail = e));
+                }
+            },
+            Message::ForgetPassword(key) => return self.forget_password(&key),
             Message::TrustCertificate => {
                 let Some(d) = self.certificate_dialog.take() else {
                     return Task::none();
@@ -237,6 +257,12 @@ impl AppModel {
             decide::FirstStep::Entra => {
                 return self.launch(account, &key, &connection, LogonSetting::EntraSignIn, None);
             }
+            // A remembered password: no dialog (also when reconnecting).
+            decide::FirstStep::AskPassword(setting)
+                if setting.needs_password() && self.config.saved_passwords.contains(&key) =>
+            {
+                return self.load_saved_password(account, key, connection, setting);
+            }
             // Reconnecting never opens the password dialog by itself.
             decide::FirstStep::AskPassword(_) if self.reconnects.remove(&key).is_some() => {
                 self.connections
@@ -245,12 +271,24 @@ impl AppModel {
             }
             decide::FirstStep::AskPassword(setting) => setting,
         };
+        self.open_password_dialog(account, key, connection, &remembered);
+        Task::none()
+    }
+
+    /// The password dialog, preset to `remembered`.
+    fn open_password_dialog(
+        &mut self,
+        account: &str,
+        key: String,
+        connection: Arc<ConnectionFile>,
+        remembered: &LogonSetting,
+    ) {
         let title = self
             .account(account)
             .and_then(|a| a.resource(&key))
             .map(|r| r.title.clone())
             .unwrap_or_default();
-        let (logon, custom_domain) = logon_index(&remembered);
+        let (logon, custom_domain) = logon_index(remembered);
         let error = self.last_failure.remove(&key);
         self.connections
             .insert(key.clone(), Connection::AwaitingUser);
@@ -264,8 +302,107 @@ impl AppModel {
             logon,
             custom_domain,
             error,
+            remember: false,
         });
+    }
+
+    /// Reads a desktop's remembered password in the background.
+    fn load_saved_password(
+        &mut self,
+        account: &str,
+        key: String,
+        connection: Arc<ConnectionFile>,
+        logon: LogonSetting,
+    ) -> Task<cosmic::Action<Message>> {
+        let Some((identity, epoch)) = self.account(account).map(|a| (a.identity.clone(), a.epoch))
+        else {
+            return Task::none();
+        };
+        let account = account.to_owned();
+        cosmic::task::future(async move {
+            let owner = key.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                crate::secrets::load_password(&identity, &owner).map_err(|e| e.to_string())
+            })
+            .await
+            .unwrap_or_else(|_| Err("task".into()));
+            Message::SavedPasswordLoaded(account, epoch, key, logon, connection, result)
+        })
+    }
+
+    /// A remembered password arrived: connect with it, or ask.
+    fn saved_password_loaded(
+        &mut self,
+        account: &str,
+        epoch: u64,
+        key: String,
+        logon: LogonSetting,
+        connection: Arc<ConnectionFile>,
+        result: Result<Option<Secret>, String>,
+    ) -> Task<cosmic::Action<Message>> {
+        if self.account(account).is_none_or(|a| a.epoch != epoch)
+            || !matches!(self.connections.get(&key), Some(Connection::Preparing))
+        {
+            return Task::none();
+        }
+        match result {
+            Ok(Some(password)) => {
+                self.used_saved_password.insert(key.clone());
+                return self.launch(account, &key, &connection, logon, Some(password));
+            }
+            Ok(None) => {
+                crate::app_log!("remembered password not in the keyring any more");
+                self.set_saved_password(&key, false);
+            }
+            Err(e) => crate::app_log!("remembered password not read ({e})"),
+        }
+        if self.reconnects.remove(&key).is_some() {
+            self.connections
+                .insert(key, Connection::Failed(fl!("error-connection-lost")));
+            return Task::none();
+        }
+        self.open_password_dialog(account, key, connection, &logon);
         Task::none()
+    }
+
+    /// Records whether a desktop has a remembered password.
+    pub(super) fn set_saved_password(&mut self, key: &str, saved: bool) {
+        let mut keys = self.config.saved_passwords.clone();
+        let changed = if saved {
+            keys.insert(key.to_owned())
+        } else {
+            keys.remove(key)
+        };
+        if !changed {
+            return;
+        }
+        match &self.config_handler {
+            Some(handler) => {
+                let _ = self.config.set_saved_passwords(handler, keys);
+            }
+            None => self.config.saved_passwords = keys,
+        }
+    }
+
+    /// Deletes a desktop's remembered password from the keyring, in the
+    /// background.
+    fn forget_password(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
+        self.set_saved_password(key, false);
+        let Some(identity) = self.account_of_resource(key).map(|a| a.identity.clone()) else {
+            return Task::none();
+        };
+        let key = key.to_owned();
+        Task::future(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                crate::secrets::delete_passwords(&identity, Some(&key))
+            })
+            .await;
+            crate::app_log!(
+                "remembered password deleted: {:?}",
+                result.map(|r| r.is_ok())
+            );
+        })
+        .discard()
     }
 
     pub(super) fn dialog_connect(&mut self) -> Task<cosmic::Action<Message>> {
@@ -299,6 +436,15 @@ impl AppModel {
             None
         };
         let d = self.dialog.take().expect("checked above");
+        // Kept only until the connection works (`session_event`).
+        match (&password, d.remember) {
+            (Some(p), true) => {
+                self.pending_password.insert(d.key.clone(), p.clone());
+            }
+            _ => {
+                self.pending_password.remove(&d.key);
+            }
+        }
         self.launch(&d.account, &d.key, &d.connection, logon, password)
     }
 
@@ -639,6 +785,8 @@ impl AppModel {
         key: &str,
         event: SessionEvent,
     ) -> Task<cosmic::Action<Message>> {
+        // Remembering a password once its connection worked.
+        let mut save_task = Task::none();
         match event {
             SessionEvent::Stage(stage) => {
                 // Only while starting; Disconnect wins.
@@ -658,6 +806,27 @@ impl AppModel {
                 if let Some(r) = self.reconnects.remove(key) {
                     crate::app_log!("reconnected (attempt {})", r.attempt);
                 }
+                self.used_saved_password.remove(key);
+                if let Some(password) = self.pending_password.remove(key)
+                    && let Some(account) = self.account_of_resource(key)
+                {
+                    let identity = account.identity.clone();
+                    let title = account
+                        .resource(key)
+                        .map(|r| r.title.clone())
+                        .unwrap_or_default();
+                    let key = key.to_owned();
+                    save_task = cosmic::task::future(async move {
+                        let owner = key.clone();
+                        let result = tokio::task::spawn_blocking(move || {
+                            crate::secrets::save_password(&identity, &owner, &title, &password)
+                                .map_err(|e| crate::accounts::keyring_detail(&e))
+                        })
+                        .await
+                        .unwrap_or_else(|_| Err("task".into()));
+                        Message::PasswordSaved(key, result)
+                    });
+                }
                 self.connections
                     .insert(key.to_owned(), Connection::Connected);
                 self.entra_failed.remove(key);
@@ -670,6 +839,10 @@ impl AppModel {
             SessionEvent::Ended { end, log } => {
                 self.running.remove(key);
                 self.session_notes.remove(key);
+                // Never remembered: this attempt didn't connect, or it did
+                // and was remembered already.
+                self.pending_password.remove(key);
+                let used_saved = self.used_saved_password.remove(key);
                 self.launching.remove(key);
                 if let Some(stop) = self.movers.remove(key) {
                     stop.store(true, Ordering::SeqCst);
@@ -701,7 +874,13 @@ impl AppModel {
                     && self.quit == Quit::No
                     && ((timed_out && reconnecting)
                         || (!timed_out
-                            && decide::reconnects(&end, was_connected, reconnecting, tried)))
+                            && decide::reconnects(
+                                &end,
+                                was_connected,
+                                reconnecting,
+                                tried,
+                                self.config.saved_passwords.contains(key),
+                            )))
                 {
                     self.timed_out.remove(key);
                     return self.schedule_reconnect(key);
@@ -777,7 +956,14 @@ impl AppModel {
                         let tried = pending
                             .map(|(logon, _)| self.logon_labels[logon_index(&logon).0].clone())
                             .unwrap_or_default();
-                        let message = fl!("error-logon-failed", setting = tried);
+                        let message = if used_saved {
+                            // Never tried again (ADR 0005): it goes, and
+                            // the dialog asks next time.
+                            save_task = self.forget_password(key);
+                            fl!("password-rejected-removed")
+                        } else {
+                            fl!("error-logon-failed", setting = tried)
+                        };
                         self.connections.insert(
                             key.to_owned(),
                             Connection::Failed(fl!("status-logon-failed")),
@@ -793,7 +979,7 @@ impl AppModel {
                 }
             }
         }
-        Task::none()
+        save_task
     }
 
     fn save_certificate_pins(&mut self, pins: BTreeMap<String, String>) {
