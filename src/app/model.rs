@@ -152,9 +152,17 @@ pub(super) enum Quit {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Connection {
+    /// Getting the connection file.
     Preparing,
+    /// The password dialog is open.
+    AwaitingUser,
+    /// FreeRDP is connecting.
     Connecting,
+    /// FreeRDP is signing in to Windows (Entra or password).
+    Authenticating,
     Connected,
+    /// Disconnect was pressed; FreeRDP is ending.
+    Disconnecting,
     /// Waiting before reconnect attempt `attempt` of `of`.
     Reconnecting {
         attempt: u32,

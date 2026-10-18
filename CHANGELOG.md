@@ -7,6 +7,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 ### Added
 
 - App settings (View → Settings): defaults for every account. New settings: time allowed for signing in and how often desktop lists refresh (app and account), and the log file size (app). Account settings now follow the app's setting or override it, as desktop settings do for the account.
+- Desktop rows say what a connection is doing: preparing, waiting for your password, connecting, signing in to Windows, connected, reconnecting, disconnecting. "Connected" now means the Windows session is active.
 - Display scaling follows the monitor: Windows draws text and apps at COSMIC's scale (for example 125 %), so the desktop matches the apps around it. A "Display scaling" setting (App, account, desktop) can set it instead.
 - Show: a connected desktop's row brings its window to the front, switching to its workspace.
 - Reconnecting after a lost connection (network drop, sleep): the app connects again by itself, with growing waits and a Stop button, up to 5 attempts (App, account and desktop settings). Desktops that use a Windows password say the connection was lost instead.

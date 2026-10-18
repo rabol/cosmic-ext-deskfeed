@@ -240,11 +240,25 @@ impl AppModel {
                 Some(fl!("status-preparing")),
                 widget::button::standard(fl!("connect")).into(),
             ),
+            Some(Connection::AwaitingUser) => (
+                Some(fl!("status-awaiting-user")),
+                widget::button::standard(fl!("connect")).into(),
+            ),
             Some(Connection::Connecting) => (
                 Some(fl!("status-connecting")),
                 widget::button::standard(fl!("disconnect"))
                     .on_press(Message::Disconnect(r.key.clone()))
                     .into(),
+            ),
+            Some(Connection::Authenticating) => (
+                Some(fl!("status-authenticating")),
+                widget::button::standard(fl!("disconnect"))
+                    .on_press(Message::Disconnect(r.key.clone()))
+                    .into(),
+            ),
+            Some(Connection::Disconnecting) => (
+                Some(fl!("status-disconnecting")),
+                widget::button::standard(fl!("disconnect")).into(),
             ),
             Some(Connection::Connected) => (
                 Some(fl!("status-connected")),
@@ -274,10 +288,12 @@ impl AppModel {
             ),
         };
         // The note only belongs to a session that is starting or running.
-        let note = self
-            .session_notes
-            .get(&r.key)
-            .filter(|_| matches!(conn, Some(Connection::Connecting | Connection::Connected)));
+        let note = self.session_notes.get(&r.key).filter(|_| {
+            matches!(
+                conn,
+                Some(Connection::Connecting | Connection::Authenticating | Connection::Connected)
+            )
+        });
         let description = match (status, note) {
             (Some(s), Some(n)) => format!("{kind} · {s} · {n}"),
             (Some(s), None) => format!("{kind} · {s}"),

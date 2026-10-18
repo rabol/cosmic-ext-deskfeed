@@ -36,7 +36,12 @@ use crate::service::http::BearerToken;
 /// dependency check requires version 3.32.2 either way.
 const FREERDP_BINARIES: &[&str] = &["xfreerdp3", "xfreerdp"];
 /// Log line FreeRDP writes once the session is set up.
-const CONNECTED_MARKER: &str = "Loading Dynamic Virtual Channel";
+/// The session is active: FreeRDP's last connection step
+/// (`libfreerdp/core/connection.c`), logged by `STATE_LOGGER`.
+const ACTIVE_MARKER: &str = "--> CONNECTION_STATE_ACTIVE";
+/// Entering and leaving the sign-in steps: Entra (`AAD`) or the Windows
+/// password (`NLA`), seen in real AVD logs (docs/milestone-1.md).
+const AUTH_STATES: &[&str] = &["CONNECTION_STATE_AAD", "CONNECTION_STATE_NLA"];
 /// FreeRDP lost a connected session (`client/common/client.c`,
 /// `client_auto_reconnect_ex`): logged before it checks whether it may
 /// reconnect, so also with its reconnect off.
@@ -222,10 +227,25 @@ pub enum SessionEnd {
     Crashed,
 }
 
+/// Where a starting session is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    /// Setting up the connection (gateway, session host).
+    Connecting,
+    /// Signing in to Windows: Entra or the password.
+    Authenticating,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
+    /// A starting session moved on (from FreeRDP's connection steps).
+    Stage(Stage),
+    /// The session is active.
     Connected,
-    Ended { end: SessionEnd, log: Vec<String> },
+    Ended {
+        end: SessionEnd,
+        log: Vec<String>,
+    },
 }
 
 /// Finds a FreeRDP client in `PATH`.
@@ -675,8 +695,8 @@ fn supervise(
                     if line.starts_with("cosmic-ext-deskfeed-signin: ") || is_state_change(&line) {
                         crate::app_log!("{line}");
                     }
-                    if log.lock().expect("not poisoned").push(&line) {
-                        report(SessionEvent::Connected);
+                    if let Some(event) = log.lock().expect("not poisoned").push(&line) {
+                        report(event);
                     }
                 }
             })
@@ -728,9 +748,10 @@ struct Log {
 }
 
 impl Log {
-    /// Keeps warnings, errors and connection steps (bounded). Returns `true` the first time
-    /// the connected marker appears.
-    fn push(&mut self, line: &str) -> bool {
+    /// Keeps warnings, errors and connection steps (bounded). Returns the
+    /// event a connection step means: a stage while starting, `Connected`
+    /// the first time the session is active.
+    fn push(&mut self, line: &str) -> Option<SessionEvent> {
         if line.contains("LOGON_FAILURE") {
             self.logon_failure = true;
         }
@@ -746,11 +767,21 @@ impl Log {
             self.lines
                 .push(crate::log::redact(line).chars().take(300).collect());
         }
-        if !self.connected && line.contains(CONNECTED_MARKER) {
-            self.connected = true;
-            return true;
+        if self.connected || !is_state_change(line) {
+            return None;
         }
-        false
+        if line.contains(ACTIVE_MARKER) {
+            self.connected = true;
+            return Some(SessionEvent::Connected);
+        }
+        let (from, to) = line.split_once(" --> ")?;
+        if AUTH_STATES.iter().any(|s| to.trim_end().ends_with(s)) {
+            return Some(SessionEvent::Stage(Stage::Authenticating));
+        }
+        if AUTH_STATES.iter().any(|s| from.ends_with(s)) {
+            return Some(SessionEvent::Stage(Stage::Connecting));
+        }
+        None
     }
 }
 
@@ -1002,13 +1033,40 @@ mod tests {
     #[test]
     fn log_keeps_errors_and_detects_connection() {
         let mut log = Log::default();
-        assert!(!log.push("[INFO][com.freerdp.core] - something"));
-        assert!(log.push(
-            "[INFO][com.freerdp.channels.drdynvc.client] - Loading Dynamic Virtual Channel rdpgfx"
-        ));
-        assert!(!log.push(
-            "[INFO][com.freerdp.channels.drdynvc.client] - Loading Dynamic Virtual Channel rdpsnd"
-        ));
+        let step = |from: &str, to: &str| {
+            format!(
+                "[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_{from} --> CONNECTION_STATE_{to}"
+            )
+        };
+        assert_eq!(log.push("[INFO][com.freerdp.core] - something"), None);
+        // Channels load before the session is active: not connected yet.
+        assert_eq!(
+            log.push("[INFO][com.freerdp.channels.drdynvc.client] - Loading Dynamic Virtual Channel rdpgfx"),
+            None
+        );
+        assert_eq!(
+            log.push(&step("NEGO", "AAD")),
+            Some(SessionEvent::Stage(Stage::Authenticating))
+        );
+        assert_eq!(
+            log.push(&step("AAD", "MCS_CREATE_REQUEST")),
+            Some(SessionEvent::Stage(Stage::Connecting))
+        );
+        assert_eq!(
+            log.push(&step("LICENSING", "MULTITRANSPORT_BOOTSTRAPPING_REQUEST")),
+            None
+        );
+        assert_eq!(
+            log.push(&step("FINALIZATION_CLIENT_FONT_MAP", "ACTIVE")),
+            Some(SessionEvent::Connected)
+        );
+        // Only once, and nothing more after it.
+        assert_eq!(log.push(&step("NEGO", "NLA")), None);
+        assert_eq!(
+            log.push(&step("FINALIZATION_CLIENT_FONT_MAP", "ACTIVE")),
+            None
+        );
+        log.lines.clear();
         assert!(!log.lost);
         // As xfreerdp3 3.32.2 printed it when the local test server went away.
         log.push("[14:13:52:196] [664309:000a22f0] [INFO][com.freerdp.client.common] - [client_auto_reconnect_ex]: Network disconnect!");
@@ -1016,7 +1074,7 @@ mod tests {
         log.push("[ERROR][com.freerdp.core.rdstls] - RDSTLS_RESULT_LOGON_FAILURE [0x0000052E]");
         assert!(log.logon_failure);
         assert_eq!(log.lines.len(), 1);
-        log.push("[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_NEGO --> CONNECTION_STATE_AAD");
+        log.push(&step("NEGO", "AAD"));
         log.push("[DEBUG][com.freerdp.core.rdp] - [rdp_recv_pdu]: recv Data PDU, length: 12");
         assert_eq!(log.lines.len(), 2);
         for i in 0..100 {
@@ -1048,7 +1106,7 @@ mod tests {
                  env | grep -q AVD_TEST_SECRET && echo LEAKED_ENV >> \"$out\"\n\
                  env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
                  env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
-                 echo '[INFO][x] - Loading Dynamic Virtual Channel rdpgfx'\n\
+                 echo '[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_FINALIZATION_CLIENT_FONT_MAP --> CONNECTION_STATE_ACTIVE'\n\
                  exit 0\n",
                 out = out.display()
             ),
@@ -1109,7 +1167,7 @@ mod tests {
         fs::write(
             &fake,
             "#!/bin/sh\ncat <&3 >/dev/null\n\
-             { echo '[INFO][com.freerdp.channels.drdynvc.client] - [dvcman_load_addin]: Loading Dynamic Virtual Channel rdpgfx'; sleep 5; } | sed -n p\n",
+             { echo '[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_FINALIZATION_CLIENT_FONT_MAP --> CONNECTION_STATE_ACTIVE'; sleep 5; } | sed -n p\n",
         )
         .unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
@@ -1152,7 +1210,7 @@ mod tests {
                         assert_eq!(log.len(), 1);
                     }
                 }
-                other @ SessionEvent::Connected => panic!("unexpected {other:?}"),
+                other => panic!("unexpected {other:?}"),
             }
         }
         fs::remove_dir_all(dir).unwrap();

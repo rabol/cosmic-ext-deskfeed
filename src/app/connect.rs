@@ -49,6 +49,7 @@ impl AppModel {
                     d.custom_domain = s;
                 }
             }
+            // Cancelled: back to Connect.
             Message::DialogCancel => {
                 if let Some(d) = self.dialog.take() {
                     self.connections.remove(&d.key);
@@ -92,6 +93,8 @@ impl AppModel {
                 }
                 if let Some(r) = self.running.get(&key) {
                     r.session.disconnect();
+                    self.connections
+                        .insert(key.clone(), Connection::Disconnecting);
                 } else if let Some(l) = self.launching.get_mut(&key) {
                     l.stop = true;
                 }
@@ -129,7 +132,13 @@ impl AppModel {
             || self.launching.contains_key(key)
             || matches!(
                 self.connections.get(key),
-                Some(Connection::Preparing | Connection::Connecting)
+                Some(
+                    Connection::Preparing
+                        | Connection::AwaitingUser
+                        | Connection::Connecting
+                        | Connection::Authenticating
+                        | Connection::Disconnecting
+                )
             )
         {
             return Task::none(); // no accidental duplicate launches
@@ -220,6 +229,8 @@ impl AppModel {
             .unwrap_or_default();
         let (logon, custom_domain) = logon_index(&remembered);
         let error = self.last_failure.remove(&key);
+        self.connections
+            .insert(key.clone(), Connection::AwaitingUser);
         self.dialog = Some(PasswordDialog {
             account: account.to_owned(),
             key,
@@ -605,7 +616,21 @@ impl AppModel {
         event: SessionEvent,
     ) -> Task<cosmic::Action<Message>> {
         match event {
+            SessionEvent::Stage(stage) => {
+                // Only while starting; Disconnect wins.
+                if let Some(c @ (Connection::Connecting | Connection::Authenticating)) =
+                    self.connections.get_mut(key)
+                {
+                    *c = match stage {
+                        launcher::Stage::Connecting => Connection::Connecting,
+                        launcher::Stage::Authenticating => Connection::Authenticating,
+                    };
+                }
+            }
             SessionEvent::Connected => {
+                if matches!(self.connections.get(key), Some(Connection::Disconnecting)) {
+                    return Task::none();
+                }
                 if let Some(r) = self.reconnects.remove(key) {
                     crate::app_log!("reconnected (attempt {})", r.attempt);
                 }
@@ -631,6 +656,14 @@ impl AppModel {
                     for line in &log {
                         crate::app_log!("  {line}");
                     }
+                }
+                // Ended because the user disconnected: however FreeRDP
+                // ended, that is a normal end, never a reason to reconnect.
+                if matches!(self.connections.get(key), Some(Connection::Disconnecting)) {
+                    self.connections.remove(key);
+                    self.reconnects.remove(key);
+                    self.timed_out.remove(key);
+                    return Task::none();
                 }
                 let was_connected =
                     matches!(self.connections.get(key), Some(Connection::Connected));
