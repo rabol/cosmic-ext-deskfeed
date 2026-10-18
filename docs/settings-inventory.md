@@ -17,7 +17,8 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Sound | on | A, Ac, C | `settings.rs` | Done |
 | Microphone | off | A, Ac, C | `settings.rs` | Done |
 | Camera | off | A, Ac, C | `settings.rs` | Done |
-| Clipboard | off | A, Ac, C | `settings.rs` | Done |
+| Clipboard: off, both directions, only to the desktop, only to this computer | off | A, Ac, C | `settings.rs` `Choice::Clipboard` | Done |
+| Copy files through the clipboard (in the clipboard's direction) | off | A, Ac, C | `settings.rs` `Toggle::ClipboardFiles` | Done |
 | Reconnect after a lost connection | on | A, Ac, C | `settings.rs` `Toggle::Reconnect` | Done |
 | Reconnect attempts | 5 (1–10) | A, Ac, C | `settings.rs` `Number::ReconnectAttempts` | Done |
 | Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | With roadmap item 5: the alternative, scaling the picture (`/smart-sizing`), gives Windows a fixed 1 024×768 desktop unless a size is set too (`client/X11/xf_client.c`), so it needs a desktop-size setting beside it |

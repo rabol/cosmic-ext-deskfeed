@@ -30,8 +30,15 @@ pub struct ConnectionSettings {
     pub microphone: Option<bool>,
     #[serde(default)]
     pub camera: Option<bool>,
+    /// Before clipboard directions: on means both directions. Read only
+    /// (`Effective::with`); new values go to `clipboard_mode`.
     #[serde(default)]
     pub clipboard: Option<bool>,
+    /// `ClipboardMode` as a number (`Choice::Clipboard`).
+    #[serde(default)]
+    pub clipboard_mode: Option<u32>,
+    #[serde(default)]
+    pub clipboard_files: Option<bool>,
     /// App and account levels only.
     #[serde(default)]
     pub refresh_mins: Option<u32>,
@@ -55,6 +62,18 @@ pub struct ConnectionSettings {
 pub enum Choice {
     /// Windows' display scaling (ADR 0015).
     Scale,
+    /// Which way copy and paste works (`clipboard_mode` values).
+    Clipboard,
+}
+
+/// `Choice::Clipboard` values.
+pub mod clipboard {
+    pub const OFF: u32 = 0;
+    pub const BOTH: u32 = 1;
+    /// From this computer to the desktop only.
+    pub const TO_DESKTOP: u32 = 2;
+    /// From the desktop to this computer only.
+    pub const TO_COMPUTER: u32 = 3;
 }
 
 impl Choice {
@@ -63,6 +82,12 @@ impl Choice {
     pub fn options(self) -> &'static [u32] {
         match self {
             Self::Scale => &[0, 100, 125, 150, 175, 200, 250, 300],
+            Self::Clipboard => &[
+                clipboard::OFF,
+                clipboard::BOTH,
+                clipboard::TO_DESKTOP,
+                clipboard::TO_COMPUTER,
+            ],
         }
     }
 
@@ -81,7 +106,8 @@ pub enum Toggle {
     Sound,
     Microphone,
     Camera,
-    Clipboard,
+    /// Files through the clipboard, in the clipboard's direction.
+    ClipboardFiles,
     Reconnect,
 }
 
@@ -94,7 +120,7 @@ impl Toggle {
         Self::Sound,
         Self::Microphone,
         Self::Camera,
-        Self::Clipboard,
+        Self::ClipboardFiles,
         Self::Reconnect,
     ];
 }
@@ -155,7 +181,7 @@ impl ConnectionSettings {
             Toggle::Sound => self.sound,
             Toggle::Microphone => self.microphone,
             Toggle::Camera => self.camera,
-            Toggle::Clipboard => self.clipboard,
+            Toggle::ClipboardFiles => self.clipboard_files,
             Toggle::Reconnect => self.reconnect,
         }
     }
@@ -168,7 +194,7 @@ impl ConnectionSettings {
             Toggle::Sound => &mut self.sound,
             Toggle::Microphone => &mut self.microphone,
             Toggle::Camera => &mut self.camera,
-            Toggle::Clipboard => &mut self.clipboard,
+            Toggle::ClipboardFiles => &mut self.clipboard_files,
             Toggle::Reconnect => &mut self.reconnect,
         };
         *slot = value;
@@ -199,6 +225,10 @@ impl ConnectionSettings {
     pub fn choice(&self, c: Choice) -> Option<u32> {
         match c {
             Choice::Scale => self.scale,
+            // An older on/off value counts until a direction is chosen.
+            Choice::Clipboard => self.clipboard_mode.or(self
+                .clipboard
+                .map(|on| if on { clipboard::BOTH } else { clipboard::OFF })),
         }
     }
 
@@ -206,6 +236,11 @@ impl ConnectionSettings {
     pub fn set_choice(&mut self, c: Choice, value: Option<u32>) {
         let slot = match c {
             Choice::Scale => &mut self.scale,
+            Choice::Clipboard => {
+                // The older value is replaced, not left to come back.
+                self.clipboard = None;
+                &mut self.clipboard_mode
+            }
         };
         *slot = value.and_then(|v| c.valid(v));
     }
@@ -227,7 +262,9 @@ pub struct Effective {
     pub sound: bool,
     pub microphone: bool,
     pub camera: bool,
-    pub clipboard: bool,
+    /// `clipboard::*`.
+    pub clipboard: u32,
+    pub clipboard_files: bool,
     pub refresh_mins: u32,
     pub sign_in_mins: u32,
     pub offline_days: u32,
@@ -250,7 +287,8 @@ pub const DEFAULTS: Effective = Effective {
     sound: true,
     microphone: false,
     camera: false,
-    clipboard: false,
+    clipboard: clipboard::OFF,
+    clipboard_files: false,
     refresh_mins: 60,
     sign_in_mins: 5,
     offline_days: 30,
@@ -272,7 +310,11 @@ impl Effective {
             sound: s.sound.unwrap_or(self.sound),
             microphone: s.microphone.unwrap_or(self.microphone),
             camera: s.camera.unwrap_or(self.camera),
-            clipboard: s.clipboard.unwrap_or(self.clipboard),
+            clipboard: s
+                .choice(Choice::Clipboard)
+                .and_then(|v| Choice::Clipboard.valid(v))
+                .unwrap_or(self.clipboard),
+            clipboard_files: s.clipboard_files.unwrap_or(self.clipboard_files),
             refresh_mins: number(Number::Refresh, self.refresh_mins),
             sign_in_mins: number(Number::SignIn, self.sign_in_mins),
             offline_days: number(Number::OfflineDays, self.offline_days),
@@ -288,6 +330,7 @@ impl Effective {
     pub fn choice(&self, c: Choice) -> u32 {
         match c {
             Choice::Scale => self.scale,
+            Choice::Clipboard => self.clipboard,
         }
     }
 
@@ -309,7 +352,7 @@ impl Effective {
             Toggle::Sound => self.sound,
             Toggle::Microphone => self.microphone,
             Toggle::Camera => self.camera,
-            Toggle::Clipboard => self.clipboard,
+            Toggle::ClipboardFiles => self.clipboard_files,
             Toggle::Reconnect => self.reconnect,
         }
     }
@@ -352,15 +395,27 @@ impl Effective {
         if self.camera {
             args.push("/dvc:rdpecam".to_owned());
         }
-        args.push(
-            if self.clipboard {
-                "/clipboard"
-            } else {
-                "-clipboard"
-            }
-            .to_owned(),
-        );
+        args.push(self.clipboard_arg());
         args
+    }
+
+    /// The clipboard in FreeRDP's terms (`client/common/cmdline.c`): text
+    /// and pictures `direction-to`, files `files-to`, each `all`, `remote`
+    /// (to the desktop), `local` (to this computer) or `off`. Always both,
+    /// because FreeRDP's default lets files through both ways.
+    fn clipboard_arg(&self) -> String {
+        let direction = match self.clipboard {
+            clipboard::BOTH => "all",
+            clipboard::TO_DESKTOP => "remote",
+            clipboard::TO_COMPUTER => "local",
+            _ => return "-clipboard".to_owned(),
+        };
+        let files = if self.clipboard_files {
+            direction
+        } else {
+            "off"
+        };
+        format!("/clipboard:direction-to:{direction},files-to:{files}")
     }
 }
 
@@ -392,7 +447,7 @@ mod tests {
         };
         let app = ConnectionSettings {
             fullscreen: Some(false),
-            clipboard: Some(true),
+            clipboard_mode: Some(clipboard::BOTH),
             timeout_secs: Some(30),
             ..Default::default()
         };
@@ -400,7 +455,7 @@ mod tests {
         assert!(e.fullscreen); // the account overrides the app
         assert_eq!(e.timeout_secs, 300); // desktop wins
         assert!(!e.sound); // desktop
-        assert!(e.clipboard); // from the app
+        assert_eq!(e.clipboard, clipboard::BOTH); // from the app
         assert!(!e.microphone); // default
         assert_eq!(effective(Some(&app), None, None).timeout_secs, 30);
         assert_eq!(effective(None, None, None), DEFAULTS);
@@ -470,13 +525,13 @@ mod tests {
         e.sound = false;
         e.microphone = true;
         e.camera = true;
-        e.clipboard = true;
+        e.clipboard = clipboard::BOTH;
         let a = e.freerdp_args();
         assert!(a.contains(&"/audio-mode:none".into()));
         assert!(!a.contains(&"/sound".into()));
         assert!(a.contains(&"/microphone".into()));
         assert!(a.contains(&"/dvc:rdpecam".into()));
-        assert!(a.contains(&"/clipboard".into()));
+        assert!(a.contains(&"/clipboard:direction-to:all,files-to:off".into()));
     }
 
     #[test]
@@ -515,5 +570,40 @@ mod tests {
         let mut e = DEFAULTS;
         e.scale = 125;
         assert!(e.freerdp_args().contains(&"/scale-desktop:125".into()));
+    }
+
+    #[test]
+    fn clipboard_directions_and_files() {
+        let arg = |mode, files| {
+            let mut e = DEFAULTS;
+            e.clipboard = mode;
+            e.clipboard_files = files;
+            e.clipboard_arg()
+        };
+        assert_eq!(arg(clipboard::OFF, true), "-clipboard");
+        assert_eq!(
+            arg(clipboard::TO_DESKTOP, false),
+            "/clipboard:direction-to:remote,files-to:off"
+        );
+        assert_eq!(
+            arg(clipboard::TO_COMPUTER, true),
+            "/clipboard:direction-to:local,files-to:local"
+        );
+        // An older on/off value still counts, until a direction is chosen.
+        let old = ConnectionSettings {
+            clipboard: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(effective(Some(&old), None, None).clipboard, clipboard::BOTH);
+        let mut s = old.clone();
+        s.set_choice(Choice::Clipboard, Some(clipboard::TO_DESKTOP));
+        assert_eq!(s.clipboard, None);
+        assert_eq!(
+            effective(Some(&s), None, None).clipboard,
+            clipboard::TO_DESKTOP
+        );
+        // Following the level above clears both.
+        s.set_choice(Choice::Clipboard, None);
+        assert!(s.is_empty());
     }
 }

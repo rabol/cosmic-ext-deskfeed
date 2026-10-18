@@ -447,7 +447,8 @@ fn settings_column<'a>(
         .add(toggle(Toggle::Sound))
         .add(toggle(Toggle::Microphone))
         .add(toggle(Toggle::Camera))
-        .add(toggle(Toggle::Clipboard));
+        .add(choice(Choice::Clipboard))
+        .add(toggle(Toggle::ClipboardFiles));
     column.extend([connection.into(), display.into(), devices.into()]);
     column.extend(last);
     widget::settings::view_column(column).into()
@@ -475,6 +476,7 @@ fn number_spin<'a>(
 fn choice_text(c: Choice) -> (String, String) {
     match c {
         Choice::Scale => (fl!("setting-scale"), fl!("setting-scale-desc")),
+        Choice::Clipboard => (fl!("setting-clipboard"), fl!("setting-clipboard-desc")),
     }
 }
 
@@ -483,6 +485,10 @@ fn choice_label(c: Choice, value: u32) -> String {
     match (c, value) {
         (Choice::Scale, 0) => fl!("scale-automatic"),
         (Choice::Scale, v) => fl!("percent", value = v),
+        (Choice::Clipboard, settings::clipboard::BOTH) => fl!("clipboard-both"),
+        (Choice::Clipboard, settings::clipboard::TO_DESKTOP) => fl!("clipboard-to-desktop"),
+        (Choice::Clipboard, settings::clipboard::TO_COMPUTER) => fl!("clipboard-to-computer"),
+        (Choice::Clipboard, _) => fl!("off"),
     }
 }
 
@@ -525,7 +531,10 @@ pub(super) fn toggle_text(t: Toggle) -> (String, String) {
         Toggle::Sound => (fl!("setting-sound"), fl!("setting-sound-desc")),
         Toggle::Microphone => (fl!("setting-microphone"), fl!("setting-microphone-desc")),
         Toggle::Camera => (fl!("setting-camera"), fl!("setting-camera-desc")),
-        Toggle::Clipboard => (fl!("setting-clipboard"), fl!("setting-clipboard-desc")),
+        Toggle::ClipboardFiles => (
+            fl!("setting-clipboard-files"),
+            fl!("setting-clipboard-files-desc"),
+        ),
         Toggle::Reconnect => (fl!("setting-reconnect"), fl!("setting-reconnect-desc")),
     }
 }
