@@ -87,15 +87,7 @@ impl AppModel {
                 workspaces,
                 error,
                 ..
-            } => resources_view(
-                *loading,
-                workspaces,
-                error.as_deref(),
-                account.notice.as_deref(),
-                &self.connections,
-                &self.session_notes,
-                |url: &Url| self.icons.get(&(account.id.clone(), url.clone())),
-            ),
+            } => self.resources_view(account, *loading, workspaces, error.as_deref()),
         }
     }
 }
@@ -199,133 +191,269 @@ pub(super) fn dependency_text(d: Dependency) -> (String, String) {
     }
 }
 
-pub(super) fn resource_row<'a>(
-    r: &'a ResourceView,
-    conn: Option<&'a Connection>,
-    note: Option<&str>,
-    icon: Option<&widget::icon::Handle>,
-) -> Element<'a, Message> {
-    let kind = match r.kind {
-        ResourceKind::Desktop => fl!("kind-desktop"),
-        ResourceKind::RemoteApp => fl!("kind-remoteapp"),
-        ResourceKind::Other => fl!("kind-other"),
-    };
-    let (status, control): (Option<String>, Element<'a, Message>) = match conn {
-        None => {
-            let mut b = widget::button::suggested(fl!("connect"));
-            if r.kind == ResourceKind::Desktop {
-                b = b.on_press(Message::Connect(r.key.clone()));
+impl AppModel {
+    /// One desktop: icon, title, kind and status, then favorite, settings
+    /// and connect buttons.
+    fn resource_row<'a>(&'a self, account: &str, r: &'a ResourceView) -> Element<'a, Message> {
+        let conn = self.connections.get(&r.key);
+        let kind = match r.kind {
+            ResourceKind::Desktop => fl!("kind-desktop"),
+            ResourceKind::RemoteApp => fl!("kind-remoteapp"),
+            ResourceKind::Other => fl!("kind-other"),
+        };
+        let (status, control): (Option<String>, Element<'a, Message>) = match conn {
+            None => {
+                let mut b = widget::button::suggested(fl!("connect"));
+                if r.kind == ResourceKind::Desktop {
+                    b = b.on_press(Message::Connect(r.key.clone()));
+                }
+                (None, b.into())
             }
-            (None, b.into())
+            Some(Connection::Preparing) => (
+                Some(fl!("status-preparing")),
+                widget::button::standard(fl!("connect")).into(),
+            ),
+            Some(Connection::Connecting) => (
+                Some(fl!("status-connecting")),
+                widget::button::standard(fl!("disconnect"))
+                    .on_press(Message::Disconnect(r.key.clone()))
+                    .into(),
+            ),
+            Some(Connection::Connected) => (
+                Some(fl!("status-connected")),
+                widget::button::destructive(fl!("disconnect"))
+                    .on_press(Message::Disconnect(r.key.clone()))
+                    .into(),
+            ),
+            Some(Connection::Failed(e)) => (
+                Some(e.clone()),
+                widget::button::suggested(fl!("connect"))
+                    .on_press(Message::Connect(r.key.clone()))
+                    .into(),
+            ),
+        };
+        // The note only belongs to a session that is starting or running.
+        let note = self
+            .session_notes
+            .get(&r.key)
+            .filter(|_| matches!(conn, Some(Connection::Connecting | Connection::Connected)));
+        let description = match (status, note) {
+            (Some(s), Some(n)) => format!("{kind} · {s} · {n}"),
+            (Some(s), None) => format!("{kind} · {s}"),
+            _ => kind,
+        };
+        let favorite = self.config.favorites.contains(&r.key);
+        let favorite = widget::button::icon(widget::icon::from_name("emblem-favorite-symbolic"))
+            .selected(favorite)
+            .tooltip(if favorite {
+                fl!("favorite-remove")
+            } else {
+                fl!("favorite-add")
+            })
+            .on_press(Message::ToggleFavorite(r.key.clone()));
+        let settings = widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
+            .tooltip(fl!("desktop-settings"))
+            .on_press(Message::OpenDesktopSettings(r.key.clone()));
+        // The feed's icon, or a stock one until it has loaded (or without one).
+        let icon = match r
+            .icon
+            .as_ref()
+            .and_then(|u| self.icons.get(&(account.to_owned(), u.clone())))
+        {
+            Some(h) => widget::icon(h.clone()),
+            None => widget::icon::from_name(match r.kind {
+                ResourceKind::Desktop => "computer-symbolic",
+                _ => "application-x-executable-symbolic",
+            })
+            .icon(),
         }
-        Some(Connection::Preparing) => (
-            Some(fl!("status-preparing")),
-            widget::button::standard(fl!("connect")).into(),
-        ),
-        Some(Connection::Connecting) => (
-            Some(fl!("status-connecting")),
-            widget::button::standard(fl!("disconnect"))
-                .on_press(Message::Disconnect(r.key.clone()))
-                .into(),
-        ),
-        Some(Connection::Connected) => (
-            Some(fl!("status-connected")),
-            widget::button::destructive(fl!("disconnect"))
-                .on_press(Message::Disconnect(r.key.clone()))
-                .into(),
-        ),
-        Some(Connection::Failed(e)) => (
-            Some(e.clone()),
-            widget::button::suggested(fl!("connect"))
-                .on_press(Message::Connect(r.key.clone()))
-                .into(),
-        ),
-    };
-    // The note only belongs to a session that is starting or running.
-    let note =
-        note.filter(|_| matches!(conn, Some(Connection::Connecting | Connection::Connected)));
-    let description = match (status, note) {
-        (Some(s), Some(n)) => format!("{kind} · {s} · {n}"),
-        (Some(s), None) => format!("{kind} · {s}"),
-        _ => kind,
-    };
-    let settings = widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
-        .tooltip(fl!("desktop-settings"))
-        .on_press(Message::OpenDesktopSettings(r.key.clone()));
-    // The feed's icon, or a stock one until it has loaded (or without one).
-    let icon = match icon {
-        Some(h) => widget::icon(h.clone()),
-        None => widget::icon::from_name(match r.kind {
-            ResourceKind::Desktop => "computer-symbolic",
-            _ => "application-x-executable-symbolic",
-        })
-        .icon(),
+        .size(32);
+        widget::settings::item::builder(r.title.clone())
+            .icon(icon)
+            .description(description)
+            .control(
+                widget::row::with_capacity(3)
+                    .push(favorite)
+                    .push(settings)
+                    .push(control)
+                    .spacing(cosmic::theme::spacing().space_xs)
+                    .align_y(Alignment::Center),
+            )
+            .into()
     }
-    .size(32);
-    widget::settings::item::builder(r.title.clone())
-        .icon(icon)
-        .description(description)
-        .control(
-            widget::row::with_capacity(2)
-                .push(settings)
-                .push(control)
-                .spacing(cosmic::theme::spacing().space_xs)
-                .align_y(Alignment::Center),
-        )
-        .into()
-}
 
-pub(super) fn resources_view<'a>(
-    loading: bool,
-    workspaces: &'a [WorkspaceView],
-    error: Option<&'a str>,
-    notice: Option<&'a str>,
-    connections: &'a HashMap<String, Connection>,
-    notes: &'a HashMap<String, String>,
-    icon_of: impl Fn(&Url) -> Option<&'a widget::icon::Handle>,
-) -> Element<'a, Message> {
-    let space = cosmic::theme::spacing();
-    let mut col = widget::column::with_capacity(workspaces.len() + 4).spacing(space.space_m);
-    if let Some(notice) = notice {
-        col = col.push(widget::text::body(notice.to_owned()));
-    }
-    if loading {
-        col = col.push(widget::text::body(fl!("loading-desktops")));
-    }
-    if let Some(error) = error {
-        col = col.push(widget::text::body(error.to_owned()));
-    }
-    if !loading
-        && error.is_none()
-        && workspaces
+    /// An account's desktops: search, last update, favorites, then each
+    /// workspace.
+    fn resources_view<'a>(
+        &'a self,
+        account: &'a Account,
+        loading: bool,
+        workspaces: &'a [WorkspaceView],
+        error: Option<&'a str>,
+    ) -> Element<'a, Message> {
+        let space = cosmic::theme::spacing();
+        let mut col = widget::column::with_capacity(workspaces.len() + 6).spacing(space.space_m);
+        let any = workspaces.iter().any(|w| !w.resources.is_empty());
+        if any {
+            col = col.push(
+                widget::search_input(fl!("search-desktops"), &self.search)
+                    .on_input(Message::SearchInput)
+                    .on_clear(Message::SearchInput(String::new())),
+            );
+        }
+        if let Some(notice) = &account.notice {
+            col = col.push(widget::text::body(notice.clone()));
+        }
+        if loading {
+            col = col.push(widget::text::body(fl!("loading-desktops")));
+        }
+        if let Some(error) = error {
+            col = col.push(widget::text::body(error.to_owned()));
+        }
+        if let Some(t) = account.last_refreshed {
+            let when = clock_label(t);
+            col = col.push(widget::text::caption(if error.is_some() {
+                fl!("showing-list-from", when = when)
+            } else {
+                fl!("updated-at", when = when)
+            }));
+        }
+        if !loading
+            && error.is_none()
+            && workspaces
+                .iter()
+                .all(|w| w.resources.is_empty() && w.error.is_none())
+        {
+            col = col.push(widget::text::body(fl!("no-desktops")));
+        }
+        let query = self.search.trim().to_lowercase();
+        let matches = |ws: &WorkspaceView, r: &ResourceView| search_matches(&query, ws, r);
+        let favorites: Vec<&ResourceView> = workspaces
             .iter()
-            .all(|w| w.resources.is_empty() && w.error.is_none())
-    {
-        col = col.push(widget::text::body(fl!("no-desktops")));
-    }
-    for ws in workspaces {
-        let mut section = widget::settings::section().title(ws.name.clone());
-        if let Some(e) = &ws.error {
-            section = section.add(widget::text::body(fl!(
-                "workspace-failed",
-                detail = e.clone()
+            .flat_map(|ws| ws.resources.iter().map(move |r| (ws, r)))
+            .filter(|(ws, r)| self.config.favorites.contains(&r.key) && matches(ws, r))
+            .map(|(_, r)| r)
+            .collect();
+        if !favorites.is_empty() {
+            let mut section = widget::settings::section().title(fl!("favorites"));
+            for r in favorites {
+                section = section.add(self.resource_row(&account.id, r));
+            }
+            col = col.push(section);
+        }
+        let mut shown = 0;
+        for ws in workspaces {
+            let listed: Vec<&ResourceView> =
+                ws.resources.iter().filter(|r| matches(ws, r)).collect();
+            if listed.is_empty() && (ws.error.is_none() || !query.is_empty()) {
+                continue;
+            }
+            shown += listed.len();
+            let mut section = widget::settings::section().title(ws.name.clone());
+            if let Some(e) = &ws.error {
+                section = section.add(widget::text::body(fl!(
+                    "workspace-failed",
+                    detail = e.clone()
+                )));
+            }
+            for r in listed {
+                section = section.add(self.resource_row(&account.id, r));
+            }
+            col = col.push(section);
+        }
+        if any && !query.is_empty() && shown == 0 {
+            col = col.push(widget::text::body(fl!(
+                "no-search-results",
+                query = self.search.trim()
             )));
         }
-        for r in &ws.resources {
-            section = section.add(resource_row(
-                r,
-                connections.get(&r.key),
-                notes.get(&r.key).map(String::as_str),
-                r.icon.as_ref().and_then(&icon_of),
-            ));
-        }
-        col = col.push(section);
+        widget::scrollable(
+            widget::container(col.max_width(800))
+                .width(Length::Fill)
+                .align_x(Horizontal::Center)
+                .padding(space.space_m),
+        )
+        .into()
     }
-    widget::scrollable(
-        widget::container(col.max_width(800))
-            .width(Length::Fill)
-            .align_x(Horizontal::Center)
-            .padding(space.space_m),
-    )
-    .into()
+}
+
+/// Whether a desktop matches the (lower-case, trimmed) search text: by its
+/// title or its workspace's name, ignoring case. Empty matches all.
+pub(super) fn search_matches(query: &str, ws: &WorkspaceView, r: &ResourceView) -> bool {
+    query.is_empty()
+        || r.title.to_lowercase().contains(query)
+        || ws.name.to_lowercase().contains(query)
+}
+
+/// "14:05" for today, "2026-10-17 14:05" for an earlier day, in local
+/// time (`localtime_r`; no date crate needed).
+pub(super) fn clock_label(t: SystemTime) -> String {
+    fn local(t: SystemTime) -> Option<libc::tm> {
+        let secs =
+            libc::time_t::try_from(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()).ok()?;
+        // SAFETY: `localtime_r` writes only into `tm`, which outlives the
+        // call; a null result means failure.
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        let ok = unsafe { !libc::localtime_r(&raw const secs, &raw mut tm).is_null() };
+        ok.then_some(tm)
+    }
+    let Some(tm) = local(t) else {
+        return String::new();
+    };
+    let time = format!("{:02}:{:02}", tm.tm_hour, tm.tm_min);
+    let today = local(SystemTime::now())
+        .is_some_and(|n| (n.tm_year, n.tm_yday) == (tm.tm_year, tm.tm_yday));
+    if today {
+        time
+    } else {
+        format!(
+            "{:04}-{:02}-{:02} {time}",
+            tm.tm_year + 1900,
+            tm.tm_mon + 1,
+            tm.tm_mday
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn desktop(title: &str) -> ResourceView {
+        ResourceView {
+            key: title.into(),
+            legacy_key: String::new(),
+            title: title.into(),
+            kind: ResourceKind::Desktop,
+            connection_file: None,
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn search_matches_title_or_workspace() {
+        let ws = WorkspaceView {
+            name: "Finance Pool".into(),
+            error: None,
+            resources: Vec::new(),
+        };
+        let r = desktop("Windows 11 Dev");
+        assert!(search_matches("", &ws, &r));
+        assert!(search_matches("dev", &ws, &r));
+        assert!(search_matches("finance", &ws, &r));
+        assert!(!search_matches("linux", &ws, &r));
+        // Non-ASCII titles compare case-insensitively too.
+        assert!(search_matches("æble", &ws, &desktop("ÆBLE desktop")));
+    }
+
+    #[test]
+    fn clock_label_shows_time_today_and_date_before() {
+        let now = clock_label(SystemTime::now());
+        assert_eq!(now.len(), 5, "{now}");
+        assert_eq!(now.as_bytes()[2], b':');
+        let old = clock_label(SystemTime::UNIX_EPOCH + Duration::from_secs(400 * 86_400));
+        // "1971-02-05 hh:mm" in any time zone.
+        assert_eq!(old.len(), 16, "{old}");
+        assert!(old.starts_with("1971-02-0"), "{old}");
+    }
 }

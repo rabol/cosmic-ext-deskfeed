@@ -87,6 +87,8 @@ pub struct AppModel {
     /// Why a running session doesn't have something the user turned on
     /// (the camera, when the desktop's policy doesn't allow it).
     session_notes: HashMap<String, String>,
+    /// The search field's text; filters the desktop list.
+    search: String,
     /// Resource icons per account and URL; the feed versions its icon
     /// URLs (`?v=`), so a fetched one stays valid.
     icons: HashMap<(String, Url), widget::icon::Handle>,
@@ -191,6 +193,7 @@ impl cosmic::Application for AppModel {
             signing_out: HashSet::new(),
             timed_out: HashSet::new(),
             session_notes: HashMap::new(),
+            search: String::new(),
             icons: HashMap::new(),
             quit: Quit::No,
             pending_logon: HashMap::new(),
@@ -492,6 +495,19 @@ impl AppModel {
     /// App-wide messages: dependencies, the context drawer, links, notices, the log. Routed here by `update`.
     pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
+            Message::SearchInput(text) => self.search = text,
+            Message::ToggleFavorite(key) => {
+                let mut favorites = self.config.favorites.clone();
+                if !favorites.remove(&key) {
+                    favorites.insert(key);
+                }
+                match &self.config_handler {
+                    Some(handler) => {
+                        let _ = self.config.set_favorites(handler, favorites);
+                    }
+                    None => self.config.favorites = favorites,
+                }
+            }
             Message::CheckDependencies => return self.check_dependencies(),
             Message::DependenciesChecked(checks) => {
                 for c in &checks {

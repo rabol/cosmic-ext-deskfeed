@@ -24,6 +24,8 @@ pub(super) struct Account {
     /// When the desktop list was last requested (wall clock, so the time
     /// spent suspended counts).
     pub(super) last_load: Option<SystemTime>,
+    /// When the desktop list last loaded successfully.
+    pub(super) last_refreshed: Option<SystemTime>,
     /// Fixed for the life of this entry; session and connection events
     /// carry it, so events from before a sign-out are ignored.
     pub(super) epoch: u64,
@@ -243,6 +245,10 @@ pub enum Message {
     CheckDependencies,
     DependenciesChecked(Vec<Check>),
     OpenLogFolder,
+    /// The search field's text.
+    SearchInput(String),
+    /// Resource key.
+    ToggleFavorite(String),
     OpenAccountSettings(String),
     OpenDesktopSettings(String),
     AppToggle(Toggle, bool),

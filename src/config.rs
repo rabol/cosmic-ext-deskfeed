@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 
@@ -17,6 +17,8 @@ pub struct Config {
     /// of account, tenant, workspace and resource ID (spec §7: titles are never
     /// identity). No credentials are stored here.
     pub logon_settings: BTreeMap<String, LogonSetting>,
+    /// Favorite desktops (resource keys, as above).
+    pub favorites: BTreeSet<String>,
     /// Log rotation size in MiB (App settings → Diagnostics); `None` is
     /// the default (`log::MAX_SIZE_MIB`).
     pub log_max_mib: Option<u32>,

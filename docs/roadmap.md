@@ -7,7 +7,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
 ## Required for the first usable release (spec §3)
 
 1. ~~**Resource icons.**~~ Done (2026-10-18): the feed's PNG, fetched in the background through the shared HTTP policy (256 KiB, no redirects), header-checked to at most 256×256 before display (`service/icons.rs`), cached per account and URL, cleared on sign-out. Stock icon until it loads. Checked with the owner's feed: 3 of 3 loaded. The `.ico` variant isn't used.
-2. **Search, favorites, last successful refresh time** in the UI (§3, §5). `Account.last_load` exists but isn't shown.
+2. ~~**Search, favorites, last successful refresh time**~~ Done (2026-10-18): search by desktop or workspace name, favorites (heart button, "Favorites" section, stored per desktop key), "Updated 14:05" / "Showing the list from …" after a failed refresh. Waiting for the owner's look in the real app.
 3. **Offline metadata cache**, account-isolated, bounded, clearly marked as cached; never grants access (§7, §10).
 4. **Reconnect** after connection loss with bounded backoff, visible status and a stop action; **focus an existing session** when Connect is pressed for a running desktop (§3, §8).
 5. **Display scaling that follows the monitor's scale** (§3, §8: derive it, never hardcode). With `xfreerdp3` Windows runs at 100 % on a 1.25-scaled screen, so its text is smaller than local apps.

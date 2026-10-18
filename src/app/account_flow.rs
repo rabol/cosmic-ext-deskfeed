@@ -112,6 +112,7 @@ impl AppModel {
                 generation: 0,
                 sign_in: 0,
                 last_load: None,
+                last_refreshed: None,
                 epoch,
             });
             tasks.push(self.start_restore(&id));
@@ -365,6 +366,7 @@ impl AppModel {
                 generation,
                 sign_in: generation,
                 last_load: None,
+                last_refreshed: None,
                 epoch,
             }),
         }
@@ -496,6 +498,7 @@ impl AppModel {
                         .collect();
                     *workspaces = list;
                     *error = None;
+                    account.last_refreshed = Some(SystemTime::now());
                     self.migrate_resource_keys(&pairs);
                     return self.fetch_icons(id);
                 }
