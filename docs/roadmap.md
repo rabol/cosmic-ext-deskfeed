@@ -46,6 +46,27 @@ Done the same day: the administrator's device policy (ADR 0021), the sign-out qu
 - ~~**Fuzzing**~~ Done as random-input tests on stable Rust (2026-10-19, [ADR 0023](adr/0023-random-input-tests-instead-of-cargo-fuzz.md)); the spec item was changed with the owner, since `cargo-fuzz` needs a nightly compiler. Not yet covered: the sign-in helper's own parsing.
 - **"Client version not supported"** (spec §7): a specific error when the service rejects the client version. What the service sends in that case isn't known yet; needs evidence (a real rejection, or Microsoft's documentation) before guessing.
 
+## Second code review (CODE_REVIEW.md, 2026-10-19)
+
+Fixed the same day, each with a test that fails without the fix where a test is possible:
+- F01, F05: sign-out and Forget win over work already under way.
+- F03: proxy credentials stay out of child environments.
+- F04: connection-file rules (ADR 0024).
+- F06, F08: password dialogs take turns; Cancel; requests stop after sign-out.
+- F07: the argument handover never blocks.
+- F09: editable Windows user name.
+- F11: the sign-in time limit.
+- F12: SIGKILL on app death (ADR 0022 addendum).
+- F13: the strict lint gate.
+- Stale security claims, the diagnostics file permissions, and the helper's redirect bound.
+
+Still open:
+- **F02, certificate pins** (owner's decision): FreeRDP treats `/cert:fingerprint` as an extra trust path, not a strict pin. A changed certificate that is otherwise valid by CA connects without Deskfeed's "changed" dialog. FreeRDP has no strict-pin option. Choices: say so in ADR 0016 and keep the pin as "trust this one too", or enforce it with a check of our own after connecting (FreeRDP logs the presented fingerprint). Only hosts AVD's broker didn't vouch for are affected.
+- **F10, administrator registration / system-browser sign-in** (owner's decision): implement it, which needs a tenant where an admin can register an app to test, or change the spec to say it's out of scope for now.
+- **F14**: the release checksum, filled in when tagging (with "Tag v0.1.0" above).
+- **FreeRDP bug found on the way**: HTTP proxy authentication drops the last character of the password (ADR 0008 addendum). Report upstream (owner's call, it's public).
+- The review's remaining uncertainties (U1 backend identity association, U3 tray disappearance, U4 redaction coverage, U6 OIDC key scope) and its test-gap list.
+
 ## Known deviation from the spec
 
 The spec prefers native Wayland session windows (§9). Deskfeed uses `xfreerdp3` on XWayland, the documented compatibility mode §9 allows; the measurements are in [ADR 0004](adr/0004-freerdp-version-and-sign-in-helper.md) (client comparison, 2026-10-18).
