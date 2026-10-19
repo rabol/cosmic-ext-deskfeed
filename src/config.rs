@@ -25,6 +25,9 @@ pub struct Config {
     pub saved_passwords: BTreeSet<String>,
     /// Favorite desktops (resource keys, as above).
     pub favorites: BTreeSet<String>,
+    /// Keep running with the window closed, with a tray icon (App settings
+    /// → Background, ADR 0017). Off by default (spec §5).
+    pub background: bool,
     /// Deskfeed's own look (App settings → Appearance): 0 or none follows
     /// the desktop, 1 dark, 2 light.
     pub app_theme: Option<u32>,

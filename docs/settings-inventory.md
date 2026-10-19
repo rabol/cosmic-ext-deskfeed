@@ -31,6 +31,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Microsoft cloud (public, government, China) | public Azure | Ac | `service/endpoint.rs`, `service/http.rs` | Later: needs each cloud's endpoints and client registration |
 | Display scaling | Automatic (the X11 scale from XSETTINGS); 100–300 % | A, Ac, C | `settings.rs` `Choice::Scale`, `display.rs` | Done (ADR 0015) |
 | Theme: match desktop, dark, light | match desktop | A | config `app_theme`, `app/settings_ui.rs` `apply_theme` | Done |
+| Keep running in the background (tray icon) | off | A | config `background`, `app/background.rs`, `tray.rs` | Done (ADR 0017) |
 
 ## Fixed on purpose
 
@@ -54,6 +55,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | FreeRDP ≥ 3.32.2; binaries `xfreerdp3`, `xfreerdp` | `deps.rs`, `sessions/launcher.rs` | The tested backend (ADR 0004) |
 | FreeRDP stop grace 5 s; 60 kept log lines; 4 096-char output lines | `sessions/launcher.rs` | Internal process handling |
 | Dependency check: 5 s per command, 256 KiB output | `deps.rs` | Internal |
+| Tray menu: at most 20 desktops listed | `tray.rs` `MAX_DESKTOPS` | Each is a menu line; the window lists all |
 | Workspace move: poll 200 ms, wait 3 s for a new workspace | `workspace.rs` | Internal timing |
 | Refresh check every 5 min (and after resume) | `app/mod.rs` `REFRESH_CHECK` | Internal; the refresh interval is a setting |
 | Log line 2 000 chars; redaction lists | `log.rs` | Internal; privacy |

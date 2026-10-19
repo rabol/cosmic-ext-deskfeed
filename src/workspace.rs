@@ -503,4 +503,92 @@ mod tests {
         )
         .unwrap();
     }
+
+    /// Asks COSMIC to close a real window, as its close button does:
+    /// `MOVE_APP_ID=… cargo test --release close_a_real_window -- --ignored`.
+    #[test]
+    #[ignore = "closes a real window on the running COSMIC session"]
+    fn close_a_real_window() {
+        use super::*;
+        let app_id = std::env::var("MOVE_APP_ID").unwrap();
+        let conn = Connection::connect_to_env().unwrap();
+        let (globals, mut queue) = registry_queue_init::<State>(&conn).unwrap();
+        let qh = queue.handle();
+        let registry = RegistryState::new(&globals);
+        let info = ToplevelInfoState::try_new(&registry, &qh).unwrap();
+        let manager = ToplevelManagerState::try_new(&registry, &qh).unwrap();
+        let workspaces = WorkspaceState::new(&registry, &qh);
+        let outputs = OutputState::new(&globals, &qh);
+        let seats = SeatState::new(&globals, &qh);
+        let mut state = State {
+            registry,
+            outputs,
+            info,
+            manager,
+            workspaces,
+            seats,
+            can_move: false,
+            can_activate: false,
+        };
+        let until = Instant::now() + Duration::from_secs(3);
+        let toplevel = loop {
+            queue.roundtrip(&mut state).unwrap();
+            if let Some(t) = state
+                .info
+                .toplevels()
+                .find(|t| t.app_id == app_id)
+                .and_then(|t| t.cosmic_toplevel.clone())
+            {
+                break t;
+            }
+            assert!(Instant::now() < until, "window not found");
+            std::thread::sleep(POLL);
+        };
+        state.manager.manager.close(&toplevel);
+        queue.roundtrip(&mut state).unwrap();
+    }
+
+    /// Prints how many windows `WATCH_APP_ID` has, every half second for
+    /// `WATCH_SECS` seconds.
+    #[test]
+    #[ignore = "watches the running COSMIC session's windows"]
+    fn watch_windows() {
+        use super::*;
+        let app_id = std::env::var("WATCH_APP_ID").unwrap();
+        let secs: u64 = std::env::var("WATCH_SECS").map_or(12, |s| s.parse().unwrap());
+        let conn = Connection::connect_to_env().unwrap();
+        let (globals, mut queue) = registry_queue_init::<State>(&conn).unwrap();
+        let qh = queue.handle();
+        let registry = RegistryState::new(&globals);
+        let info = ToplevelInfoState::try_new(&registry, &qh).unwrap();
+        let manager = ToplevelManagerState::try_new(&registry, &qh).unwrap();
+        let workspaces = WorkspaceState::new(&registry, &qh);
+        let outputs = OutputState::new(&globals, &qh);
+        let seats = SeatState::new(&globals, &qh);
+        let mut state = State {
+            registry,
+            outputs,
+            info,
+            manager,
+            workspaces,
+            seats,
+            can_move: false,
+            can_activate: false,
+        };
+        let start = Instant::now();
+        let mut last = usize::MAX;
+        while start.elapsed() < Duration::from_secs(secs) {
+            queue.roundtrip(&mut state).unwrap();
+            let n = state
+                .info
+                .toplevels()
+                .filter(|t| t.app_id == app_id)
+                .count();
+            if n != last {
+                println!("{:>5.1}s: {n} window(s)", start.elapsed().as_secs_f32());
+                last = n;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
 }

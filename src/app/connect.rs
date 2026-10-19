@@ -121,7 +121,9 @@ impl AppModel {
                 if self.account(&id).is_some_and(|a| a.epoch == epoch)
                     && self.running.get(&key).is_some_and(|r| r.attempt == attempt)
                 {
-                    return self.session_event(&key, event);
+                    let task = self.session_event(&key, event);
+                    // The tray's menu lists the connected desktops.
+                    return Task::batch([task, self.update_tray()]);
                 }
             }
             Message::Disconnect(key) => {
@@ -626,11 +628,21 @@ impl AppModel {
     fn quit_message(&mut self, message: &Message) -> Task<cosmic::Action<Message>> {
         match (message, self.quit) {
             (Message::QuitRequested, Quit::No) => {
-                if self.running.is_empty() && self.launching.is_empty() {
+                let idle = self.running.is_empty() && self.launching.is_empty();
+                // Closing with background operation: nothing to ask.
+                if idle && self.can_run_in_background() && !self.quit_from_tray {
+                    return self.hide_window();
+                }
+                self.quit_from_tray = false;
+                if idle {
                     self.quit = Quit::Stopping;
                     return self.continue_quit();
                 }
                 self.quit = Quit::Asking;
+            }
+            (Message::QuitToBackground, Quit::Asking) => {
+                self.quit = Quit::No;
+                return self.hide_window();
             }
             (Message::QuitCancel, Quit::Asking) => self.quit = Quit::No,
             (Message::QuitConfirm, Quit::Asking) => {
@@ -780,14 +792,22 @@ impl AppModel {
     /// Asks before quitting while desktops are open.
     pub(super) fn quit_dialog(&self) -> Element<'_, Message> {
         let open = u32::try_from(self.running.len() + self.launching.len()).unwrap_or(u32::MAX);
-        widget::dialog()
+        let mut dialog = widget::dialog()
             .title(fl!("quit-title"))
             .body(fl!("quit-body", count = open))
             .primary_action(
                 widget::button::destructive(fl!("quit-disconnect")).on_press(Message::QuitConfirm),
             )
-            .secondary_action(widget::button::standard(fl!("cancel")).on_press(Message::QuitCancel))
-            .into()
+            .secondary_action(
+                widget::button::standard(fl!("cancel")).on_press(Message::QuitCancel),
+            );
+        // Spec §5: the third choice when background operation is on.
+        if self.can_run_in_background() {
+            dialog = dialog.tertiary_action(
+                widget::button::text(fl!("quit-to-background")).on_press(Message::QuitToBackground),
+            );
+        }
+        dialog.into()
     }
 
     pub(super) fn session_event(

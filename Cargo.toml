@@ -59,7 +59,10 @@ features = [
     # GPU-accelerated rendering
     "wgpu",
     # xdg portal dialogs on Linux
-    "xdg-portal"
+    "xdg-portal",
+    # Closing and reopening the main window while the app keeps running
+    # (background operation, ADR 0017)
+    "multi-window",
 ]
 
 # Uncomment to test a locally-cloned libcosmic

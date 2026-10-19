@@ -316,6 +316,12 @@ pub enum Message {
     OpenLogFolder,
     /// An account's offline list was read (account, epoch, list).
     CacheLoaded(String, u64, Option<crate::cache::Cached>),
+    /// From the tray (background operation).
+    Tray(crate::tray::TrayEvent),
+    /// App settings → Background.
+    AppBackground(bool),
+    /// Quit dialog: close the window, keep the desktops.
+    QuitToBackground,
     /// View → Diagnostics: build the report and show it.
     OpenDiagnostics,
     DiagnosticsReady(String),

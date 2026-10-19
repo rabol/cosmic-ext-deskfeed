@@ -20,5 +20,6 @@ Each significant decision is recorded as a short Markdown file, `NNNN-title.md`,
 | [0014](0014-reconnect-by-the-app.md) | The app reconnects lost sessions, not FreeRDP | Accepted |
 | [0015](0015-display-scaling-from-xsettings.md) | Windows' display scaling follows the X11 scale from XSETTINGS | Accepted |
 | [0016](0016-session-host-certificates.md) | Session host certificates: the broker's pin, else the user's approval | Accepted |
+| [0017](0017-background-operation-and-tray.md) | Background operation with a StatusNotifierItem tray over zbus | Accepted |
 
 Do not put tenant data (host names, tenant or workspace IDs, user names, feed URLs) in ADRs. Describe evidence in redacted form.

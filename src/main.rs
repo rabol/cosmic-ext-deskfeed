@@ -16,6 +16,7 @@ mod sessions;
 mod settings;
 #[cfg(test)]
 mod test_util;
+mod tray;
 mod workspace;
 
 fn main() -> cosmic::iced::Result {

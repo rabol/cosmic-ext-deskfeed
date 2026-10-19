@@ -67,6 +67,20 @@ impl AppModel {
                 }
                 return apply_theme(value);
             }
+            Message::AppBackground(on) => {
+                match &self.config_handler {
+                    Some(handler) => {
+                        let _ = self.config.set_background(handler, on);
+                    }
+                    None => self.config.background = on,
+                }
+                if !on {
+                    // Back to closing ends the app; the tray goes with the
+                    // subscription.
+                    self.tray = None;
+                    self.tray_unavailable = None;
+                }
+            }
             Message::AppLogSize(mib) => {
                 let (min, max, _) = crate::log::MAX_SIZE_MIB;
                 let mib = mib.clamp(min, max);
@@ -207,6 +221,19 @@ impl AppModel {
                     Message::AppTheme,
                 )),
             );
+        let background_desc = match (&self.tray_unavailable, self.config.background) {
+            (Some(why), true) => fl!("setting-background-unavailable", detail = why.clone()),
+            _ => fl!("setting-background-desc"),
+        };
+        let background = widget::settings::section()
+            .title(fl!("settings-background"))
+            .add(
+                widget::settings::item::builder(fl!("setting-background"))
+                    .description(background_desc)
+                    .control(
+                        widget::toggler(self.config.background).on_toggle(Message::AppBackground),
+                    ),
+            );
         let (min, max, default) = crate::log::MAX_SIZE_MIB;
         let mib = self.config.log_max_mib.unwrap_or(default).clamp(min, max);
         let diagnostics = widget::settings::section()
@@ -231,7 +258,8 @@ impl AppModel {
             toggle,
             choice,
             Some(
-                widget::column::with_capacity(2)
+                widget::column::with_capacity(3)
+                    .push(background)
                     .push(appearance)
                     .push(diagnostics)
                     .spacing(cosmic::theme::spacing().space_m)

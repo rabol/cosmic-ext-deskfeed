@@ -36,6 +36,7 @@ use crate::sessions::rdpfile::{CameraPolicy, ConnectionFile, RdpError};
 use crate::settings::{self, Choice, ConnectionSettings, Number, Toggle};
 
 mod account_flow;
+mod background;
 mod connect;
 mod decide;
 mod diagnostics;
@@ -52,6 +53,19 @@ use model::*;
 #[allow(clippy::wildcard_imports)]
 use views::*;
 
+/// The tray's events, for the subscription (a plain `fn`, so iced keeps
+/// one tray running while background operation stays on).
+fn tray_events() -> impl cosmic::iced::futures::Stream<Item = crate::tray::TrayEvent> {
+    crate::tray::run(crate::tray::Labels {
+        title: fl!("app-title"),
+        show: fl!("tray-show"),
+        quit: fl!("tray-quit"),
+        show_desktop: fl!("tray-show-desktop", title = "{title}"),
+    })
+}
+
+/// The app ID (also the tray item's ID and icon name).
+pub const APP_ID: &str = "io.github.rabol.cosmic-ext-deskfeed";
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const APP_ICON: &[u8] = include_bytes!("../../resources/icons/hicolor/256x256/apps/icon.png");
 
@@ -92,6 +106,12 @@ pub struct AppModel {
     reconnects: HashMap<String, Reconnect>,
     /// The search field's text; filters the desktop list.
     search: String,
+    /// The tray, while background operation is on and a tray answers.
+    tray: Option<crate::tray::Handle>,
+    /// Why there is no tray, when background operation is on.
+    tray_unavailable: Option<String>,
+    /// The tray's Quit: really quit, not close to the background.
+    quit_from_tray: bool,
     /// The diagnostics report while its page is open (`None`: building).
     diagnostics: Option<String>,
     /// Where the report was saved, or why it wasn't.
@@ -155,7 +175,7 @@ impl cosmic::Application for AppModel {
     type Executor = cosmic::executor::Default;
     type Flags = ();
     type Message = Message;
-    const APP_ID: &'static str = "io.github.rabol.cosmic-ext-deskfeed";
+    const APP_ID: &'static str = APP_ID;
 
     fn core(&self) -> &cosmic::Core {
         &self.core
@@ -209,6 +229,9 @@ impl cosmic::Application for AppModel {
             session_notes: HashMap::new(),
             reconnects: HashMap::new(),
             search: String::new(),
+            tray: None,
+            tray_unavailable: None,
+            quit_from_tray: false,
             diagnostics: None,
             diagnostics_status: None,
             cache: crate::cache::Store::user(),
@@ -395,6 +418,15 @@ impl cosmic::Application for AppModel {
         Some(Message::QuitRequested)
     }
 
+    /// Started again while running (single instance): show the window,
+    /// also when it was closed for the background.
+    fn dbus_activation(
+        &mut self,
+        _msg: cosmic::dbus_activation::Message,
+    ) -> Task<cosmic::Action<Self::Message>> {
+        self.show_window()
+    }
+
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
         if self.quit == Quit::Asking {
             return Some(self.quit_dialog());
@@ -464,6 +496,12 @@ impl cosmic::Application for AppModel {
         )
     }
 
+    /// Deskfeed has only its main window. After it closed for background
+    /// operation, the closing window may still be drawn once: nothing.
+    fn view_window(&self, _id: cosmic::iced::window::Id) -> Element<'_, Self::Message> {
+        widget::Space::new().into()
+    }
+
     fn view(&self) -> Element<'_, Self::Message> {
         let space = cosmic::theme::spacing();
         let mut col = widget::column::with_capacity(3).spacing(space.space_s);
@@ -495,6 +533,11 @@ impl cosmic::Application for AppModel {
             // Closing from the desktop (window menu, keyboard shortcut,
             // dock); the window's own close button goes to `on_app_exit`.
             cosmic::iced::window::close_requests().map(|_| Message::QuitRequested),
+            if self.config.background {
+                Subscription::run(tray_events).map(Message::Tray)
+            } else {
+                Subscription::none()
+            },
         ])
     }
 
@@ -541,6 +584,7 @@ impl cosmic::Application for AppModel {
             | Message::Disconnect(..)
             | Message::WorkspaceMoved(..)
             | Message::QuitRequested
+            | Message::QuitToBackground
             | Message::QuitConfirm
             | Message::QuitCancel
             | Message::ReadyToQuit => self.connection_message(message),
@@ -550,6 +594,7 @@ impl cosmic::Application for AppModel {
             | Message::AppNumber(..)
             | Message::AppLogSize(..)
             | Message::AppTheme(..)
+            | Message::AppBackground(..)
             | Message::AppChoice(..)
             | Message::AccountChoice(..)
             | Message::DesktopChoice(..)
@@ -566,6 +611,7 @@ impl AppModel {
     /// App-wide messages: dependencies, the context drawer, links, notices, the log. Routed here by `update`.
     pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
+            Message::Tray(event) => return self.tray_event(event),
             Message::SearchInput(text) => self.search = text,
             Message::OpenDiagnostics => {
                 self.context_page = ContextPage::Diagnostics;
