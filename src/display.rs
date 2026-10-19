@@ -3,7 +3,7 @@
 //! The scale X11 windows get, for Windows' display scaling (ADR 0015).
 //!
 //! FreeRDP's window is an X11 window. COSMIC gives X11 windows the full
-//! pixels of a scaled monitor (its default "fractional" XWayland
+//! pixels of a scaled monitor (its default "fractional" `XWayland`
 //! descaling) and tells X11 programs the matching DPI through XSETTINGS
 //! `Xft/DPI` (96 × 1024 × scale; cosmic-comp `src/xwayland.rs`
 //! `update_xwayland_settings`). Without it, Windows draws at 100 % and its
@@ -70,16 +70,13 @@ pub fn resolve_percent(setting: u32) -> u32 {
     if setting != 0 {
         return setting;
     }
-    match x11_scale() {
-        Some(scale) => {
-            let percent = desktop_scale_percent(scale);
-            crate::app_log!("display scale: {percent} % (follows the monitor)");
-            percent
-        }
-        None => {
-            crate::app_log!("display scale: X11 scale unknown, using 100 %");
-            100
-        }
+    if let Some(scale) = x11_scale() {
+        let percent = desktop_scale_percent(scale);
+        crate::app_log!("display scale: {percent} % (follows the monitor)");
+        percent
+    } else {
+        crate::app_log!("display scale: X11 scale unknown, using 100 %");
+        100
     }
 }
 

@@ -39,19 +39,22 @@ fn token(platform_data: &HashMap<String, OwnedValue>) -> Option<String> {
     (!token.is_empty() && token.len() <= 1024).then_some(token)
 }
 
+// The method signatures are the D-Bus interface's (zbus generates the
+// dispatch from them): every argument stays, used or not.
+#[allow(unused_variables, clippy::needless_pass_by_value)]
 #[zbus::interface(name = "org.freedesktop.Application")]
 impl Application {
     fn activate(&self, platform_data: HashMap<String, OwnedValue>) {
         let _ = self.tx.unbounded_send(token(&platform_data));
     }
     /// Deskfeed opens no files or URLs: just show the window.
-    fn open(&self, _uris: Vec<String>, platform_data: HashMap<String, OwnedValue>) {
+    fn open(&self, uris: Vec<String>, platform_data: HashMap<String, OwnedValue>) {
         let _ = self.tx.unbounded_send(token(&platform_data));
     }
     fn activate_action(
         &self,
-        _action: String,
-        _parameter: Vec<OwnedValue>,
+        action: String,
+        parameter: Vec<OwnedValue>,
         platform_data: HashMap<String, OwnedValue>,
     ) {
         let _ = self.tx.unbounded_send(token(&platform_data));

@@ -215,6 +215,8 @@ pub(super) fn dependency_text(d: Dependency) -> (String, String) {
 impl AppModel {
     /// One desktop: icon, title, kind and status, then favorite, settings
     /// and connect buttons.
+    // One flat layout, top to bottom; reads best in one place.
+    #[allow(clippy::too_many_lines)]
     fn resource_row<'a>(
         &'a self,
         account: &str,
@@ -362,6 +364,8 @@ impl AppModel {
     /// An account's desktops: `header`, search, last update, favorites,
     /// then each workspace. `offline`: an offline list saved then, shown
     /// read-only.
+    // One flat layout, top to bottom; reads best in one place.
+    #[allow(clippy::too_many_lines)]
     fn resources_view<'a>(
         &'a self,
         account: &'a Account,
@@ -595,7 +599,7 @@ mod tests {
         let now = clock_label(SystemTime::now());
         assert_eq!(now.len(), 5, "{now}");
         assert_eq!(now.as_bytes()[2], b':');
-        let old = clock_label(SystemTime::UNIX_EPOCH + Duration::from_secs(400 * 86_400));
+        let old = clock_label(SystemTime::UNIX_EPOCH + Duration::from_hours(400 * 24));
         // "1971-02-05 hh:mm" in any time zone.
         assert_eq!(old.len(), 16, "{old}");
         assert!(old.starts_with("1971-02-0"), "{old}");

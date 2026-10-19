@@ -20,7 +20,7 @@ fn main_window_settings() -> window::Settings {
         exit_on_close_request: false,
         ..window::Settings::default()
     };
-    s.platform_specific.application_id = <AppModel as cosmic::Application>::APP_ID.to_owned();
+    <AppModel as cosmic::Application>::APP_ID.clone_into(&mut s.platform_specific.application_id);
     s
 }
 

@@ -48,7 +48,7 @@ pub fn watch(
                     &thread_alive,
                     &tx,
                     crate::single::bus(),
-                )
+                );
             });
         if spawned.is_ok() {
             // Ends the thread when the subscription is dropped.

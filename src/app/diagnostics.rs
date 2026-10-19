@@ -97,18 +97,19 @@ impl AppModel {
 }
 
 /// Builds the report. Blocking (reads the log); call from `spawn_blocking`.
-pub(super) fn build(inputs: Inputs) -> String {
+pub(super) fn build(inputs: &Inputs) -> String {
+    use std::fmt::Write as _;
     let mut out = inputs.summary.join("\n");
     out.push_str("\n\nSystem:\n");
     if let Ok(release) = std::fs::read_to_string("/etc/os-release")
         && let Some(name) = release.lines().find_map(|l| l.strip_prefix("PRETTY_NAME="))
     {
-        out.push_str(&format!("  {}\n", name.trim_matches('"')));
+        let _ = writeln!(out, "  {}", name.trim_matches('"'));
     }
     if let Ok(kernel) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
-        out.push_str(&format!("  Linux {}\n", kernel.trim()));
+        let _ = writeln!(out, "  Linux {}", kernel.trim());
     }
-    out.push_str(&format!("\nLast {LOG_LINES} log lines:\n"));
+    let _ = write!(out, "\nLast {LOG_LINES} log lines:\n");
     for line in log_tail() {
         out.push_str("  ");
         out.push_str(&crate::log::redact(&line));
@@ -180,9 +181,9 @@ mod tests {
 
     #[test]
     fn saved_privately() {
+        use std::os::unix::fs::PermissionsExt as _;
         let path = std::env::temp_dir().join(format!("deskfeed-diag-{}.txt", std::process::id()));
         save(&path, "report").unwrap();
-        use std::os::unix::fs::PermissionsExt as _;
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
@@ -198,7 +199,7 @@ mod tests {
     fn real_report() {
         println!(
             "{}",
-            build(Inputs {
+            build(&Inputs {
                 summary: vec!["(summary)".into()],
                 names: Vec::new(),
             })

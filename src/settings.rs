@@ -685,7 +685,7 @@ mod tests {
             sound: true,
         };
         let mut allowed = e;
-        assert!(allowed.limit_to(all).is_empty());
+        assert_eq!(allowed.limit_to(all), []);
         assert_eq!(allowed, e);
         let none = DevicePolicy {
             clipboard: false,
@@ -706,7 +706,7 @@ mod tests {
         off.clipboard = clipboard::OFF;
         off.microphone = false;
         off.sound = false;
-        assert!(off.limit_to(none).is_empty());
+        assert_eq!(off.limit_to(none), []);
     }
 
     #[test]

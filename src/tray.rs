@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 //! The tray icon for background operation (spec §5, ADR 0017): a
-//! StatusNotifierItem with a small `com.canonical.dbusmenu` menu, served on
+//! `StatusNotifierItem` with a small `com.canonical.dbusmenu` menu, served on
 //! the session bus with zbus (already in the tree, ADR 0009).
 //!
 //! COSMIC's status area (cosmic-applets `cosmic-applet-status-area`) calls
@@ -13,7 +13,7 @@
 //!
 //! The app builds the menu ([`TrayItem`]); this module serves it.
 //!
-//! The item exists only while a StatusNotifierWatcher with a host answers;
+//! The item exists only while a `StatusNotifierWatcher` with a host answers;
 //! otherwise the app is told the tray is unavailable, so it never runs
 //! without a way back (spec §5).
 
@@ -125,6 +125,15 @@ struct Item {
     title: String,
 }
 
+// The method signatures are the D-Bus interface's (zbus generates the
+// dispatch from them): `self` and every argument stay, used or not.
+#[allow(
+    unused_variables,
+    clippy::unused_self,
+    clippy::needless_pass_by_value,
+    clippy::needless_lifetimes,
+    clippy::unnecessary_literal_bound
+)]
 #[zbus::interface(name = "org.kde.StatusNotifierItem")]
 impl Item {
     #[zbus(property)]
@@ -169,15 +178,15 @@ impl Item {
         OwnedObjectPath::try_from(MENU_PATH).expect("valid path")
     }
 
-    fn activate(&self, _x: i32, _y: i32) {
+    fn activate(&self, x: i32, y: i32) {
         let token = self.token.lock().ok().and_then(|mut t| t.take());
         let _ = self.events.unbounded_send(TrayEvent::Show(token));
     }
     fn secondary_activate(&self, x: i32, y: i32) {
         self.activate(x, y);
     }
-    fn context_menu(&self, _x: i32, _y: i32) {}
-    fn scroll(&self, _delta: i32, _orientation: &str) {}
+    fn context_menu(&self, x: i32, y: i32) {}
+    fn scroll(&self, delta: i32, orientation: &str) {}
     /// COSMIC sends this before `Activate`, so the window may take focus.
     fn provide_xdg_activation_token(&self, token: String) {
         if token.len() <= 1024
@@ -196,7 +205,7 @@ struct Menu {
 }
 
 type Props = HashMap<String, OwnedValue>;
-/// `(width, height, ARGB32 data)` (StatusNotifierItem icon pixmaps).
+/// `(width, height, ARGB32 data)` (`StatusNotifierItem` icon pixmaps).
 type Pixmaps = Vec<(i32, i32, Vec<u8>)>;
 
 fn props(pairs: &[(&str, Value<'_>)]) -> Props {
@@ -324,6 +333,14 @@ impl Menu {
     }
 }
 
+// As for `Item`: the signatures are the D-Bus interface's.
+#[allow(
+    unused_variables,
+    clippy::unused_self,
+    clippy::needless_pass_by_value,
+    clippy::needless_lifetimes,
+    clippy::unnecessary_literal_bound
+)]
 #[zbus::interface(name = "com.canonical.dbusmenu")]
 impl Menu {
     #[zbus(property)]
@@ -346,9 +363,9 @@ impl Menu {
     /// The whole menu, whatever part was asked for: it is small.
     fn get_layout(
         &self,
-        _parent_id: i32,
-        _recursion_depth: i32,
-        _property_names: Vec<String>,
+        parent_id: i32,
+        recursion_depth: i32,
+        property_names: Vec<String>,
     ) -> (u32, (i32, Props, Vec<OwnedValue>)) {
         let revision = self.state.lock().map_or(0, |m| m.revision);
         (revision, self.layout())
@@ -356,17 +373,17 @@ impl Menu {
 
     fn get_group_properties(
         &self,
-        _ids: Vec<i32>,
-        _property_names: Vec<String>,
+        ids: Vec<i32>,
+        property_names: Vec<String>,
     ) -> Vec<(i32, Props)> {
         Vec::new()
     }
 
-    fn get_property(&self, _id: i32, _name: String) -> OwnedValue {
+    fn get_property(&self, id: i32, name: String) -> OwnedValue {
         OwnedValue::from(0u32)
     }
 
-    fn event(&self, id: i32, event_id: String, _data: OwnedValue, _timestamp: u32) {
+    fn event(&self, id: i32, event_id: String, data: OwnedValue, timestamp: u32) {
         if event_id == "clicked" {
             self.clicked(id);
         }
@@ -381,11 +398,11 @@ impl Menu {
         Vec::new()
     }
 
-    fn about_to_show(&self, _id: i32) -> bool {
+    fn about_to_show(&self, id: i32) -> bool {
         false
     }
 
-    fn about_to_show_group(&self, _ids: Vec<i32>) -> (Vec<i32>, Vec<i32>) {
+    fn about_to_show_group(&self, ids: Vec<i32>) -> (Vec<i32>, Vec<i32>) {
         (Vec::new(), Vec::new())
     }
 

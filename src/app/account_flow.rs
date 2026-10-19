@@ -7,6 +7,9 @@ use super::*;
 
 impl AppModel {
     /// Account messages: saved sign-ins, sign-in, desktop lists, sign-out. Routed here by `update`.
+    // One `match` over this handler's messages; splitting it would only
+    // spread the routing out.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn account_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::SavedLoaded(result) => return self.saved_loaded(result),

@@ -523,7 +523,7 @@ mod tests {
                     &a.state,
                 );
                 if let Ok(code) = a.complete(&input) {
-                    assert!(!code.code.is_empty());
+                    assert_ne!(code.code, "");
                     assert!(input.contains(&a.state));
                 }
                 // Used up, whatever happened.

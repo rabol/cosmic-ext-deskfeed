@@ -6,6 +6,9 @@ use super::*;
 
 impl AppModel {
     /// Connection messages: connecting, the password dialog, sessions, the workspace move. Routed here by `update`.
+    // One `match` over this handler's messages; splitting it would only
+    // spread the routing out.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn connection_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::Connect(key) => return self.prepare_connection(&key),
@@ -465,6 +468,9 @@ impl AppModel {
     }
 
     /// Step 3: start FreeRDP and forward its events to the app.
+    // One sequence of steps in the order they happen; reads best in one
+    // place.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn launch(
         &mut self,
         account: &str,
@@ -905,172 +911,186 @@ impl AppModel {
                     self.remember_logon(key, logon);
                 }
             }
-            SessionEvent::Ended { end, log } => {
-                let ended = self
-                    .running
-                    .get(key)
-                    .map(|r| (r.attempt, r.remote_app, r.account.clone()));
-                self.running.remove(key);
-                self.session_notes.remove(key);
-                // Never remembered: this attempt didn't connect, or it did
-                // and was remembered already.
-                self.pending_password.remove(key);
-                let used_saved = self.used_saved_password.remove(key);
-                self.launching.remove(key);
-                if let Some(stop) = self.movers.remove(key) {
-                    stop.store(true, Ordering::SeqCst);
+            SessionEvent::Ended { end, log } => return self.session_ended(key, &end, &log),
+        }
+        save_task
+    }
+
+    /// A session's FreeRDP ended: clear its state, then reconnect, explain,
+    /// or ask, depending on how it ended.
+    // One sequence of steps in the order they happen; reads best in one
+    // place.
+    #[allow(clippy::too_many_lines)]
+    fn session_ended(
+        &mut self,
+        key: &str,
+        end: &SessionEnd,
+        log: &[String],
+    ) -> Task<cosmic::Action<Message>> {
+        let mut save_task = Task::none();
+        let ended = self
+            .running
+            .get(key)
+            .map(|r| (r.attempt, r.remote_app, r.account.clone()));
+        self.running.remove(key);
+        self.session_notes.remove(key);
+        // Never remembered: this attempt didn't connect, or it did
+        // and was remembered already.
+        self.pending_password.remove(key);
+        let used_saved = self.used_saved_password.remove(key);
+        self.launching.remove(key);
+        if let Some(stop) = self.movers.remove(key) {
+            stop.store(true, Ordering::SeqCst);
+        }
+        let pending = self.pending_logon.remove(key);
+        if !log.is_empty() && *end != SessionEnd::Closed {
+            crate::app_log!("FreeRDP ended ({end:?}); last log lines:");
+            for line in log {
+                crate::app_log!("  {line}");
+            }
+        }
+        // Ended because the user disconnected: however FreeRDP
+        // ended, that is a normal end, never a reason to reconnect.
+        if matches!(self.connections.get(key), Some(Connection::Disconnecting)) {
+            // Windows shown through it are gone with it.
+            self.moved_to.retain(|_, to| to != key);
+            self.connections.remove(key);
+            self.reconnects.remove(key);
+            self.timed_out.remove(key);
+            return Task::none();
+        }
+        let was_connected = matches!(self.connections.get(key), Some(Connection::Connected));
+        if let Some(to) =
+            ended
+                .filter(|(_, remote_app, _)| *remote_app)
+                .and_then(|(attempt, _, account)| {
+                    self.newer_app_connection(key, &account, end, was_connected, attempt)
+                })
+        {
+            crate::app_log!("RemoteApp's session taken over by another app's connection");
+            self.connections.remove(key);
+            self.reconnects.remove(key);
+            self.timed_out.remove(key);
+            // Windows that had moved here move on with them.
+            for target in self.moved_to.values_mut() {
+                if target == key {
+                    target.clone_from(&to);
                 }
-                let pending = self.pending_logon.remove(key);
-                if !log.is_empty() && end != SessionEnd::Closed {
-                    crate::app_log!("FreeRDP ended ({end:?}); last log lines:");
-                    for line in &log {
-                        crate::app_log!("  {line}");
-                    }
-                }
-                // Ended because the user disconnected: however FreeRDP
-                // ended, that is a normal end, never a reason to reconnect.
-                if matches!(self.connections.get(key), Some(Connection::Disconnecting)) {
-                    // Windows shown through it are gone with it.
-                    self.moved_to.retain(|_, to| to != key);
-                    self.connections.remove(key);
-                    self.reconnects.remove(key);
-                    self.timed_out.remove(key);
-                    return Task::none();
-                }
-                let was_connected =
-                    matches!(self.connections.get(key), Some(Connection::Connected));
-                if let Some(to) = ended.filter(|(_, remote_app, _)| *remote_app).and_then(
-                    |(attempt, _, account)| {
-                        self.newer_app_connection(key, &account, &end, was_connected, attempt)
-                    },
-                ) {
-                    crate::app_log!("RemoteApp's session taken over by another app's connection");
-                    self.connections.remove(key);
-                    self.reconnects.remove(key);
-                    self.timed_out.remove(key);
-                    // Windows that had moved here move on with them.
-                    for target in self.moved_to.values_mut() {
-                        if target == key {
-                            target.clone_from(&to);
-                        }
-                    }
-                    self.moved_to.insert(key.to_owned(), to);
-                    return save_task;
-                }
-                self.moved_to.retain(|_, to| to != key);
-                let tried = pending.as_ref().map(|(logon, _)| logon);
-                let reconnecting = self.reconnects.contains_key(key);
-                let wanted = self
-                    .account_of_resource(key)
-                    .is_some_and(|a| self.effective_settings(&a.id, key).reconnect);
-                let timed_out = self.timed_out.contains(key);
-                if wanted
-                    && self.quit == Quit::No
-                    && ((timed_out && reconnecting)
-                        || (!timed_out
-                            && decide::reconnects(
-                                &end,
-                                was_connected,
-                                reconnecting,
-                                tried,
-                                self.config.saved_passwords.contains(key),
-                            )))
-                {
-                    self.timed_out.remove(key);
-                    return self.schedule_reconnect(key);
-                }
-                self.reconnects.remove(key);
-                if self.timed_out.remove(key) {
-                    // Ended by the app: not about how the user logged on.
-                    self.connections.insert(
-                        key.to_owned(),
-                        Connection::Failed(fl!("error-connect-too-long")),
-                    );
-                    return Task::none();
-                }
-                let outcome = decide::end_outcome(
-                    &end,
-                    was_connected,
-                    self.config.logon_settings.get(key),
-                    tried,
-                    self.entra_failures.get(key).copied().unwrap_or(0),
+            }
+            self.moved_to.insert(key.to_owned(), to);
+            return save_task;
+        }
+        self.moved_to.retain(|_, to| to != key);
+        let tried = pending.as_ref().map(|(logon, _)| logon);
+        let reconnecting = self.reconnects.contains_key(key);
+        let wanted = self
+            .account_of_resource(key)
+            .is_some_and(|a| self.effective_settings(&a.id, key).reconnect);
+        let timed_out = self.timed_out.contains(key);
+        if wanted
+            && self.quit == Quit::No
+            && ((timed_out && reconnecting)
+                || (!timed_out
+                    && decide::reconnects(
+                        end,
+                        was_connected,
+                        reconnecting,
+                        tried,
+                        self.config.saved_passwords.contains(key),
+                    )))
+        {
+            self.timed_out.remove(key);
+            return self.schedule_reconnect(key);
+        }
+        self.reconnects.remove(key);
+        if self.timed_out.remove(key) {
+            // Ended by the app: not about how the user logged on.
+            self.connections.insert(
+                key.to_owned(),
+                Connection::Failed(fl!("error-connect-too-long")),
+            );
+            return Task::none();
+        }
+        let outcome = decide::end_outcome(
+            end,
+            was_connected,
+            self.config.logon_settings.get(key),
+            tried,
+            self.entra_failures.get(key).copied().unwrap_or(0),
+        );
+        if outcome != decide::EndOutcome::Clear
+            && !was_connected
+            && tried == Some(&LogonSetting::EntraSignIn)
+        {
+            *self.entra_failures.entry(key.to_owned()).or_insert(0) += 1;
+        }
+        if let SessionEnd::CertificateNotTrusted(certificate) = end {
+            let pinned = self.config.certificate_pins.get(key).cloned();
+            let step = decide::certificate_step(pinned.as_deref(), &certificate.fingerprint);
+            crate::app_log!("session host certificate not trusted: {step:?}");
+            let title = self
+                .account_of_resource(key)
+                .and_then(|a| a.resource(key))
+                .map(|r| r.title.clone())
+                .unwrap_or_default();
+            self.connections.insert(
+                key.to_owned(),
+                Connection::Failed(match step {
+                    decide::CertificateStep::Ask => fl!("error-certificate-untrusted"),
+                    decide::CertificateStep::Changed => fl!("error-certificate-changed"),
+                }),
+            );
+            self.certificate_dialog = Some(CertificateDialog {
+                key: key.to_owned(),
+                title,
+                certificate: certificate.clone(),
+                changed_from: (step == decide::CertificateStep::Changed)
+                    .then_some(pinned)
+                    .flatten(),
+            });
+            return Task::none();
+        }
+        match outcome {
+            decide::EndOutcome::Clear => {
+                self.connections.remove(key);
+            }
+            decide::EndOutcome::OfferPassword => {
+                // Offer password logon next time, and say why.
+                self.entra_failed.insert(key.to_owned());
+                self.connections.insert(
+                    key.to_owned(),
+                    Connection::Failed(fl!("status-entra-failed")),
                 );
-                if outcome != decide::EndOutcome::Clear
-                    && !was_connected
-                    && tried == Some(&LogonSetting::EntraSignIn)
-                {
-                    *self.entra_failures.entry(key.to_owned()).or_insert(0) += 1;
-                }
-                if let SessionEnd::CertificateNotTrusted(certificate) = &end {
-                    let pinned = self.config.certificate_pins.get(key).cloned();
-                    let step =
-                        decide::certificate_step(pinned.as_deref(), &certificate.fingerprint);
-                    crate::app_log!("session host certificate not trusted: {step:?}");
-                    let title = self
-                        .account_of_resource(key)
-                        .and_then(|a| a.resource(key))
-                        .map(|r| r.title.clone())
-                        .unwrap_or_default();
-                    self.connections.insert(
-                        key.to_owned(),
-                        Connection::Failed(match step {
-                            decide::CertificateStep::Ask => fl!("error-certificate-untrusted"),
-                            decide::CertificateStep::Changed => fl!("error-certificate-changed"),
-                        }),
-                    );
-                    self.certificate_dialog = Some(CertificateDialog {
-                        key: key.to_owned(),
-                        title,
-                        certificate: certificate.clone(),
-                        changed_from: (step == decide::CertificateStep::Changed)
-                            .then_some(pinned)
-                            .flatten(),
-                    });
-                    return Task::none();
-                }
-                match outcome {
-                    decide::EndOutcome::Clear => {
-                        self.connections.remove(key);
-                    }
-                    decide::EndOutcome::OfferPassword => {
-                        // Offer password logon next time, and say why.
-                        self.entra_failed.insert(key.to_owned());
-                        self.connections.insert(
-                            key.to_owned(),
-                            Connection::Failed(fl!("status-entra-failed")),
-                        );
-                        self.last_failure.insert(
-                            key.to_owned(),
-                            fl!("error-entra-failed", detail = describe_session_end(&end)),
-                        );
-                    }
-                    decide::EndOutcome::WrongPassword => {
-                        // Stop and explain; the user decides whether to try
-                        // again (ADR 0005). No automatic retry or re-prompt.
-                        let tried = pending
-                            .map(|(logon, _)| self.logon_labels[logon_index(&logon).0].clone())
-                            .unwrap_or_default();
-                        let message = if used_saved {
-                            // Never tried again (ADR 0005): it goes, and
-                            // the dialog asks next time.
-                            save_task = self.forget_password(key);
-                            fl!("password-rejected-removed")
-                        } else {
-                            fl!("error-logon-failed", setting = tried)
-                        };
-                        self.connections.insert(
-                            key.to_owned(),
-                            Connection::Failed(fl!("status-logon-failed")),
-                        );
-                        self.last_failure.insert(key.to_owned(), message);
-                    }
-                    decide::EndOutcome::Failed => {
-                        self.connections.insert(
-                            key.to_owned(),
-                            Connection::Failed(describe_session_end(&end)),
-                        );
-                    }
-                }
+                self.last_failure.insert(
+                    key.to_owned(),
+                    fl!("error-entra-failed", detail = describe_session_end(end)),
+                );
+            }
+            decide::EndOutcome::WrongPassword => {
+                // Stop and explain; the user decides whether to try
+                // again (ADR 0005). No automatic retry or re-prompt.
+                let tried = pending
+                    .map(|(logon, _)| self.logon_labels[logon_index(&logon).0].clone())
+                    .unwrap_or_default();
+                let message = if used_saved {
+                    // Never tried again (ADR 0005): it goes, and
+                    // the dialog asks next time.
+                    save_task = self.forget_password(key);
+                    fl!("password-rejected-removed")
+                } else {
+                    fl!("error-logon-failed", setting = tried)
+                };
+                self.connections.insert(
+                    key.to_owned(),
+                    Connection::Failed(fl!("status-logon-failed")),
+                );
+                self.last_failure.insert(key.to_owned(), message);
+            }
+            decide::EndOutcome::Failed => {
+                self.connections.insert(
+                    key.to_owned(),
+                    Connection::Failed(describe_session_end(end)),
+                );
             }
         }
         save_task

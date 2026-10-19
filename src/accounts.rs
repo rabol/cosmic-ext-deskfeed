@@ -528,7 +528,7 @@ fn renew_in(
     let account = match newest(&account) {
         Some(known)
             if !known.tokens.needs_refresh(Instant::now())
-                && !(force && known.tokens.access_token.expose() == refused) =>
+                && (!force || known.tokens.access_token.expose() != refused) =>
         {
             return Ok(known);
         }
@@ -825,7 +825,7 @@ mod tests {
         let store = FakeStore::with(&me, "rt-old");
         let mut account =
             Arc::into_inner(signed_in(&me, Some("rt-old"), Duration::from_secs(3600))).unwrap();
-        account.tokens.expires_wall = SystemTime::now() - Duration::from_secs(5 * 3600);
+        account.tokens.expires_wall = SystemTime::now() - Duration::from_hours(5);
         let renewed = renew_in(&http(port), &env(port, &store), Arc::new(account), false).unwrap();
         assert_eq!(renewed.tokens.access_token.expose(), "new-access");
     }

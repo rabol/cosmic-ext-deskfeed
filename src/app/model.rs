@@ -138,6 +138,8 @@ pub(super) struct Running {
 }
 
 /// A FreeRDP start in progress.
+// Independent facts about one start; a bitflag type would only hide them.
+#[allow(clippy::struct_excessive_bools)]
 pub(super) struct Launching {
     pub(super) attempt: u64,
     /// How long it may take to connect (spec §8: every attempt ends).

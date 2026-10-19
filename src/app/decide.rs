@@ -123,11 +123,12 @@ pub(super) fn reconnects(
         | SessionEnd::TlsFailed
         | SessionEnd::Failed { .. }
         | SessionEnd::Crashed => reconnecting,
-        // Taken over by another connection: reconnecting would take it
-        // back, and the two would take turns (ADR 0020). A refused app
-        // stays refused.
-        SessionEnd::Replaced | SessionEnd::AppRefused(_) => false,
-        SessionEnd::Closed
+        // Taken over by another connection (`Replaced`): reconnecting would
+        // take it back, and the two would take turns (ADR 0020). A refused
+        // app stays refused.
+        SessionEnd::Replaced
+        | SessionEnd::AppRefused(_)
+        | SessionEnd::Closed
         | SessionEnd::DisconnectedByServer
         | SessionEnd::Cancelled
         | SessionEnd::CertificateNotTrusted(_)
@@ -171,7 +172,7 @@ pub(super) fn moved_to<'a>(
 pub(super) fn refresh_wait(every: std::time::Duration, random: u32) -> std::time::Duration {
     let spread = every / 5;
     let offset = spread.mul_f64(f64::from(random) / f64::from(u32::MAX));
-    every - every / 10 + offset
+    every.saturating_sub(every / 10) + offset
 }
 
 /// The computer slept between two checks: the wall clock moved on more

@@ -682,6 +682,9 @@ impl AppModel {
     }
 
     /// App-wide messages: dependencies, the context drawer, links, notices, the log. Routed here by `update`.
+    // One `match` over this handler's messages; splitting it would only
+    // spread the routing out.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::Tray(event) => return self.tray_event(event),
@@ -708,7 +711,7 @@ impl AppModel {
                 self.diagnostics_status = None;
                 let inputs = self.diagnostics_inputs();
                 return cosmic::task::future(async move {
-                    let text = tokio::task::spawn_blocking(move || diagnostics::build(inputs))
+                    let text = tokio::task::spawn_blocking(move || diagnostics::build(&inputs))
                         .await
                         .unwrap_or_default();
                     Message::DiagnosticsReady(text)

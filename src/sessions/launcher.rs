@@ -926,6 +926,8 @@ fn is_state_change(line: &str) -> bool {
     line.contains(&format!("[DEBUG][{STATE_LOGGER}]")) && line.contains(" --> ")
 }
 
+// Independent facts read from the log; a bitflag type would only hide them.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Default)]
 struct Log {
     lines: Vec<String>,
@@ -1848,7 +1850,7 @@ sleep 300
                         }
                     }
                 }
-                Err(_) => panic!("nothing happened in time: {events:?}"),
+                Err(e) => panic!("nothing happened in time ({e}): {events:?}"),
             }
         };
         if var("EXPECT").is_ok_and(|v| v == "missing") {

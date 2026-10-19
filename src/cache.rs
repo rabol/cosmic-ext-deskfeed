@@ -217,7 +217,7 @@ mod tests {
         }]
     }
 
-    const DAY: Duration = Duration::from_secs(86_400);
+    const DAY: Duration = Duration::from_hours(24);
 
     #[test]
     fn saves_and_loads_privately() {
