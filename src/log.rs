@@ -110,6 +110,8 @@ pub fn redact(message: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .take(MAX_LINE)
         .collect();
+    // IPv6 addresses first: `:` separates words below (review U4).
+    let one_line = redact_ipv6(&one_line);
     let mut out = String::with_capacity(one_line.len());
     let mut word = String::new();
     for c in one_line.chars() {
@@ -141,10 +143,11 @@ fn replace_word(word: &str) -> Option<&'static str> {
     if is_guid(word) {
         return Some("<id>");
     }
+    // `DOMAIN\\user`, `user@domain.example`, and `user@DOMAIN` (review U4).
     if word.contains('\\')
         || word
             .split_once('@')
-            .is_some_and(|(user, domain)| !user.is_empty() && domain.contains('.'))
+            .is_some_and(|(user, domain)| !user.is_empty() && !domain.is_empty())
     {
         return Some("<user>");
     }
@@ -164,6 +167,55 @@ fn replace_word(word: &str) -> Option<&'static str> {
         return Some("<redacted>");
     }
     None
+}
+
+/// Replaces IPv6 addresses (also with a `%zone`) by `<ip>`: runs of hex
+/// digits, `:`, `.` and `%zone` that parse as one. Timestamps like
+/// `12:16:11:369` don't parse, so they stay.
+fn redact_ipv6(line: &str) -> String {
+    let is_part = |c: char| c.is_ascii_hexdigit() || matches!(c, ':' | '.');
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(start) = rest.find(is_part) {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let end = rest.find(|c: char| !is_part(c)).unwrap_or(rest.len());
+        let candidate = &rest[..end];
+        // A `%zone` after the address belongs to it.
+        let zone_end = rest[end..].strip_prefix('%').map_or(end, |z| {
+            end + 1
+                + z.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+                    .unwrap_or(z.len())
+        });
+        // `addr:port` without brackets can't be told apart; try the whole
+        // run, then without a trailing `:port`-like part.
+        let whole = candidate.trim_end_matches('.');
+        // Where the address ends: after its `%zone`, else before any
+        // trailing dots (a sentence's period stays).
+        let next = if zone_end > end {
+            zone_end
+        } else {
+            whole.len()
+        };
+        // A whole word only (`freerdp::core` holds `::c`, which parses),
+        // with a digit or letter in it (`::` alone isn't an address here).
+        let word_char = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+        let bounded =
+            !word_char(out.chars().next_back()) && !word_char(rest[next..].chars().next());
+        let parsed = bounded
+            && whole.chars().any(|c| c.is_ascii_hexdigit())
+            && whole.matches(':').count() >= 2
+            && whole.parse::<std::net::Ipv6Addr>().is_ok();
+        if parsed {
+            out.push_str("<ip>");
+            rest = &rest[next..];
+        } else {
+            out.push_str(candidate);
+            rest = &rest[end..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn is_guid(word: &str) -> bool {
@@ -351,5 +403,80 @@ mod tests {
         ] {
             assert_eq!(redact(keep), keep);
         }
+    }
+
+    /// Lines shaped like real FreeRDP and app log lines, with synthetic
+    /// sensitive data (review U4): what must go, and what must stay
+    /// readable.
+    #[test]
+    fn redacts_realistic_lines() {
+        let cases: &[(&str, &[&str], &[&str])] = &[
+            (
+                "[ERROR][com.freerdp.core.transport] - [freerdp_tcp_connect]: failed to connect to fe80::1%eth0:3389",
+                &["fe80", "eth0"],
+                &["com.freerdp.core.transport", "freerdp_tcp_connect", "<ip>"],
+            ),
+            (
+                "connecting to [2001:db8:85a3::8a2e:370:7334]:443 via proxy",
+                &["2001:db8", "7334"],
+                &["<ip>", ":443"],
+            ),
+            (
+                "[12:16:11:369] [1:2] [INFO][com.freerdp.client.common] - Logon Info V2 [CORP\\anna [3]]",
+                &["anna", "CORP"],
+                &["12:16:11:369", "<user>"],
+            ),
+            ("signed in as anna@CORP", &["anna", "CORP"], &["<user>"]),
+            (
+                "user anna@contoso.example",
+                &["anna", "contoso"],
+                &["<user>"],
+            ),
+            (
+                "gateway rdgateway-c101-weu-r1.wvd.microsoft.com, host desk-7.corp.example.internal",
+                &["corp.example", "desk-7"],
+                &["rdgateway-c101-weu-r1.wvd.microsoft.com", "<host>"],
+            ),
+            (
+                "tenant 00000000-0000-0000-0000-0000000000aa refused: AADSTS50076",
+                &["0000000000aa"],
+                &["<id>", "AADSTS50076"],
+            ),
+            (
+                "address 10.17.8.107 and the app's app::model module",
+                &["10.17.8.107"],
+                &["<ip>", "app::model"],
+            ),
+        ];
+        for (line, gone, kept) in cases {
+            let out = redact(line);
+            for g in *gone {
+                assert!(!out.contains(g), "{g:?} left in {out:?}");
+            }
+            for k in *kept {
+                assert!(out.contains(k), "{k:?} lost from {out:?}");
+            }
+        }
+        assert_eq!(redact("unreachable: fe80::1."), "unreachable: <ip>.");
+        // Rust paths and timestamps are never addresses.
+        assert_eq!(
+            redact("freerdp::core and 10:20:30:400"),
+            "freerdp::core and 10:20:30:400"
+        );
+    }
+
+    #[test]
+    fn random_lines_never_break_the_redactor() {
+        let samples: [&[u8]; 3] = [
+            b"[ERROR][com.freerdp.core] - failed to connect to fe80::1%eth0:3389 as CORP\\anna",
+            b"anna@contoso.example 10.0.0.1 [2001:db8::1]:443 00000000-0000-0000-0000-000000000000",
+            b"bearer:eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl",
+        ];
+        crate::test_util::random_inputs("redact", &samples, |input| {
+            let out = redact(&String::from_utf8_lossy(input));
+            assert!(!out.contains('\n'));
+            // Replacements are short; the cut happens before them.
+            assert!(out.chars().count() <= MAX_LINE * 2);
+        });
     }
 }
