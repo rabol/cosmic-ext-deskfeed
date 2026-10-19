@@ -49,6 +49,13 @@ const LOST_MARKERS: &[&str] = &[
     "client_auto_reconnect_ex]: Network disconnect!",
     "client_auto_reconnect_ex]: Disconnected by server hitting a bug",
 ];
+/// Longest user name and password handed to FreeRDP, in bytes. Windows
+/// allows 256 characters for a password and 104 for a user principal name;
+/// these leave room for multi-byte characters. With the 16 KiB gateway
+/// token the arguments stay far below a pipe's 64 KiB (`send_args`).
+const MAX_USER_NAME: usize = 1024;
+const MAX_PASSWORD: usize = 1024;
+
 /// FreeRDP's log line when Windows refuses to start a RemoteApp.
 const APP_REFUSED_MARKER: &str = "RAIL exec error: execResult=";
 /// The server's reason when another connection took over the session
@@ -467,7 +474,7 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
     args.push(if entra { "/sec:aad" } else { "/sec:nla" }.to_owned());
     args.push(format!("/azure:auth-helper:{}", spec.helper.display()));
     if let Some(user) = &spec.username {
-        if user.contains(['\n', '\r', '\0']) {
+        if user.contains(['\n', '\r', '\0']) || user.len() > MAX_USER_NAME {
             return Err(LaunchError::Io("bad user name".into()));
         }
         args.push(format!("/u:{user}"));
@@ -480,7 +487,7 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
         }
         if let Some(pw) = &spec.password {
             let pw = pw.expose();
-            if pw.is_empty() || pw.contains(['\n', '\r', '\0']) {
+            if pw.is_empty() || pw.contains(['\n', '\r', '\0']) || pw.len() > MAX_PASSWORD {
                 return Err(LaunchError::BadPassword);
             }
             args.push(format!("/p:{pw}"));
@@ -917,11 +924,28 @@ fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
 }
 
 /// Writes the argument lines and closes the pipe (an empty line ends them).
+/// Hands the arguments over. Never blocks (review F07): the whole payload
+/// must fit in the pipe's buffer, and the write end is non-blocking, so a
+/// FreeRDP that never reads them can't hold up launching or quitting. On
+/// an error the caller stops FreeRDP.
 fn send_args(write_end: OwnedFd, args: &[String]) -> std::io::Result<()> {
+    let fd = write_end.as_raw_fd();
+    // SAFETY: plain fcntl calls on a descriptor we own.
+    let capacity = unsafe { libc::fcntl(fd, libc::F_GETPIPE_SZ) };
+    // SAFETY: as above.
+    let nonblocking = unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        flags >= 0 && libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) == 0
+    };
     let mut w = fs::File::from(write_end);
     let mut payload = args.join("\n");
     payload.push_str("\n\n");
-    let result = w.write_all(payload.as_bytes());
+    let fits = usize::try_from(capacity).is_ok_and(|c| payload.len() <= c);
+    let result = if fits && nonblocking {
+        w.write_all(payload.as_bytes())
+    } else {
+        Err(std::io::Error::other("arguments don't fit the pipe"))
+    };
     // Wipe our copy of the password from this buffer.
     // SAFETY: overwriting bytes with zeros keeps the String valid UTF-8.
     unsafe { payload.as_bytes_mut().fill(0) };
@@ -1469,6 +1493,32 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    #[test]
+    fn handing_over_arguments_never_blocks() {
+        // Nobody reads the pipe, and the arguments are bigger than it.
+        let (read_end, write_end) = pipe().unwrap();
+        let args = vec!["x".repeat(1024 * 1024)];
+        let started = std::time::Instant::now();
+        assert!(send_args(write_end, &args).is_err());
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(read_end);
+        // Normal arguments fit.
+        let (read_end, write_end) = pipe().unwrap();
+        send_args(write_end, &["/u:anna".into(), "/p:pw".into()]).unwrap();
+        let mut got = String::new();
+        fs::File::from(read_end).read_to_string(&mut got).unwrap();
+        assert_eq!(got, "/u:anna\n/p:pw\n\n");
+        // Too long a password or user name never reaches the pipe.
+        let mut s = spec(LogonSetting::Automatic, Some(&"p".repeat(2000)), false);
+        assert_eq!(
+            build_args(&s, Path::new("/x.rdp")).unwrap_err(),
+            LaunchError::BadPassword
+        );
+        s.password = None;
+        s.username = Some("u".repeat(2000));
+        assert!(build_args(&s, Path::new("/x.rdp")).is_err());
     }
 
     #[test]
