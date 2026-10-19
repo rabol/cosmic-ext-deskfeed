@@ -51,7 +51,6 @@ Install the current build first (`just install`, or the package).
 
 11a. **Editable Windows user name** (review F09), on a desktop that asks for a Windows password (your issue #38 host pool). *Expected:* the password dialog shows "Windows user name", filled with your account's name. Change it (for example to `DOMAIN\name` if your Windows logon uses that), connect. *Expected:* it signs in as that user, and the next time the dialog shows the name you typed. A malformed name (like `name@`) gives a clear message instead of trying.
 12. **Remembered Windows password** (ADR 0009 addendum), on a desktop that asks for a Windows password. Tick "Remember this password", connect, disconnect, connect again. *Expected:* no password question the second time.
-13. **RemoteApp from Azure Virtual Desktop** (ADR 0020), once a RemoteApp is assigned to your account. Connect it. *Expected:* the app's window opens like any other window. Open a second app from the same place. *Expected:* both windows stay open, and the first app's row says "Its windows are in <second app>'s connection".
 14. **Stability** (spec §8, §13): a few hours of use with a desktop open, including idle time, changing audio devices, plugging in a monitor, and sleep.
 
 ## Done
