@@ -29,50 +29,120 @@ use std::fmt::Write as _;
 
 const MAX_LINES: usize = 1_000;
 const MAX_VALUE_LEN: usize = 4_096;
+/// Most refused property names kept for the log.
+const MAX_REFUSED: usize = 16;
 
-/// Properties copied from the feed's file, lower-case. Display behaviour
-/// (`smart sizing`, which conflicts with `/dynamic-resolution`; full screen
-/// and monitors) is left out: the app's settings decide it (settings.rs).
-/// FreeRDP can't switch full screen off from the command line, so a
-/// `screen mode id:i:2` here would override "windowed".
-const ALLOWED: &[&str] = &[
-    "full address",
-    "alternate full address",
-    "gatewayhostname",
-    "gatewayusagemethod",
-    "gatewayprofileusagemethod",
-    "gatewaycredentialssource",
-    "gatewaybrokeringtype",
-    "armpath",
-    "loadbalanceinfo",
-    "aadtenantid",
-    "geo",
-    "hubdiscoverygeourl",
-    "wvd endpoint pool",
-    "workspace id",
-    "resourceprovider",
-    // RemoteApps (ADR 0020): which program, with the arguments the
-    // administrator published. Not `remoteapplicationfile` or
-    // `remoteapplicationicon`, which name files on this computer, and not
-    // `remoteapplicationexpandcmdline`/`…expandworkingdir`: their `0` asks
-    // for this computer's environment values, and FreeRDP 3.32.2 ignores
-    // them anyway (read in `client/common/file.c`, used nowhere).
-    "remoteapplicationmode",
-    "remoteapplicationprogram",
-    "remoteapplicationname",
-    "remoteapplicationcmdline",
-    "remotedesktopname",
-    "enablerdsaadauth",
-    "enablecredsspsupport",
-    "promptcredentialonce",
-    "targetisaadjoined",
-    "kdcproxyname",
-    "use redirection server name",
-    "audiomode",
-    "videoplaybackmode",
-    "dynamic resolution",
-    "autoreconnection enabled",
-];
+/// How a kept property's value is checked (review F04: typed, with
+/// destinations checked separately).
+#[derive(Clone, Copy)]
+enum Rule {
+    /// `i`, within this range (Microsoft's RDP properties reference).
+    Int(i64, i64),
+    /// `s`: printable text.
+    Text,
+    /// `s`: a host name or IP address, optionally with `:port`; no scheme,
+    /// user or path.
+    HostPort,
+    /// `s`: a host name only.
+    Host,
+}
+
+/// Properties copied from the feed's file (lower-case) and their rules.
+/// Display behaviour (`smart sizing`, which conflicts with
+/// `/dynamic-resolution`; full screen and monitors) is left out: the app's
+/// settings decide it (settings.rs). FreeRDP can't switch full screen off
+/// from the command line, so a `screen mode id:i:2` here would override
+/// "windowed".
+///
+/// Not kept although AVD sends them: `armpath`, `geo`,
+/// `hubdiscoverygeourl`, `wvd endpoint pool` and `resourceprovider`, which
+/// FreeRDP 3.32.2 reads but never uses, and `workspace id` and
+/// `remotedesktopname`, which it doesn't read. With the AVD gateway the
+/// session host comes from the broker's answer (`gateway/arm.c`), so
+/// `full address` is only checked for its form.
+fn rule(key: &str) -> Option<Rule> {
+    use Rule::{Host, HostPort, Int, Text};
+    Some(match key {
+        "full address" | "alternate full address" | "gatewayhostname" => HostPort,
+        // FreeRDP's Kerberos KDC address, as given (`KerberosKdcUrl`).
+        "kdcproxyname" => Host,
+        // Text: `loadbalanceinfo`, `aadtenantid`, and for RemoteApps
+        // (ADR 0020) which program, with the arguments the administrator
+        // published. Not `remoteapplicationfile` or
+        // `remoteapplicationicon`, which name files on this computer, and
+        // not `remoteapplicationexpandcmdline`/`…expandworkingdir`: their `0`
+        // asks for this computer's environment values, and FreeRDP 3.32.2
+        // ignores them anyway (read in `client/common/file.c`, used nowhere).
+        "loadbalanceinfo"
+        | "aadtenantid"
+        | "remoteapplicationprogram"
+        | "remoteapplicationname"
+        | "remoteapplicationcmdline" => Text,
+        "gatewayusagemethod" => Int(0, 4),
+        "gatewaycredentialssource" => Int(0, 5),
+        "audiomode" => Int(0, 2),
+        // Not documented for AVD; small values only.
+        "gatewaybrokeringtype" => Int(0, 9),
+        "gatewayprofileusagemethod"
+        | "remoteapplicationmode"
+        | "enablerdsaadauth"
+        | "enablecredsspsupport"
+        | "promptcredentialonce"
+        | "targetisaadjoined"
+        | "use redirection server name"
+        | "videoplaybackmode"
+        | "dynamic resolution"
+        | "autoreconnection enabled" => Int(0, 1),
+        _ => return None,
+    })
+}
+
+/// The value as the rule allows it, or `None`.
+fn checked(rule: Rule, kind: &str, value: &str) -> Option<Value> {
+    let printable = |v: &str| !v.is_empty() && !v.chars().any(char::is_control);
+    match (rule, kind) {
+        (Rule::Int(min, max), "i") => {
+            let v: i64 = value.trim().parse().ok()?;
+            (min..=max).contains(&v).then_some(Value::Int(v))
+        }
+        (Rule::Text, "s") if printable(value) => Some(Value::Str(value.to_owned())),
+        (Rule::HostPort, "s") if is_host_port(value) => Some(Value::Str(value.to_owned())),
+        (Rule::Host, "s") if is_host(value) => Some(Value::Str(value.to_owned())),
+        _ => None,
+    }
+}
+
+/// A DNS name or IPv4 address: labels of letters, digits, `-` and `_`.
+fn is_host(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 253
+        && s.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        })
+}
+
+/// `host`, `host:port` or `[IPv6]:port`, port 1–65535.
+fn is_host_port(s: &str) -> bool {
+    if let Some(rest) = s.strip_prefix('[') {
+        let Some((ip, port)) = rest.split_once(']') else {
+            return false;
+        };
+        return ip.parse::<std::net::Ipv6Addr>().is_ok()
+            && (port.is_empty() || port.strip_prefix(':').is_some_and(is_port));
+    }
+    match s.rsplit_once(':') {
+        Some((host, port)) => is_host(host) && is_port(port),
+        None => is_host(s),
+    }
+}
+
+fn is_port(p: &str) -> bool {
+    p.parse::<u16>().is_ok_and(|n| n > 0) && p.chars().all(|c| c.is_ascii_digit())
+}
 
 /// Written after the kept properties so local devices stay private.
 const DEVICE_DEFAULTS: &[&str] = &[
@@ -178,6 +248,9 @@ pub struct ConnectionFile {
     pub cameras: CameraPolicy,
     /// The administrator's clipboard, microphone and sound policy.
     pub devices: DevicePolicy,
+    /// Names of properties Deskfeed keeps that were dropped for their form
+    /// (bounded; for the log).
+    pub refused: Vec<String>,
 }
 
 impl ConnectionFile {
@@ -187,6 +260,7 @@ impl ConnectionFile {
         let mut dropped = 0;
         let mut cameras = CameraPolicy::NotAllowed;
         let mut devices = DevicePolicy::DEFAULT;
+        let mut refused = Vec::new();
         for (n, line) in text.lines().enumerate() {
             if n >= MAX_LINES {
                 return Err(RdpError::TooLarge);
@@ -204,25 +278,23 @@ impl ConnectionFile {
                 cameras = CameraPolicy::parse(value);
             }
             devices.read(&key, kind, value);
-            if !ALLOWED.contains(&key.as_str()) || value.len() > MAX_VALUE_LEN {
+            let Some(rule) = rule(&key) else {
                 dropped += 1;
                 continue;
-            }
-            let value = match kind {
-                "i" => {
-                    let Ok(v) = value.trim().parse() else {
-                        dropped += 1;
-                        continue;
-                    };
-                    Value::Int(v)
-                }
-                "s" if value.chars().all(|c| !c.is_control()) => Value::Str(value.to_owned()),
-                _ => {
-                    dropped += 1;
-                    continue;
-                }
             };
-            props.insert(key, value);
+            if let Some(value) = (value.len() <= MAX_VALUE_LEN)
+                .then(|| checked(rule, kind, value))
+                .flatten()
+            {
+                props.insert(key, value);
+            } else {
+                // A property Deskfeed keeps, in a form it doesn't accept:
+                // its name goes to the log (`refused`), never its value.
+                dropped += 1;
+                if refused.len() < MAX_REFUSED && !refused.contains(&key) {
+                    refused.push(key);
+                }
+            }
         }
         if !matches!(props.get("full address"), Some(Value::Str(s)) if !s.is_empty()) {
             return Err(RdpError::MissingAddress);
@@ -235,6 +307,7 @@ impl ConnectionFile {
             dropped,
             cameras,
             devices,
+            refused,
         })
     }
 
@@ -253,6 +326,7 @@ impl ConnectionFile {
                 microphone: true,
                 sound: true,
             },
+            refused: Vec::new(),
         }
     }
 
@@ -348,11 +422,12 @@ mod tests {
         for kept in [
             "full address:s:rdgateway.example",
             "gatewayhostname:s:rdgateway.wvd.microsoft.com:443",
-            "armpath:s:abc/def",
             "audiomode:i:0",
         ] {
             assert!(text.contains(kept), "{kept}");
         }
+        // Read by FreeRDP but never used: not passed on.
+        assert!(!text.contains("armpath"));
         for gone in [
             "drivestoredirect",
             "devicestoredirect",
@@ -367,7 +442,7 @@ mod tests {
         assert!(text.contains("redirectclipboard:i:0"));
         assert!(text.contains("redirectprinters:i:0"));
         assert!(!text.contains("redirectclipboard:i:1"));
-        assert_eq!(f.dropped, 9);
+        assert_eq!(f.dropped, 10);
         assert_eq!(f.cameras, CameraPolicy::All);
     }
 
@@ -393,6 +468,63 @@ mod tests {
         assert_eq!(
             policy("camerastoredirect:i:1\r\n"),
             CameraPolicy::NotAllowed
+        );
+    }
+
+    #[test]
+    fn each_property_has_its_form() {
+        let kept = |line: &str| {
+            let f = ConnectionFile::parse(format!("full address:s:h\r\n{GW}{line}\r\n").as_bytes())
+                .unwrap();
+            (f.to_freerdp_text().contains(line), f.refused)
+        };
+        for good in [
+            "alternate full address:s:host-1.example.com:3389",
+            "alternate full address:s:10.0.0.4",
+            "alternate full address:s:[fe80::1]:3389",
+            "kdcproxyname:s:kdc.example.com",
+            "audiomode:i:2",
+            "gatewayusagemethod:i:4",
+            "enablerdsaadauth:i:1",
+            "loadbalanceinfo:s:tsv://MS Terminal Services Plugin.1.Pool",
+            "remoteapplicationcmdline:s:/x \"y z\"",
+        ] {
+            assert_eq!(kept(good), (true, vec![]), "{good}");
+        }
+        for (bad, key) in [
+            (
+                "alternate full address:s:https://evil.example/x",
+                "alternate full address",
+            ),
+            (
+                "alternate full address:s:user@host",
+                "alternate full address",
+            ),
+            ("alternate full address:s:host:0", "alternate full address"),
+            (
+                "alternate full address:s:host:99999",
+                "alternate full address",
+            ),
+            (
+                "alternate full address:s:host/path",
+                "alternate full address",
+            ),
+            (
+                "kdcproxyname:s:https://kdc.example.com/KdcProxy",
+                "kdcproxyname",
+            ),
+            ("kdcproxyname:s:kdc.example.com:443", "kdcproxyname"),
+            ("audiomode:i:7", "audiomode"),
+            ("enablerdsaadauth:i:-1", "enablerdsaadauth"),
+            ("enablerdsaadauth:s:1", "enablerdsaadauth"),
+            ("loadbalanceinfo:i:1", "loadbalanceinfo"),
+        ] {
+            assert_eq!(kept(bad), (false, vec![key.to_owned()]), "{bad}");
+        }
+        // A full address with a scheme makes the file unusable.
+        assert_eq!(
+            ConnectionFile::parse(format!("full address:s:https://h/\r\n{GW}").as_bytes()),
+            Err(RdpError::MissingAddress)
         );
     }
 
@@ -585,10 +717,7 @@ mod tests {
                 for line in text.split_terminator("\r\n") {
                     assert!(!line.chars().any(char::is_control), "{line:?}");
                     let key = line.split(':').next().unwrap_or_default();
-                    assert!(
-                        ALLOWED.contains(&key) || defaults.contains(&key),
-                        "{line:?}"
-                    );
+                    assert!(rule(key).is_some() || defaults.contains(&key), "{line:?}");
                 }
                 assert!(matches!(
                     f.props.get("gatewayhostname"),

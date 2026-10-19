@@ -27,5 +27,6 @@ Each significant decision is recorded as a short Markdown file, `NNNN-title.md`,
 | [0021](0021-device-policy-from-the-connection-file.md) | The administrator's device policy from the connection file wins | Accepted |
 | [0022](0022-child-programs-end-with-the-app.md) | Child programs end with the app (PR_SET_PDEATHSIG from one spawner thread) | Accepted |
 | [0023](0023-random-input-tests-instead-of-cargo-fuzz.md) | Random-input tests on stable Rust instead of cargo-fuzz | Accepted |
+| [0024](0024-typed-connection-file-properties.md) | Connection-file properties: a rule per property, unused ones dropped | Accepted |
 
 Do not put tenant data (host names, tenant or workspace IDs, user names, feed URLs) in ADRs. Describe evidence in redacted form.

@@ -265,7 +265,16 @@ impl AppModel {
                     ),
                 };
                 ConnectionFile::parse(&resp.body)
-                    .map(|c| (Arc::new(c), signed_in))
+                    .map(|c| {
+                        // Names only: they come from Deskfeed's own list.
+                        if !c.refused.is_empty() {
+                            crate::app_log!(
+                                "connection file: dropped for their form: {}",
+                                c.refused.join(", ")
+                            );
+                        }
+                        (Arc::new(c), signed_in)
+                    })
                     .map_err(|e| {
                         StepError::Show(match e {
                             RdpError::GatewayNotAllowed => fl!("error-gateway-not-allowed"),
