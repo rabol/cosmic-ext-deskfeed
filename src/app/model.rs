@@ -11,8 +11,9 @@ pub(super) struct Account {
     pub(super) state: AccountState,
     /// The saved sign-in this account was restored from, for "Try again".
     pub(super) stored: Option<Stored>,
-    /// Shown above the desktop list, for example when the keyring couldn't
-    /// save the sign-in.
+    /// Shown above the desktop list when the keyring couldn't save the
+    /// sign-in: it lasts only while the app runs. "Try again" saves again
+    /// (spec §6: memory-only or retry).
     pub(super) notice: Option<String>,
     /// The saved sign-in couldn't be renewed for a temporary reason.
     pub(super) can_retry: bool,
@@ -276,6 +277,8 @@ pub enum Message {
     ),
     /// Icons fetched for an account (account, epoch, URL and PNG bytes).
     IconsLoaded(String, u64, Vec<(Url, Vec<u8>)>),
+    /// Saves an account's sign-in to the keyring again.
+    RetrySave(String),
     SignOut(String),
     SignOutSelected,
     /// The sign-out question: disconnect its sessions and sign out.

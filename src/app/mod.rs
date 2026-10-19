@@ -626,6 +626,7 @@ impl AppModel {
             | Message::IconsLoaded(..)
             | Message::CacheLoaded(..)
             | Message::SignOut(..)
+            | Message::RetrySave(..)
             | Message::SignOutSelected
             | Message::SignOutConfirm
             | Message::SignOutCancel

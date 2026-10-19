@@ -15,6 +15,8 @@ Install the current build first (`just install`, or the package).
 
 3b. **Sign-out when the keyring refuses.** Lock the keyring (for example in Passwords and Keys, if you have it), select Sign out, and cancel the unlock prompt. *Expected:* a warning "Sign-out couldn't remove all of the account's sign-in data" with a Try again button. Select Try again and unlock. *Expected:* the warning goes away, and the account doesn't come back after restarting Deskfeed.
 
+3c. **Sign in while the keyring is locked.** Lock the keyring, sign in, and cancel the unlock prompt. *Expected:* the desktop list works, with a note that the sign-in couldn't be saved and a Try again button. Select Try again and unlock. *Expected:* the note goes away, and after restarting Deskfeed you're still signed in.
+
 ### Background and tray (ADR 0017)
 
 3. **Connect from the tray with the window closed.** Turn on Settings → Background, close the window, use the tray menu's "Connect …". *Expected:* the desktop connects without the window opening. A password question or a failure opens the window. The connected desktop has a check mark, and the top of the menu says "1 connected".

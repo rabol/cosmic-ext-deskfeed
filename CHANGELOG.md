@@ -10,6 +10,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 - If Deskfeed crashes or is killed, its desktops and sign-in windows now close with it instead of running on (ADR 0022).
 - Error messages no longer contain raw technical text; the details are in the log (View → Diagnostics). A sign-in refused because the computer isn't a managed device now says so.
 - Desktop lists refresh after the computer wakes from sleep, and hourly refreshes are spread by a few minutes either way.
+- When the sign-in couldn't be saved to the keyring, a Try again button saves it again; until then it lasts only while Deskfeed runs.
 - When sign-out can't remove everything (for example, the keyring stays locked), a Try again button removes what's left.
 - Signing out of an account with desktops or apps connected asks first, offering "Disconnect and sign out" or Cancel.
 - The administrator's clipboard, microphone and sound policy from the connection file now wins over your settings, as the camera policy already did. The desktop's row says what was turned off and why (ADR 0021).

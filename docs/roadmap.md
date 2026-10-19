@@ -39,6 +39,13 @@ Working rules for this list: research the docs, source and APIs first; test loca
 - AppStream screenshots.
 - ~~Minimum GTK 4 and WebKitGTK versions as package constraints.~~ Done (2026-10-19, ADR 0007 addendum): GTK 4.10 and WebKitGTK 2.42, found by building with lower features; the helper is built for those, and the AUR packages require them.
 
+## Found by checking the spec against the code (2026-10-19)
+
+Done the same day: the administrator's device policy (ADR 0021), the sign-out question, child programs ending with the app (ADR 0022), Try again for sign-out and keyring saving, refresh after sleep with jitter, technical details moved to the log, device-compliance message. Still open:
+
+- **Fuzzing** (spec §13 item 10): the feed XML, connection file and sign-in callback parsers with `cargo-fuzz`. Needs the owner's decision: `cargo-fuzz` is a new tool and needs a nightly compiler (CI and local only, not in the app).
+- **"Client version not supported"** (spec §7): a specific error when the service rejects the client version. What the service sends in that case isn't known yet; needs evidence (a real rejection, or Microsoft's documentation) before guessing.
+
 ## Known deviation from the spec
 
 The spec prefers native Wayland session windows (§9). Deskfeed uses `xfreerdp3` on XWayland, the documented compatibility mode §9 allows; the measurements are in [ADR 0004](adr/0004-freerdp-version-and-sign-in-helper.md) (client comparison, 2026-10-18).

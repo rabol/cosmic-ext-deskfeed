@@ -390,7 +390,16 @@ impl AppModel {
             );
         }
         if let Some(notice) = &account.notice {
-            col = col.push(widget::text::body(notice.clone()));
+            col = col.push(
+                widget::row::with_capacity(2)
+                    .push(widget::text::body(notice.clone()).width(Length::Fill))
+                    .push(
+                        widget::button::standard(fl!("try-again"))
+                            .on_press(Message::RetrySave(account.id.clone())),
+                    )
+                    .spacing(cosmic::theme::spacing().space_xs)
+                    .align_y(Alignment::Center),
+            );
         }
         if loading {
             col = col.push(widget::text::body(fl!("loading-desktops")));

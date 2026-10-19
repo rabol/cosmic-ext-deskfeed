@@ -45,6 +45,23 @@ impl AppModel {
                     a.notice = result.err();
                 }
             }
+            Message::RetrySave(id) => {
+                let Some(a) = self.account(&id) else {
+                    return Task::none();
+                };
+                let AccountState::Ready { signed_in, .. } = &a.state else {
+                    return Task::none();
+                };
+                let (signed_in, sign_in) = (signed_in.clone(), a.sign_in);
+                let started = accounts::sign_out_count(&id);
+                return cosmic::task::future(async move {
+                    let result =
+                        tokio::task::spawn_blocking(move || accounts::save(&signed_in, started))
+                            .await
+                            .unwrap_or_else(|_| Err(fl!("error-generic")));
+                    Message::Saved(id, sign_in, result)
+                });
+            }
             Message::Refresh(id) => return self.load_resources(&id),
             Message::RefreshDue => {
                 // The check timer stops while the computer sleeps; the
