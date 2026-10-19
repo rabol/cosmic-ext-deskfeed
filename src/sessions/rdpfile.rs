@@ -9,9 +9,12 @@
 //! off; the user's own settings decide those later. Commands such as
 //! `alternate shell` are never passed on.
 //!
-//! `camerastoredirect` isn't passed on either, but it is read: it is the
-//! administrator's camera policy, which the user's Camera setting can't
-//! override (`cameras`).
+//! `camerastoredirect`, `redirectclipboard`, `audiocapturemode` and
+//! `audiomode` aren't passed on either, but they are read: they are the
+//! administrator's device policy, which the user's settings can't override
+//! (`cameras`, `devices`; spec §5 "respect server policy"). A missing one
+//! means Microsoft's default (RDP properties reference): no camera, no
+//! clipboard, no microphone, sound played on this computer.
 //!
 //! The file decides where the access token goes (`gatewayhostname`), so a
 //! file naming any other gateway than an AVD service host is refused. Its
@@ -48,16 +51,16 @@ const ALLOWED: &[&str] = &[
     "wvd endpoint pool",
     "workspace id",
     "resourceprovider",
-    // RemoteApps (ADR 0020): which program, with the arguments and
-    // environment expansion the administrator published. Not
-    // `remoteapplicationfile` or `remoteapplicationicon`, which name files
-    // on this computer.
+    // RemoteApps (ADR 0020): which program, with the arguments the
+    // administrator published. Not `remoteapplicationfile` or
+    // `remoteapplicationicon`, which name files on this computer, and not
+    // `remoteapplicationexpandcmdline`/`…expandworkingdir`: their `0` asks
+    // for this computer's environment values, and FreeRDP 3.32.2 ignores
+    // them anyway (read in `client/common/file.c`, used nowhere).
     "remoteapplicationmode",
     "remoteapplicationprogram",
     "remoteapplicationname",
     "remoteapplicationcmdline",
-    "remoteapplicationexpandcmdline",
-    "remoteapplicationexpandworkingdir",
     "remotedesktopname",
     "enablerdsaadauth",
     "enablecredsspsupport",
@@ -129,6 +132,43 @@ impl CameraPolicy {
     }
 }
 
+/// What the administrator allows for this computer's devices, besides
+/// cameras.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevicePolicy {
+    /// `redirectclipboard:i:1`.
+    pub clipboard: bool,
+    /// `audiocapturemode:i:1`.
+    pub microphone: bool,
+    /// `audiomode:i:0` (or missing): the desktop's sound plays here. `1`
+    /// leaves it on the host, `2` plays none.
+    pub sound: bool,
+}
+
+impl DevicePolicy {
+    /// Microsoft's defaults, for properties the file doesn't set.
+    const DEFAULT: Self = Self {
+        clipboard: false,
+        microphone: false,
+        sound: true,
+    };
+
+    fn read(&mut self, key: &str, kind: &str, value: &str) {
+        if kind != "i" {
+            return;
+        }
+        let Ok(v) = value.trim().parse::<i64>() else {
+            return;
+        };
+        match key {
+            "redirectclipboard" => self.clipboard = v == 1,
+            "audiocapturemode" => self.microphone = v == 1,
+            "audiomode" => self.sound = v == 0,
+            _ => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectionFile {
     props: BTreeMap<String, Value>,
@@ -136,6 +176,8 @@ pub struct ConnectionFile {
     pub dropped: usize,
     /// The administrator's camera policy (`camerastoredirect`).
     pub cameras: CameraPolicy,
+    /// The administrator's clipboard, microphone and sound policy.
+    pub devices: DevicePolicy,
 }
 
 impl ConnectionFile {
@@ -144,6 +186,7 @@ impl ConnectionFile {
         let mut props = BTreeMap::new();
         let mut dropped = 0;
         let mut cameras = CameraPolicy::NotAllowed;
+        let mut devices = DevicePolicy::DEFAULT;
         for (n, line) in text.lines().enumerate() {
             if n >= MAX_LINES {
                 return Err(RdpError::TooLarge);
@@ -160,6 +203,7 @@ impl ConnectionFile {
             if key == "camerastoredirect" && kind == "s" && value.len() <= MAX_VALUE_LEN {
                 cameras = CameraPolicy::parse(value);
             }
+            devices.read(&key, kind, value);
             if !ALLOWED.contains(&key.as_str()) || value.len() > MAX_VALUE_LEN {
                 dropped += 1;
                 continue;
@@ -190,6 +234,7 @@ impl ConnectionFile {
             props,
             dropped,
             cameras,
+            devices,
         })
     }
 
@@ -203,6 +248,11 @@ impl ConnectionFile {
             props,
             dropped: 0,
             cameras: CameraPolicy::All,
+            devices: DevicePolicy {
+                clipboard: true,
+                microphone: true,
+                sound: true,
+            },
         }
     }
 
@@ -347,6 +397,37 @@ mod tests {
     }
 
     #[test]
+    fn reads_device_policy_with_microsofts_defaults() {
+        let policy = |lines: &str| {
+            ConnectionFile::parse(format!("full address:s:h\r\n{GW}{lines}").as_bytes())
+                .unwrap()
+                .devices
+        };
+        assert_eq!(policy(""), DevicePolicy::DEFAULT);
+        assert_eq!(
+            policy("redirectclipboard:i:1\r\naudiocapturemode:i:1\r\naudiomode:i:0\r\n"),
+            DevicePolicy {
+                clipboard: true,
+                microphone: true,
+                sound: true
+            }
+        );
+        let off = policy("RedirectClipboard:i:0\r\naudiocapturemode:i:0\r\naudiomode:i:2\r\n");
+        assert!(!off.clipboard && !off.microphone && !off.sound);
+        assert!(!policy("audiomode:i:1\r\n").sound);
+        // Wrong type or value: the default stays.
+        assert!(!policy("redirectclipboard:s:1\r\n").clipboard);
+        assert!(!policy("redirectclipboard:i:x\r\n").clipboard);
+        // Never passed on as such: the device defaults follow.
+        let text = ConnectionFile::parse(
+            format!("full address:s:h\r\n{GW}redirectclipboard:i:1\r\n").as_bytes(),
+        )
+        .unwrap()
+        .to_freerdp_text();
+        assert!(text.contains("redirectclipboard:i:0") && !text.contains("redirectclipboard:i:1"));
+    }
+
+    #[test]
     fn reads_utf16_with_bom() {
         let mut bytes = vec![0xFF, 0xFE];
         for u in format!("full address:s:h\r\n{GW}enablerdsaadauth:i:1\r\n").encode_utf16() {
@@ -450,13 +531,13 @@ mod tests {
             "remoteapplicationprogram:s:||notepad",
             "remoteapplicationname:s:Notepad",
             "remoteapplicationcmdline:s:/A \"%USERPROFILE%\"",
-            "remoteapplicationexpandcmdline:i:1",
         ] {
             assert!(text.contains(kept), "{kept}");
         }
         assert!(!text.contains("remoteapplicationfile"));
         assert!(!text.contains("remoteapplicationicon"));
-        assert_eq!(f.dropped, 2);
+        assert!(!text.contains("remoteapplicationexpandcmdline"));
+        assert_eq!(f.dropped, 3);
     }
 
     #[test]

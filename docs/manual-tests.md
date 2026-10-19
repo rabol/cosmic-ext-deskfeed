@@ -24,6 +24,10 @@ Install the current build first (`just install`, or the package).
 8. **Display scaling** (ADR 0015). On a monitor with scaling other than 100 %, connect a desktop. *Expected:* text in Windows is the same size as in COSMIC's apps.
 9. **Camera** (ADR 0013), on a desktop whose administrator allows cameras. Turn on the Camera setting, connect, open Windows' Camera app. *Expected:* the camera works. Unplug and plug it back in: note what happens.
 
+### Administrator policy (ADR 0021)
+
+15. **Clipboard and microphone still work where allowed.** With the clipboard on in Settings, connect your usual desktop and copy text both ways. *Expected:* it works. If it doesn't, the desktop's row says "Clipboard off: your organization doesn't allow it", and the log has a line "Device policy from the connection file" showing what the feed allows. Tell me what it says.
+
 ### Lists
 
 10. **Search, favorites, last update.** Type part of a desktop's name in the search field, mark a desktop as a favorite (heart), and look at the "Updated …" line. *Expected:* the list narrows, the favorite shows at the top under Favorites, and the time is right.

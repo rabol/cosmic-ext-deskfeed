@@ -332,7 +332,36 @@ pub const DEFAULTS: Effective = Effective {
     scale: 0,
 };
 
+/// A device setting the administrator's policy turned off for a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Limited {
+    Clipboard,
+    Microphone,
+    Sound,
+}
+
 impl Effective {
+    /// Turns off what the connection file's device policy doesn't allow
+    /// (spec §5: server policy wins over a preference) and says what it
+    /// turned off, so the session can show it.
+    pub fn limit_to(&mut self, policy: crate::sessions::rdpfile::DevicePolicy) -> Vec<Limited> {
+        let mut limited = Vec::new();
+        if self.clipboard != clipboard::OFF && !policy.clipboard {
+            self.clipboard = clipboard::OFF;
+            self.clipboard_files = false;
+            limited.push(Limited::Clipboard);
+        }
+        if self.microphone && !policy.microphone {
+            self.microphone = false;
+            limited.push(Limited::Microphone);
+        }
+        if self.sound && !policy.sound {
+            self.sound = false;
+            limited.push(Limited::Sound);
+        }
+        limited
+    }
+
     /// This level with `s` on top. Hand-edited values are clamped too.
     pub fn with(self, s: Option<&ConnectionSettings>) -> Self {
         let Some(s) = s else { return self };
@@ -640,6 +669,44 @@ mod tests {
         // A desktop with the same settings is unchanged.
         let d = e.freerdp_args();
         assert!(d.contains(&"+f".into()) && d.contains(&"+grab-keyboard".into()));
+    }
+
+    #[test]
+    fn the_administrators_policy_wins() {
+        use crate::sessions::rdpfile::DevicePolicy;
+        let mut e = DEFAULTS;
+        e.clipboard = clipboard::BOTH;
+        e.clipboard_files = true;
+        e.microphone = true;
+        e.sound = true;
+        let all = DevicePolicy {
+            clipboard: true,
+            microphone: true,
+            sound: true,
+        };
+        let mut allowed = e;
+        assert!(allowed.limit_to(all).is_empty());
+        assert_eq!(allowed, e);
+        let none = DevicePolicy {
+            clipboard: false,
+            microphone: false,
+            sound: false,
+        };
+        let limited = e.limit_to(none);
+        assert_eq!(
+            limited,
+            [Limited::Clipboard, Limited::Microphone, Limited::Sound]
+        );
+        let a = e.freerdp_args();
+        assert!(a.contains(&"-clipboard".into()));
+        assert!(a.contains(&"/audio-mode:none".into()));
+        assert!(!a.contains(&"/microphone".into()));
+        // Nothing to say when the user had it off anyway.
+        let mut off = DEFAULTS;
+        off.clipboard = clipboard::OFF;
+        off.microphone = false;
+        off.sound = false;
+        assert!(off.limit_to(none).is_empty());
     }
 
     #[test]

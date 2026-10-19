@@ -8,7 +8,7 @@
 Spec §3 lists RemoteApps as parity work that needs real interoperability evidence before it is advertised as supported. Until now the feed's RemoteApps were listed but couldn't connect.
 
 FreeRDP's RemoteApp support (MS-RDPERP, "RAIL") is in the X11 client, which Deskfeed already uses (ADR 0004). In FreeRDP 3.32.2:
-- `client/common/file.c` reads `remoteapplicationmode`, `remoteapplicationprogram`, `remoteapplicationname`, `remoteapplicationcmdline`, `remoteapplicationexpandcmdline` and `remoteapplicationexpandworkingdir` from the connection file. `channels/rail/client/client_rails.c` sends the program and its arguments to Windows.
+- `client/common/file.c` reads `remoteapplicationmode`, `remoteapplicationprogram`, `remoteapplicationname`, `remoteapplicationcmdline`, `remoteapplicationexpandcmdline` and `remoteapplicationexpandworkingdir` from the connection file. `channels/rail/client/client_rails.c` sends the program and its arguments to Windows. The two `expand` properties are read but used nowhere.
 - With RemoteApp mode on, the client creates no desktop window. Each Windows window becomes an X11 window with the server's title. Its `WM_CLASS` is `/wm-class` when given (`client/X11/xf_window.c`, `xf_AppWindowCreate`), so COSMIC sees Deskfeed's app ID.
 - The remote screen covers one monitor unless `/multimon` is given (`client/X11/xf_monitor.c`). Then app windows can't be moved to another monitor.
 - When Windows refuses to start the program, the client logs `RAIL exec error: execResult=RAIL_EXEC_E_…` and cancels the connection (`xf_rail.c`), so it exits as "cancelled" (145).
@@ -19,7 +19,7 @@ The owner's tenant has no RemoteApps and the owner can't publish one, so there i
 ## Decision
 
 - Connect works for RemoteApps. The resource is a RemoteApp when its connection file says `remoteapplicationmode:i:1`, not only when the feed's type says so. The list says "App (preview)".
-- The connection file filter (`rdpfile.rs`) also keeps `remoteapplicationcmdline`, `remoteapplicationexpandcmdline` and `remoteapplicationexpandworkingdir`, which the administrator publishes. It drops `remoteapplicationfile` and `remoteapplicationicon`, which name files on this computer.
+- The connection file filter (`rdpfile.rs`) also keeps `remoteapplicationcmdline`, which the administrator publishes. It drops `remoteapplicationfile` and `remoteapplicationicon`, which name files on this computer, and the two `expand` properties: their `0` means "expand with this computer's environment" (Microsoft's RDP property reference), which would send local values to the host if FreeRDP ever honoured it.
 - For a RemoteApp, FreeRDP gets `/multimon` (app windows can go to every monitor), no `+f`, `-grab-keyboard` and `-toggle-fullscreen` (`Effective::freerdp_app_args`). The app skips "Keep the screen on" and "Open on a new workspace". Its settings page hides those rows and the keyboard section, and says why.
 - `/wm-class` stays, so app windows group under Deskfeed's icon in the dock.
 - A connected app has no Show button, and its tray entry opens Deskfeed's window. Show finds a desktop's window by the title Deskfeed gave it, and an app's windows have the titles Windows gives them.

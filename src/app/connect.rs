@@ -494,9 +494,10 @@ impl AppModel {
             settings.new_workspace = false;
             settings.system_shortcuts = false;
         }
-        // The administrator's camera policy wins over the user's setting
+        // The administrator's device policy wins over the user's settings
         // (spec §Settings: respect server policy, show effective behaviour).
         self.session_notes.remove(key);
+        let mut notes = Vec::new();
         if settings.camera {
             let note = match connection.cameras {
                 CameraPolicy::All => None,
@@ -509,8 +510,22 @@ impl AppModel {
             );
             if let Some(note) = note {
                 settings.camera = false;
-                self.session_notes.insert(key.to_owned(), note);
+                notes.push(note);
             }
+        }
+        crate::app_log!(
+            "Device policy from the connection file: {:?}",
+            connection.devices
+        );
+        notes.extend(settings.limit_to(connection.devices).into_iter().map(
+            |limited| match limited {
+                Limited::Clipboard => fl!("clipboard-not-allowed"),
+                Limited::Microphone => fl!("microphone-not-allowed"),
+                Limited::Sound => fl!("sound-not-allowed"),
+            },
+        ));
+        if !notes.is_empty() {
+            self.session_notes.insert(key.to_owned(), notes.join(" · "));
         }
         let window_title = self
             .account(account)

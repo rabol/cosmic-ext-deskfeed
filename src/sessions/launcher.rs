@@ -1877,8 +1877,6 @@ sleep 300
             "gatewaycredentialssource:i:0",
             "gatewaybrokeringtype:i:1",
             "remoteapplicationmode:i:0",
-            "remoteapplicationexpandcmdline:i:0",
-            "remoteapplicationexpandworkingdir:i:0",
             "enablerdsaadauth:i:0",
             "enablecredsspsupport:i:1",
             "promptcredentialonce:i:1",

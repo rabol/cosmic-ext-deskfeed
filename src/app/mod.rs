@@ -33,7 +33,7 @@ use crate::service::http::{Http, HttpError};
 use crate::service::icons;
 use crate::sessions::launcher::{self, LaunchSpec, LogonSetting, SessionEnd, SessionEvent};
 use crate::sessions::rdpfile::{CameraPolicy, ConnectionFile, RdpError};
-use crate::settings::{self, Choice, ConnectionSettings, Number, Toggle};
+use crate::settings::{self, Choice, ConnectionSettings, Limited, Number, Toggle};
 
 mod account_flow;
 mod background;
