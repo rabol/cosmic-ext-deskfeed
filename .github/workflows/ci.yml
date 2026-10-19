@@ -33,6 +33,7 @@ jobs:
           git rust just pkgconf
           gtk4 webkitgtk-6.0 libxkbcommon wayland
           desktop-file-utils appstream
+          dbus
 
       - name: Check out
         # actions/checkout v7.0.1

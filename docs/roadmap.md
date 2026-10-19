@@ -65,7 +65,7 @@ Still open:
 - **F10, administrator registration / system-browser sign-in** (owner's decision): implement it, which needs a tenant where an admin can register an app to test, or change the spec to say it's out of scope for now.
 - **F14**: the release checksum, filled in when tagging (with "Tag v0.1.0" above).
 - **FreeRDP bug found on the way**: HTTP proxy authentication drops the last character of the password (ADR 0008 addendum). Report upstream (owner's call, it's public).
-- The review's remaining uncertainties (U1 backend identity association, U3 tray disappearance, U4 redaction coverage, U6 OIDC key scope) and its test-gap list.
+- The review's remaining uncertainties (U1 backend identity association, U4 redaction coverage, U6 OIDC key scope) and its test-gap list. U3 (tray disappearance) is done (ADR 0017 addendum).
 
 ## Known deviation from the spec
 

@@ -51,3 +51,10 @@ libcosmic closes the app when its main window closes, unless the `multi-window` 
 - Connect from the tray works with the window closed. The window opens when the user is needed: a password or certificate question, the quit question, a sign-in, or a failed connection.
 - Show from the menu now passes COSMIC's activation token, like a click on the icon.
 
+
+## Addendum (2026-10-19): the panel's tray going away (review U3)
+
+Until now the item registered again when the panel's tray (the StatusNotifierWatcher) came back, but the app wasn't told when the tray disappeared. With the window closed, Deskfeed could then be left with no visible way back except starting it again.
+
+- `tray::follow_host` watches the watcher's name. If it is gone and still gone after 5 s (a panel restart takes a moment), the app gets `Unavailable` and shows its window, as when there is no tray at startup. When the watcher returns, the item registers again and the app gets `Ready`, so the icon and menu come back. A refused registration also counts as `Unavailable`.
+- Tested on a private bus (`dbus-daemon`, with a stand-in watcher), so the real panel isn't touched (`follows_the_panels_tray`). A quick restart re-registers without telling the app. A tray gone for good tells it after the grace time. A tray coming back later brings the icon back. Without the new step, the test fails. CI installs `dbus` for it.

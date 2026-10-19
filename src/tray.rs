@@ -19,6 +19,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use cosmic::iced::futures::{SinkExt, StreamExt, channel::mpsc};
 use zbus::object_server::SignalEmitter;
@@ -426,7 +427,15 @@ pub struct Labels {
 pub fn run(labels: Labels) -> impl cosmic::iced::futures::Stream<Item = TrayEvent> {
     cosmic::iced::stream::channel(16, move |mut out: mpsc::Sender<TrayEvent>| async move {
         let (events, mut incoming) = mpsc::unbounded();
-        match serve(labels, events).await {
+        let bus = match zbus::connection::Builder::session() {
+            Ok(bus) => bus,
+            Err(e) => {
+                let _ = out.send(TrayEvent::Unavailable(e.to_string())).await;
+                std::future::pending::<()>().await;
+                unreachable!()
+            }
+        };
+        match serve(bus, labels, events, HOST_GRACE).await {
             Ok(handle) => {
                 crate::app_log!("tray icon shown");
                 let _ = out.send(TrayEvent::Ready(handle)).await;
@@ -446,7 +455,17 @@ pub fn run(labels: Labels) -> impl cosmic::iced::futures::Stream<Item = TrayEven
     })
 }
 
-async fn serve(labels: Labels, events: mpsc::UnboundedSender<TrayEvent>) -> Result<Handle, String> {
+/// How long the panel's tray may be gone before the app is told (a panel
+/// restart takes a moment; review U3).
+const HOST_GRACE: Duration = Duration::from_secs(5);
+
+/// Serves the item on `bus` and registers it with the panel's tray.
+async fn serve(
+    bus: zbus::connection::Builder<'static>,
+    labels: Labels,
+    events: mpsc::UnboundedSender<TrayEvent>,
+    grace: Duration,
+) -> Result<Handle, String> {
     let err = |e: zbus::Error| e.to_string();
     let menu = Arc::new(Mutex::new(MenuState {
         revision: 0,
@@ -468,8 +487,7 @@ async fn serve(labels: Labels, events: mpsc::UnboundedSender<TrayEvent>) -> Resu
     }));
     let token: Arc<Mutex<Option<String>>> = Arc::default();
     let name = format!("org.kde.StatusNotifierItem-{}-1", std::process::id());
-    let conn = zbus::connection::Builder::session()
-        .map_err(err)?
+    let conn = bus
         .name(name.as_str())
         .map_err(err)?
         .serve_at(
@@ -485,7 +503,7 @@ async fn serve(labels: Labels, events: mpsc::UnboundedSender<TrayEvent>) -> Resu
             MENU_PATH,
             Menu {
                 state: menu.clone(),
-                events,
+                events: events.clone(),
                 token,
             },
         )
@@ -507,31 +525,71 @@ async fn serve(labels: Labels, events: mpsc::UnboundedSender<TrayEvent>) -> Resu
         .call::<_, _, ()>("RegisterStatusNotifierItem", &(name.as_str(),))
         .await
         .map_err(err)?;
-    // Register again whenever the panel (the watcher) restarts.
-    {
-        let conn = conn.clone();
-        let name = name.clone();
-        tokio::spawn(async move {
-            let Ok(dbus) = zbus::fdo::DBusProxy::new(&conn).await else {
-                return;
-            };
-            let Ok(mut changes) = dbus.receive_name_owner_changed().await else {
-                return;
-            };
-            while let Some(change) = changes.next().await {
-                let Ok(args) = change.args() else { continue };
-                if args.name() == WATCHER
-                    && args.new_owner().is_some()
-                    && let Ok(w) = zbus::Proxy::new(&conn, WATCHER, WATCHER_PATH, WATCHER).await
-                {
-                    let _ = w
-                        .call::<_, _, ()>("RegisterStatusNotifierItem", &(name.as_str(),))
-                        .await;
+    let handle = Handle {
+        menu,
+        conn: conn.clone(),
+    };
+    tokio::spawn(follow_host(conn, name, events, handle.clone(), grace));
+    Ok(handle)
+}
+
+/// Follows the panel's tray (the watcher): when it goes away and stays away
+/// for `grace`, the app hears `Unavailable` and shows its window, so it is
+/// never hidden without a way back (spec §5; review U3). When it comes back,
+/// the item registers again and the app hears `Ready`.
+async fn follow_host(
+    conn: zbus::Connection,
+    name: String,
+    events: mpsc::UnboundedSender<TrayEvent>,
+    handle: Handle,
+    grace: Duration,
+) {
+    let Ok(dbus) = zbus::fdo::DBusProxy::new(&conn).await else {
+        return;
+    };
+    let Ok(mut changes) = dbus.receive_name_owner_changed().await else {
+        return;
+    };
+    while let Some(change) = changes.next().await {
+        let Ok(args) = change.args() else { continue };
+        if args.name() != WATCHER {
+            continue;
+        }
+        if args.new_owner().is_none() {
+            crate::app_log!("tray: the panel's tray went away");
+            let (dbus, events) = (dbus.clone(), events.clone());
+            tokio::spawn(async move {
+                tokio::time::sleep(grace).await;
+                let back = dbus
+                    .name_has_owner(WATCHER.try_into().expect("valid name"))
+                    .await
+                    .unwrap_or(false);
+                if !back {
+                    let _ = events.unbounded_send(TrayEvent::Unavailable(
+                        "the panel's tray went away".into(),
+                    ));
                 }
+            });
+            continue;
+        }
+        let registered = match zbus::Proxy::new(&conn, WATCHER, WATCHER_PATH, WATCHER).await {
+            Ok(w) => w
+                .call::<_, _, ()>("RegisterStatusNotifierItem", &(name.as_str(),))
+                .await
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        let event = match registered {
+            Ok(()) => {
+                crate::app_log!("tray: registered again with the panel's tray");
+                TrayEvent::Ready(handle.clone())
             }
-        });
+            Err(e) => {
+                TrayEvent::Unavailable(format!("the panel's tray came back but refused ({e})"))
+            }
+        };
+        let _ = events.unbounded_send(event);
     }
-    Ok(Handle { menu, conn })
 }
 
 #[cfg(test)]
@@ -613,5 +671,115 @@ mod tests {
         assert!(matches!(rx.try_recv(), Ok(TrayEvent::Connect(k)) if k == "k3"));
         assert!(matches!(rx.try_recv(), Ok(TrayEvent::Quit)));
         assert!(rx.try_recv().is_err());
+    }
+
+    /// A stand-in for the panel's tray (the `StatusNotifierWatcher`).
+    struct FakeWatcher {
+        registered: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[zbus::interface(name = "org.kde.StatusNotifierWatcher")]
+    impl FakeWatcher {
+        #[zbus(property)]
+        #[allow(clippy::unused_self)]
+        fn is_status_notifier_host_registered(&self) -> bool {
+            true
+        }
+        fn register_status_notifier_item(&self, service: String) {
+            self.registered.lock().unwrap().push(service);
+        }
+    }
+
+    async fn watcher(address: &str, registered: &Arc<Mutex<Vec<String>>>) -> zbus::Connection {
+        zbus::connection::Builder::address(address)
+            .unwrap()
+            .name(WATCHER)
+            .unwrap()
+            .serve_at(
+                WATCHER_PATH,
+                FakeWatcher {
+                    registered: registered.clone(),
+                },
+            )
+            .unwrap()
+            .build()
+            .await
+            .unwrap()
+    }
+
+    async fn next(
+        rx: &mut mpsc::UnboundedReceiver<TrayEvent>,
+        within: Duration,
+    ) -> Option<TrayEvent> {
+        tokio::time::timeout(within, rx.next()).await.ok().flatten()
+    }
+
+    /// The panel's tray restarting, going away and coming back, on a
+    /// private bus (`dbus-daemon`), so the real panel isn't touched.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn follows_the_panels_tray() {
+        /// Ends the private bus however the test ends, so a failing test
+        /// can't leave it running (and holding the test's output open).
+        struct Bus(std::process::Child);
+        impl Drop for Bus {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut bus = Bus(std::process::Command::new("dbus-daemon")
+            .args(["--session", "--nofork", "--print-address=1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("dbus-daemon (package dbus)"));
+        let mut address = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(bus.0.stdout.take().unwrap()),
+            &mut address,
+        )
+        .unwrap();
+        let address = address.trim().to_owned();
+        let registered = Arc::new(Mutex::new(Vec::new()));
+        let first = watcher(&address, &registered).await;
+        let (tx, mut rx) = mpsc::unbounded();
+        let labels = Labels {
+            title: "Deskfeed".into(),
+            show: "Show".into(),
+            quit: "Quit".into(),
+        };
+        let grace = Duration::from_millis(400);
+        let _handle = serve(
+            zbus::connection::Builder::address(address.as_str()).unwrap(),
+            labels,
+            tx,
+            grace,
+        )
+        .await
+        .unwrap();
+        assert_eq!(registered.lock().unwrap().len(), 1);
+
+        // A quick restart: registered again, and no "unavailable".
+        first.close().await.unwrap();
+        let second = watcher(&address, &registered).await;
+        let event = next(&mut rx, Duration::from_secs(3)).await;
+        assert!(matches!(event, Some(TrayEvent::Ready(_))), "{event:?}");
+        assert!(next(&mut rx, grace * 2).await.is_none());
+        assert_eq!(registered.lock().unwrap().len(), 2);
+
+        // Gone for good: the app hears it after the grace time.
+        second.close().await.unwrap();
+        let event = next(&mut rx, grace + Duration::from_secs(3)).await;
+        assert!(
+            matches!(event, Some(TrayEvent::Unavailable(_))),
+            "{event:?}"
+        );
+
+        // Back later: the icon returns.
+        let _third = watcher(&address, &registered).await;
+        let event = next(&mut rx, Duration::from_secs(3)).await;
+        assert!(matches!(event, Some(TrayEvent::Ready(_))), "{event:?}");
+        assert_eq!(registered.lock().unwrap().len(), 3);
     }
 }
