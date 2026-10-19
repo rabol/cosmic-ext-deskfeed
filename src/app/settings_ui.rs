@@ -495,6 +495,9 @@ fn settings_column<'a>(
         .add(toggle(Toggle::Fullscreen))
         .add(toggle(Toggle::AllMonitors))
         .add(toggle(Toggle::NewWorkspace));
+    let keyboard = widget::settings::section()
+        .title(fl!("settings-keyboard"))
+        .add(toggle(Toggle::SystemShortcuts));
     let devices = widget::settings::section()
         .title(fl!("settings-devices"))
         .add(toggle(Toggle::Sound))
@@ -502,7 +505,12 @@ fn settings_column<'a>(
         .add(toggle(Toggle::Camera))
         .add(choice(Choice::Clipboard))
         .add(toggle(Toggle::ClipboardFiles));
-    column.extend([connection.into(), display.into(), devices.into()]);
+    column.extend([
+        connection.into(),
+        display.into(),
+        keyboard.into(),
+        devices.into(),
+    ]);
     column.extend(last);
     widget::settings::view_column(column).into()
 }
@@ -605,6 +613,10 @@ pub(super) fn toggle_text(t: Toggle) -> (String, String) {
         Toggle::ClipboardFiles => (
             fl!("setting-clipboard-files"),
             fl!("setting-clipboard-files-desc"),
+        ),
+        Toggle::SystemShortcuts => (
+            fl!("setting-system-shortcuts"),
+            fl!("setting-system-shortcuts-desc"),
         ),
         Toggle::Reconnect => (fl!("setting-reconnect"), fl!("setting-reconnect-desc")),
     }

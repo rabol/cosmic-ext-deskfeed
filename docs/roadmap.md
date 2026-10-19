@@ -20,7 +20,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
 12. Smaller items:
     - ~~Light/dark theme override (§5).~~ Done (2026-10-18): View → Settings → Appearance.
     - ~~The sign-in helper's "Sign in" strings aren't localized~~ Done (2026-10-18): the app passes its translated title to the helper (`COSMIC_EXT_DESKFEED_SIGNIN_TITLE`); "Sign in" stays only as the fallback.
-    - Capturing system shortcuts (Super, Alt+Tab) in a session and a visible way to release them: unverified with `xfreerdp3` (§9).
+    - ~~Capturing system shortcuts (Super, Alt+Tab) in a session and a visible way to release them (§9).~~ Done (2026-10-19, [ADR 0018](adr/0018-system-shortcuts-through-xwayland-grab.md)): FreeRDP's keyboard grab reaches COSMIC through XWayland's grab protocol, which cosmic-comp treats like shortcuts-inhibit; Keyboard setting at every level; Right Ctrl named in the setting and on the connected row. Waiting for the owner's check in a real session.
     - ~~Diagnostics support export, previewable and redacted (§12).~~ Done (2026-10-18): View → Diagnostics shows the whole report, Save writes exactly it (0600). Versions, dependency check, settings, counts per account, the last 300 log lines redacted again, known account, workspace and desktop names replaced. A report from the owner's real log had no IDs, e-mail addresses, tokens or host names.
 
 ## Parity work the spec allows later (§3)

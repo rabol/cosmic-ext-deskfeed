@@ -19,6 +19,8 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Camera | off | A, Ac, C | `settings.rs` | Done |
 | Clipboard: off, both directions, only to the desktop, only to this computer | off | A, Ac, C | `settings.rs` `Choice::Clipboard` | Done |
 | Copy files through the clipboard (in the clipboard's direction) | off | A, Ac, C | `settings.rs` `Toggle::ClipboardFiles` | Done |
+| Send shortcuts like Super and Alt+Tab to the desktop | on (`+grab-keyboard`) | A, Ac, C | `settings.rs` `Toggle::SystemShortcuts` | Done (ADR 0018) |
+| FreeRDP's own hotkeys (Ctrl+Alt+Enter, Ctrl+Alt+M, Right Ctrl) | FreeRDP's defaults | A, Ac, C | not passed | Later (spec §5): `-toggle-fullscreen` exists; Right Ctrl and Ctrl+Alt+M have no switch in 3.32.2 |
 | Reconnect after a lost connection | on | A, Ac, C | `settings.rs` `Toggle::Reconnect` | Done |
 | Reconnect attempts | 5 (1–10) | A, Ac, C | `settings.rs` `Number::ReconnectAttempts` | Done |
 | Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | With roadmap item 5: the alternative, scaling the picture (`/smart-sizing`), gives Windows a fixed 1 024×768 desktop unless a size is set too (`client/X11/xf_client.c`), so it needs a desktop-size setting beside it |

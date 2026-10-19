@@ -125,6 +125,9 @@ pub(super) struct Running {
     pub(super) session: launcher::Session,
     /// Its window's title, to find the window (Show).
     pub(super) title: String,
+    /// Started with "Send shortcuts … to the desktop": its row says how
+    /// to get them back.
+    pub(super) grabs_shortcuts: bool,
 }
 
 /// A FreeRDP start in progress.
@@ -138,6 +141,7 @@ pub(super) struct Launching {
     pub(super) stop: bool,
     /// Its window's title, as FreeRDP got it (`launcher::safe_title`).
     pub(super) title: String,
+    pub(super) grabs_shortcuts: bool,
 }
 
 /// Quitting the app.

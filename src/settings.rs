@@ -39,6 +39,9 @@ pub struct ConnectionSettings {
     pub clipboard_mode: Option<u32>,
     #[serde(default)]
     pub clipboard_files: Option<bool>,
+    /// Super, Alt+Tab and the like go to the desktop (ADR 0018).
+    #[serde(default)]
+    pub system_shortcuts: Option<bool>,
     /// App and account levels only.
     #[serde(default)]
     pub refresh_mins: Option<u32>,
@@ -108,12 +111,14 @@ pub enum Toggle {
     Camera,
     /// Files through the clipboard, in the clipboard's direction.
     ClipboardFiles,
+    /// Super, Alt+Tab and the like go to the desktop (ADR 0018).
+    SystemShortcuts,
     Reconnect,
 }
 
 impl Toggle {
     #[cfg(test)]
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Fullscreen,
         Self::AllMonitors,
         Self::NewWorkspace,
@@ -121,6 +126,7 @@ impl Toggle {
         Self::Microphone,
         Self::Camera,
         Self::ClipboardFiles,
+        Self::SystemShortcuts,
         Self::Reconnect,
     ];
 }
@@ -182,6 +188,7 @@ impl ConnectionSettings {
             Toggle::Microphone => self.microphone,
             Toggle::Camera => self.camera,
             Toggle::ClipboardFiles => self.clipboard_files,
+            Toggle::SystemShortcuts => self.system_shortcuts,
             Toggle::Reconnect => self.reconnect,
         }
     }
@@ -195,6 +202,7 @@ impl ConnectionSettings {
             Toggle::Microphone => &mut self.microphone,
             Toggle::Camera => &mut self.camera,
             Toggle::ClipboardFiles => &mut self.clipboard_files,
+            Toggle::SystemShortcuts => &mut self.system_shortcuts,
             Toggle::Reconnect => &mut self.reconnect,
         };
         *slot = value;
@@ -265,6 +273,7 @@ pub struct Effective {
     /// `clipboard::*`.
     pub clipboard: u32,
     pub clipboard_files: bool,
+    pub system_shortcuts: bool,
     pub refresh_mins: u32,
     pub sign_in_mins: u32,
     pub offline_days: u32,
@@ -289,6 +298,9 @@ pub const DEFAULTS: Effective = Effective {
     camera: false,
     clipboard: clipboard::OFF,
     clipboard_files: false,
+    // FreeRDP's own default: the desktop gets the keyboard while the
+    // pointer is over its focused window.
+    system_shortcuts: true,
     refresh_mins: 60,
     sign_in_mins: 5,
     offline_days: 30,
@@ -315,6 +327,7 @@ impl Effective {
                 .and_then(|v| Choice::Clipboard.valid(v))
                 .unwrap_or(self.clipboard),
             clipboard_files: s.clipboard_files.unwrap_or(self.clipboard_files),
+            system_shortcuts: s.system_shortcuts.unwrap_or(self.system_shortcuts),
             refresh_mins: number(Number::Refresh, self.refresh_mins),
             sign_in_mins: number(Number::SignIn, self.sign_in_mins),
             offline_days: number(Number::OfflineDays, self.offline_days),
@@ -353,6 +366,7 @@ impl Effective {
             Toggle::Microphone => self.microphone,
             Toggle::Camera => self.camera,
             Toggle::ClipboardFiles => self.clipboard_files,
+            Toggle::SystemShortcuts => self.system_shortcuts,
             Toggle::Reconnect => self.reconnect,
         }
     }
@@ -396,6 +410,18 @@ impl Effective {
             args.push("/dvc:rdpecam".to_owned());
         }
         args.push(self.clipboard_arg());
+        // A bool option, on by default (`client/common/cmdline.h`): FreeRDP
+        // grabs the keyboard while the pointer is over its focused window,
+        // XWayland passes the grab to COSMIC, and COSMIC then sends its own
+        // shortcuts to the window (ADR 0018). Right Ctrl releases it.
+        args.push(
+            if self.system_shortcuts {
+                "+grab-keyboard"
+            } else {
+                "-grab-keyboard"
+            }
+            .to_owned(),
+        );
         args
     }
 
@@ -507,6 +533,18 @@ mod tests {
         assert!(!a.iter().any(|x| x.starts_with("/microphone")));
         assert!(!a.iter().any(|x| x.contains("rdpecam")));
         assert!(a.contains(&"/sound".into()));
+    }
+
+    #[test]
+    fn system_shortcuts_follow_the_setting() {
+        assert!(DEFAULTS.freerdp_args().contains(&"+grab-keyboard".into()));
+        let desktop = ConnectionSettings {
+            system_shortcuts: Some(false),
+            ..Default::default()
+        };
+        let a = effective(None, None, Some(&desktop)).freerdp_args();
+        assert!(a.contains(&"-grab-keyboard".into()));
+        assert!(!a.contains(&"+grab-keyboard".into()));
     }
 
     #[test]

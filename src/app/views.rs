@@ -261,7 +261,13 @@ impl AppModel {
                 widget::button::standard(fl!("disconnect")).into(),
             ),
             Some(Connection::Connected) => (
-                Some(fl!("status-connected")),
+                Some(
+                    if self.running.get(&r.key).is_some_and(|s| s.grabs_shortcuts) {
+                        fl!("status-connected-shortcuts")
+                    } else {
+                        fl!("status-connected")
+                    },
+                ),
                 widget::row::with_capacity(2)
                     .push(
                         widget::button::suggested(fl!("show-desktop"))
