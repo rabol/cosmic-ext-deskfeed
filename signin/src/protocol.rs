@@ -17,6 +17,9 @@ pub const LOGIN_HOST: &str = "login.microsoftonline.com";
 pub const NATIVE_CLIENT: &str = "https://login.microsoftonline.com/common/oauth2/nativeclient";
 
 const MAX_REQUEST_LEN: usize = 16 * 1024;
+/// Longest redirect URL handed back, as the app's own limit
+/// (`MAX_CALLBACK_LEN` in `auth/attempt.rs`). Real ones are a few KiB.
+const MAX_REDIRECT_LEN: usize = 16 * 1024;
 const MAX_TIMEOUT_MS: u64 = 15 * 60 * 1000;
 
 #[derive(Debug, Deserialize)]
@@ -258,6 +261,13 @@ pub enum Reply {
 }
 
 fn reply_from_redirect(url: &Url) -> Reply {
+    // The app refuses longer callbacks too (`auth/attempt.rs`); refusing
+    // here keeps an oversized one from being copied around at all.
+    if url.as_str().len() > MAX_REDIRECT_LEN {
+        return Reply::Failed {
+            reason: "callback_too_long".into(),
+        };
+    }
     let mut code = None;
     let mut state = None;
     let mut error = None;
@@ -347,6 +357,19 @@ mod tests {
 
     fn req(url: &str) -> String {
         serde_json::json!({ "url": url, "title": "Sign in" }).to_string()
+    }
+
+    #[test]
+    fn an_oversized_redirect_is_refused_early() {
+        let base = "https://login.microsoftonline.com/common/oauth2/nativeclient";
+        let ok = Url::parse(&format!("{base}?code=abc&state=s")).unwrap();
+        assert!(matches!(reply_from_redirect(&ok), Reply::Ok { .. }));
+        // As in the review's harness: a 1 MiB code.
+        let huge = Url::parse(&format!("{base}?code={}&state=s", "a".repeat(1024 * 1024))).unwrap();
+        assert!(matches!(
+            reply_from_redirect(&huge),
+            Reply::Failed { reason } if reason == "callback_too_long"
+        ));
     }
 
     #[test]

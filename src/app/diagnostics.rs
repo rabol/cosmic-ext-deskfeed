@@ -158,6 +158,9 @@ pub(super) fn save(path: &std::path::Path, text: &str) -> std::io::Result<()> {
         .truncate(true)
         .mode(0o600)
         .open(path)?;
+    // `mode` applies only to a new file: an existing one keeps its
+    // permissions unless set here, before anything is written (review).
+    f.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     f.write_all(text.as_bytes())?;
     f.sync_all()
 }
@@ -189,6 +192,14 @@ mod tests {
             0o600
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "report");
+        // Over an existing file that others could read: private too.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        save(&path, "again").unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "again");
         std::fs::remove_file(path).unwrap();
     }
 
