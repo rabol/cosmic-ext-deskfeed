@@ -236,7 +236,10 @@ impl AppModel {
                     .map_err(|e| {
                         StepError::Show(match e {
                             RdpError::GatewayNotAllowed => fl!("error-gateway-not-allowed"),
-                            e => fl!("error-bad-connection-file", detail = format!("{e:?}")),
+                            e => {
+                                crate::app_log!("connection file refused: {e:?}");
+                                fl!("error-bad-connection-file")
+                            }
                         })
                     })
             })
@@ -597,7 +600,10 @@ impl AppModel {
                             fl!("error-proxy-unsupported", scheme = scheme)
                         }
                         launcher::LaunchError::BadPassword => fl!("error-password-chars"),
-                        other => fl!("error-launch", detail = format!("{other:?}")),
+                        other => {
+                            crate::app_log!("FreeRDP didn't start: {other:?}");
+                            fl!("error-launch")
+                        }
                     })
                 })
                 .await

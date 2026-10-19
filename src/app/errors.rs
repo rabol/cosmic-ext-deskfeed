@@ -23,13 +23,23 @@ pub(super) fn describe_sign_in_error(e: SignInError) -> SignInFailure {
         SignInError::Token(TokenError::Transient(_)) => fl!("error-network"),
         SignInError::HelperFailed(reason) if reason == "tls_error" => fl!("error-tls"),
         SignInError::HelperFailed(reason) if reason == "no_display" => fl!("error-no-display"),
-        other => fl!("error-sign-in-generic", detail = format!("{other:?}")),
+        // Spec §12: technical details go to the details area, which is
+        // the log (View → Diagnostics shows it).
+        other => {
+            crate::app_log!("sign-in failed: {other:?}");
+            fl!("error-sign-in-generic")
+        }
     };
     SignInFailure(Some(text))
 }
 
 pub(super) fn access_denied(code: Option<String>) -> String {
     match code.filter(|c| !c.is_empty()) {
+        // Conditional Access wants a compliant (53000) or domain-joined
+        // (53001) device (spec §6: explain device compliance).
+        Some(code) if code == "53000" || code == "53001" => {
+            fl!("error-device-not-compliant", code = code)
+        }
         Some(code) => fl!("error-access-denied-code", code = code),
         None => fl!("error-access-denied"),
     }
@@ -45,7 +55,10 @@ pub(super) fn describe_fetch_error(e: &FetchError) -> String {
             fl!("error-network")
         }
         FetchError::Http(HttpError::Tls) => fl!("error-tls"),
-        other => fl!("error-feed", detail = other.to_string()),
+        other => {
+            crate::app_log!("loading desktops failed: {other}");
+            fl!("error-feed")
+        }
     }
 }
 
@@ -88,4 +101,20 @@ pub(super) fn refused_or_shown(e: FetchError) -> StepError {
 
 pub(super) fn refused_or_shown_http(e: HttpError) -> StepError {
     refused_or_shown(FetchError::Http(e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_compliance_is_explained() {
+        for code in ["53000", "53001"] {
+            let text = access_denied(Some(code.into()));
+            assert!(text.contains("devices it manages"), "{text}");
+            assert!(text.contains(code), "{text}");
+        }
+        assert!(!access_denied(Some("53003".into())).contains("devices it manages"));
+        assert!(!access_denied(None).contains("AADSTS"));
+    }
 }

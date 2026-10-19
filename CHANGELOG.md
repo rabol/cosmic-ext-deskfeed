@@ -8,6 +8,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 - RemoteApps (preview): apps from the feed connect and open as ordinary windows, grouped under Deskfeed in the dock, on every monitor. Settings that only fit a desktop (full screen, keyboard, workspace, keep the screen on) are left out for apps. When Windows won't start an app, the row says why. Checked against a Windows host, not yet with an AVD RemoteApp (ADR 0020).
 - If Deskfeed crashes or is killed, its desktops and sign-in windows now close with it instead of running on (ADR 0022).
+- Error messages no longer contain raw technical text; the details are in the log (View → Diagnostics). A sign-in refused because the computer isn't a managed device now says so.
 - Desktop lists refresh after the computer wakes from sleep, and hourly refreshes are spread by a few minutes either way.
 - When sign-out can't remove everything (for example, the keyring stays locked), a Try again button removes what's left.
 - Signing out of an account with desktops or apps connected asks first, offering "Disconnect and sign out" or Cancel.
