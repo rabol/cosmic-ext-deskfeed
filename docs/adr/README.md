@@ -25,5 +25,6 @@ Each significant decision is recorded as a short Markdown file, `NNNN-title.md`,
 | [0019](0019-keep-screen-on-in-full-screen.md) | Keep the screen on in full screen through org.freedesktop.ScreenSaver | Accepted |
 | [0020](0020-remoteapps.md) | RemoteApps through FreeRDP's X11 RemoteApp mode, as a preview | Accepted (preview) |
 | [0021](0021-device-policy-from-the-connection-file.md) | The administrator's device policy from the connection file wins | Accepted |
+| [0022](0022-child-programs-end-with-the-app.md) | Child programs end with the app (PR_SET_PDEATHSIG from one spawner thread) | Accepted |
 
 Do not put tenant data (host names, tenant or workspace IDs, user names, feed URLs) in ADRs. Describe evidence in redacted form.

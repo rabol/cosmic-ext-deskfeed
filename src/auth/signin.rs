@@ -224,7 +224,7 @@ fn run_helper(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     crate::sessions::launcher::pass_environment(&mut cmd, &["GTK_THEME"]);
-    let mut child = crate::sessions::launcher::spawn_retrying(&mut cmd)
+    let mut child = crate::sessions::launcher::spawn_tied(cmd)
         .map_err(|e| SignInError::HelperFailed(e.kind().to_string()))?;
     cancel.started(child.id());
     let mut stdin = child.stdin.take().expect("piped");

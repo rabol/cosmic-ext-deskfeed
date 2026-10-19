@@ -750,13 +750,65 @@ fn spawn_freerdp(
             Ok(())
         });
     }
-    spawn_retrying(&mut cmd).map_err(|e| io_err(&e))
+    spawn_tied(cmd).map_err(|e| io_err(&e))
+}
+
+/// A program start for the spawner thread, and where its result goes.
+type SpawnRequest = (Command, std::sync::mpsc::Sender<std::io::Result<Child>>);
+
+/// Starts `cmd` so that it ends when Deskfeed does, even after a crash or
+/// a kill (spec §6, §8: no orphaned sessions). The kernel sends it SIGTERM
+/// when its parent goes (`PR_SET_PDEATHSIG`). "Parent" is the *thread* that
+/// started it, and the async runtime's worker threads come and go, so every
+/// start happens on one thread that lasts as long as the app. A child in
+/// its own process group (FreeRDP) passes the signal on to its group by
+/// ending; its helper then loses its pipes.
+pub fn spawn_tied(mut cmd: Command) -> std::io::Result<Child> {
+    static SPAWNER: std::sync::OnceLock<Mutex<std::sync::mpsc::Sender<SpawnRequest>>> =
+        std::sync::OnceLock::new();
+    let parent = i32::try_from(std::process::id()).unwrap_or(0);
+    // SAFETY: only async-signal-safe calls (prctl, getppid) between fork
+    // and exec.
+    unsafe {
+        cmd.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // The app ended before the line above took effect.
+            if libc::getppid() != parent {
+                return Err(std::io::Error::from_raw_os_error(libc::ESRCH));
+            }
+            Ok(())
+        });
+    }
+    let spawner = SPAWNER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<SpawnRequest>();
+        std::thread::Builder::new()
+            .name("spawner".into())
+            .spawn(move || {
+                // Lives as long as the app: the sender is in a static.
+                for (mut cmd, reply) in rx {
+                    let _ = reply.send(spawn_retrying(&mut cmd));
+                }
+            })
+            .expect("start the spawner thread");
+        Mutex::new(tx)
+    });
+    let (reply, result) = std::sync::mpsc::channel();
+    spawner
+        .lock()
+        .expect("not poisoned")
+        .send((cmd, reply))
+        .map_err(|_| std::io::Error::other("spawner gone"))?;
+    result
+        .recv()
+        .map_err(|_| std::io::Error::other("spawner gone"))?
 }
 
 /// `spawn`, retried briefly on "text file busy": the executable may still
 /// be open for writing in a process another thread just forked (seen with
 /// freshly written test scripts).
-pub fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
+fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
     let mut attempts = 0;
     loop {
         match cmd.spawn() {
@@ -1245,6 +1297,69 @@ mod tests {
                 Err(LaunchError::BadPassword),
                 "{pw:?}"
             );
+        }
+    }
+
+    /// Run by `children_end_when_the_app_crashes` in a process of its own:
+    /// starts a long `sleep`, prints its pid, then crashes.
+    #[test]
+    #[ignore = "run by children_end_when_the_app_crashes"]
+    fn crashing_app() {
+        if std::env::var("DESKFEED_TEST_CRASH").is_err() {
+            return;
+        }
+        let mut cmd = Command::new("sleep");
+        // No inherited output: the outer test reads until it closes.
+        cmd.arg("60")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let child = spawn_tied(cmd).unwrap();
+        println!("CHILD {}", child.id());
+        std::io::Write::flush(&mut std::io::stdout()).unwrap();
+        std::process::abort();
+    }
+
+    #[test]
+    fn children_end_when_the_app_crashes() {
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "sessions::launcher::tests::crashing_app",
+            ])
+            .args(["--nocapture", "--test-threads=1"])
+            .env("DESKFEED_TEST_CRASH", "1")
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "it should have crashed");
+        let text = String::from_utf8_lossy(&out.stdout);
+        let pid: u32 = text
+            .lines()
+            .find_map(|l| l.split_once("CHILD ").map(|(_, pid)| pid))
+            .unwrap_or_else(|| panic!("no pid in {text}"))
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .parse()
+            .unwrap();
+        // Gone, or a zombie waiting for its new parent to reap it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let state = fs::read_to_string(format!("/proc/{pid}/stat")).ok();
+            let alive = state
+                .as_deref()
+                .and_then(|s| s.rsplit(')').next())
+                .is_some_and(|rest| !rest.trim_start().starts_with('Z'));
+            if !alive {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "sleep {pid} outlived the app"
+            );
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
