@@ -104,6 +104,7 @@ status-reconnecting = Connection lost. Reconnecting, attempt { $attempt } of { $
 stop = Stop
 error-connection-lost = The connection was lost. Select Connect to connect again.
 status-moved = Its windows are in { $app }'s connection
+error-proxy-password = The proxy needs a user name and password, and the remote desktop client (FreeRDP) can't send them correctly yet: a known FreeRDP bug. Signing in still works through the proxy; connecting to desktops doesn't, until FreeRDP is fixed.
 error-session-replaced = Another connection took over this session, so this one ended. Select Connect to take it back.
 error-app-not-allowed = Windows wouldn't start this app: the session host doesn't allow it. Ask your administrator.
 error-app-not-found = Windows couldn't find this app on the session host. Ask your administrator.

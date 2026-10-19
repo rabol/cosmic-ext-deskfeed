@@ -54,6 +54,8 @@ const APP_REFUSED_MARKER: &str = "RAIL exec error: execResult=";
 /// The server's reason when another connection took over the session
 /// (`libfreerdp/core/errinfo.c`, logged at INFO).
 const REPLACED_MARKER: &str = "ERRINFO_DISCONNECTED_BY_OTHER_CONNECTION";
+/// FreeRDP's log line with the proxy's answer (`http_proxy_connect`).
+const PROXY_ANSWER_MARKER: &str = "[http_proxy_connect]: HTTP Proxy: ";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
 /// Longest FreeRDP output line looked at; the rest of a line is skipped.
@@ -76,15 +78,11 @@ const BASE_ENV: &[&str] = &[
     "LC_ALL",
     "LC_MESSAGES",
     "PATH",
-    "http_proxy",
-    "https_proxy",
-    "all_proxy",
-    "no_proxy",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "ALL_PROXY",
-    "NO_PROXY",
 ];
+
+/// The variable that tells the sign-in helper where its proxy file is
+/// (`signin/src/proxy.rs`); it holds only the path.
+const PROXY_FILE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_PROXY_FILE";
 
 /// The proxy the app's own HTTP client uses: the first set of these, in
 /// ureq's order (ureq 3.4.2 `Proxy::try_from_env`).
@@ -97,40 +95,118 @@ const APP_PROXY_VARS: &[&str] = &[
     "http_proxy",
 ];
 
-/// The proxy FreeRDP gets: exactly the app's (spec §7), under the names
-/// FreeRDP reads.
+/// The proxy the app itself uses (ureq 3.4.2, `Proxy::try_from_env`): the
+/// first of [`APP_PROXY_VARS`] whose value ureq accepts, and `NO_PROXY`
+/// before `no_proxy`. `get` reads an environment variable.
+fn app_proxy(get: impl Fn(&str) -> Option<String>) -> FreeRdpProxy {
+    FreeRdpProxy {
+        https_proxy: APP_PROXY_VARS
+            .iter()
+            .filter_map(|name| get(name))
+            .find(|value| ureq::Proxy::new(value).is_ok()),
+        no_proxy: ["NO_PROXY", "no_proxy"].iter().find_map(|name| get(name)),
+    }
+    .or_none()
+}
+
+/// The proxy FreeRDP gets: exactly the app's (spec §7). FreeRDP 3.32.2
+/// accepts `http://`, `socks5://` or no scheme (`proxy_parse_uri`).
 ///
-/// The app (ureq 3.4.2, `Proxy::try_from_env`) takes the first of
-/// [`APP_PROXY_VARS`] whose value it accepts, and `NO_PROXY` before
-/// `no_proxy`. FreeRDP 3.32.2 reads `https_proxy`, then `HTTPS_PROXY`, and
-/// `no_proxy` before `NO_PROXY` (`libfreerdp/core/proxy.c`,
-/// `proxy_prepare`), and accepts `http://`, `socks5://` or no scheme
-/// (`proxy_parse_uri`). So FreeRDP gets only `https_proxy` and `no_proxy`,
-/// set to the app's choice. `get` reads an environment variable.
+/// Its address may hold a user name and password, so it never goes into an
+/// environment (review F03): FreeRDP gets it as `/proxy:` through the
+/// private argument pipe, and only `no_proxy` as a variable, which FreeRDP
+/// still reads with `/proxy:` set (`libfreerdp/core/proxy.c`,
+/// `proxy_prepare`). The sign-in helper reads it from a private file.
 fn freerdp_proxy(get: impl Fn(&str) -> Option<String>) -> Result<FreeRdpProxy, LaunchError> {
-    let Some(proxy) = APP_PROXY_VARS
-        .iter()
-        .filter_map(|name| get(name))
-        .find(|value| ureq::Proxy::new(value).is_ok())
-    else {
-        return Ok(FreeRdpProxy::default());
+    let proxy = app_proxy(get);
+    let Some(uri) = &proxy.https_proxy else {
+        return Ok(proxy);
     };
-    let scheme = proxy.split_once("://").map(|(s, _)| s.to_ascii_lowercase());
+    let scheme = uri.split_once("://").map(|(s, _)| s.to_ascii_lowercase());
     match scheme.as_deref() {
-        None | Some("http" | "socks5") => Ok(FreeRdpProxy {
-            https_proxy: Some(proxy),
-            no_proxy: ["NO_PROXY", "no_proxy"].iter().find_map(|name| get(name)),
-        }),
+        None | Some("http" | "socks5") => Ok(proxy),
         // Connecting directly instead would bypass the proxy the app uses.
         Some(other) => Err(LaunchError::UnsupportedProxy(other.to_owned())),
     }
 }
 
-/// Proxy variables for FreeRDP; `None`: not set.
+/// The app's proxy; `None`: not set.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct FreeRdpProxy {
     https_proxy: Option<String>,
     no_proxy: Option<String>,
+}
+
+impl FreeRdpProxy {
+    /// `no_proxy` alone means nothing.
+    fn or_none(self) -> Self {
+        if self.https_proxy.is_none() {
+            return Self::default();
+        }
+        self
+    }
+
+    /// FreeRDP's `/proxy:` option, when there is a proxy; `None` for a
+    /// value that would break the argument pipe.
+    fn arg(&self) -> Option<String> {
+        self.https_proxy
+            .as_ref()
+            .filter(|p| !p.contains(['\n', '\r', '\0']))
+            .map(|p| format!("/proxy:{p}"))
+    }
+
+    /// Writes the sign-in helper's proxy file (`signin/src/proxy.rs`) into
+    /// the private folder `dir`, readable only by the user; `None` without
+    /// a proxy.
+    fn write_file(&self, dir: &Path) -> Result<Option<PathBuf>, LaunchError> {
+        let Some(uri) = &self.https_proxy else {
+            return Ok(None);
+        };
+        let text = serde_json::json!({ "uri": uri, "no_proxy": self.no_proxy }).to_string();
+        let path = dir.join("proxy.json");
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .and_then(|mut f| f.write_all(text.as_bytes()))
+            .map_err(|e| io_err(&e))?;
+        Ok(Some(path))
+    }
+}
+
+/// A private folder holding the sign-in helper's proxy file, for a sign-in
+/// the app starts itself; removed when dropped.
+pub struct HelperProxy {
+    _dir: Option<RuntimeDir>,
+    file: Option<PathBuf>,
+}
+
+impl HelperProxy {
+    /// The app's proxy for its own sign-in window. Any scheme: the web view
+    /// isn't limited like FreeRDP.
+    pub fn new() -> Result<Self, LaunchError> {
+        let proxy = app_proxy(|name| std::env::var(name).ok());
+        if proxy.https_proxy.is_none() {
+            return Ok(Self {
+                _dir: None,
+                file: None,
+            });
+        }
+        let dir = RuntimeDir::create(&runtime_base()?)?;
+        let file = proxy.write_file(&dir.0)?;
+        Ok(Self {
+            _dir: Some(dir),
+            file,
+        })
+    }
+
+    /// Tells the helper where the file is (`PROXY_FILE_ENV`), if any.
+    pub fn apply(&self, cmd: &mut Command) {
+        if let Some(file) = &self.file {
+            cmd.env(PROXY_FILE_ENV, file);
+        }
+    }
 }
 
 /// Copies the allowed variables ([`BASE_ENV`] plus `extra`) from the app's
@@ -241,6 +317,12 @@ pub enum SessionEnd {
     Replaced,
     /// Windows wouldn't start the RemoteApp (ADR 0020).
     AppRefused(AppRefusal),
+    /// The proxy wanted a user name and password (HTTP 407). FreeRDP 3.32.2
+    /// can't give it one: it drops the last character of `user:password`
+    /// before encoding it (`libfreerdp/core/proxy.c`, `http_proxy_connect`,
+    /// `size - 1` on `winpr_asprintf`'s length, which has no NUL; still so
+    /// on FreeRDP's master branch, 2026-10-19).
+    ProxyAuthRefused,
     /// FreeRDP couldn't verify the session host's certificate (ADR 0016).
     CertificateNotTrusted(CertificateInfo),
     Failed {
@@ -597,21 +679,32 @@ pub fn launch(
     events: impl Fn(SessionEvent) + Send + Sync + 'static,
 ) -> Result<Session, LaunchError> {
     let freerdp = find_freerdp().ok_or(LaunchError::FreeRdpMissing)?;
-    launch_with(&freerdp, &runtime_base()?, spec, events)
+    let proxy = freerdp_proxy(|name| std::env::var(name).ok())?;
+    launch_with(&freerdp, &runtime_base()?, spec, &proxy, events)
 }
 
 fn launch_with(
     freerdp: &Path,
     runtime: &Path,
     spec: &LaunchSpec,
+    proxy: &FreeRdpProxy,
     events: impl Fn(SessionEvent) + Send + Sync + 'static,
 ) -> Result<Session, LaunchError> {
     let dir = RuntimeDir::create(runtime)?;
     let rdp_path = write_connection_file(&dir, &spec.connection)?;
-    let args = build_args(spec, &rdp_path)?;
+    let mut args = build_args(spec, &rdp_path)?;
+    args.extend(proxy.arg());
+    let proxy_file = proxy.write_file(&dir.0)?;
     let (read_end, write_end) = pipe()?;
     let (terminal, output) = output_terminal().map_err(|e| io_err(&e))?;
-    let mut child = spawn_freerdp(freerdp, &spec.profile, &read_end, output)?;
+    let mut child = spawn_freerdp(
+        freerdp,
+        &spec.profile,
+        &read_end,
+        output,
+        proxy,
+        proxy_file.as_deref(),
+    )?;
     drop(read_end);
     if send_args(write_end, &args).is_err() {
         let _ = child.kill();
@@ -700,6 +793,8 @@ fn spawn_freerdp(
     profile: &Path,
     args_pipe: &OwnedFd,
     output: OwnedFd,
+    proxy: &FreeRdpProxy,
+    proxy_file: Option<&Path>,
 ) -> Result<Child, LaunchError> {
     let read_fd = args_pipe.as_raw_fd();
     let mut cmd = Command::new(freerdp);
@@ -710,15 +805,12 @@ fn spawn_freerdp(
         .stderr(Stdio::piped())
         .process_group(0);
     pass_environment(&mut cmd, &["PULSE_SERVER"]);
-    let proxy = freerdp_proxy(|name| std::env::var(name).ok())?;
-    for name in APP_PROXY_VARS.iter().chain(&["NO_PROXY", "no_proxy"]) {
-        cmd.env_remove(name);
-    }
-    if let Some(p) = proxy.https_proxy {
-        cmd.env("https_proxy", p);
-    }
-    if let Some(n) = proxy.no_proxy {
+    // The proxy itself goes through the argument pipe (`FreeRdpProxy`).
+    if let Some(n) = &proxy.no_proxy {
         cmd.env("no_proxy", n);
+    }
+    if let Some(file) = proxy_file {
+        cmd.env(PROXY_FILE_ENV, file);
     }
     cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_PROFILE", profile);
     // The sign-in window's title in the user's language; the helper has no
@@ -908,6 +1000,7 @@ fn supervise(
         let end = match (log.refused_certificate(), log.app_refused) {
             (Some(cert), _) => SessionEnd::CertificateNotTrusted(cert),
             (None, Some(why)) => SessionEnd::AppRefused(why),
+            _ if log.proxy_auth => SessionEnd::ProxyAuthRefused,
             _ if log.replaced && status.code().is_some() => SessionEnd::Replaced,
             _ => classify_exit(status.code(), log.logon_failure, log.connected && log.lost),
         };
@@ -939,6 +1032,8 @@ struct Log {
     replaced: bool,
     /// Windows refused to start the RemoteApp (`APP_REFUSED_MARKER`).
     app_refused: Option<AppRefusal>,
+    /// The proxy asked for a password (`PROXY_ANSWER_MARKER`, 407).
+    proxy_auth: bool,
     /// The certificate FreeRDP is describing (`Certificate details for`).
     certificate: Option<CertificateInfo>,
     /// A complete description (it has a well-formed thumbprint).
@@ -1050,6 +1145,12 @@ impl Log {
         }
         if let Some(why) = AppRefusal::from_log(line) {
             self.app_refused.get_or_insert(why);
+        }
+        if line
+            .split_once(PROXY_ANSWER_MARKER)
+            .is_some_and(|(_, answer)| answer.split_whitespace().nth(1) == Some("407"))
+        {
+            self.proxy_auth = true;
         }
         self.read_certificate(line);
         if line.contains("[ERROR]") || line.contains("[WARN]") || is_state_change(line) {
@@ -1442,6 +1543,18 @@ mod tests {
              forcing the disconnection of the current connection.",
         );
         assert!(log.replaced);
+        assert!(!log.proxy_auth);
+        // As 3.32.2 printed it against an authenticating test proxy.
+        log.push(
+            "[12:16:11:369] [1:2] [INFO][com.freerdp.core.proxy] - [http_proxy_connect]: \
+             HTTP Proxy: HTTP/1.1 407 Proxy Authentication Required",
+        );
+        assert!(log.proxy_auth);
+        let mut other = Log::default();
+        other.push(
+            "[INFO][x] - [http_proxy_connect]: HTTP Proxy: HTTP/1.1 200 Connection established",
+        );
+        assert!(!other.proxy_auth);
     }
 
     /// As xfreerdp3 3.32.2 printed it for the local test server's
@@ -1583,6 +1696,10 @@ Do you trust the above certificate? (Y/T/N) [15:13:10:299] [675264:000a4dc2] [ER
                  echo \"DIRMODE:$(stat -c %a \"$(dirname \"$first\")\")\" >> \"$out\"\n\
                  grep -q drivestoredirect \"$first\" && echo DRIVES >> \"$out\"\n\
                  env | grep -q AVD_TEST_SECRET && echo LEAKED_ENV >> \"$out\"\n\
+                 env | grep -qi 'pr0xy-pw' && echo PROXY_IN_ENV >> \"$out\"\n\
+                 env | grep -q '^no_proxy=.corp.example$' && echo NO_PROXY_OK >> \"$out\"\n\
+                 pf=\"$COSMIC_EXT_DESKFEED_SIGNIN_PROXY_FILE\"\n\
+                 [ -n \"$pf\" ] && echo \"PROXYFILE:$(stat -c %a \"$pf\"):$(cat \"$pf\")\" >> \"$out\"\n\
                  env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
                  env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
                  echo '[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_FINALIZATION_CLIENT_FONT_MAP --> CONNECTION_STATE_ACTIVE'\n\
@@ -1599,7 +1716,16 @@ Do you trust the above certificate? (Y/T/N) [15:13:10:299] [675264:000a4dc2] [ER
 
         let (tx, rx) = std::sync::mpsc::channel();
         let s = spec(LogonSetting::Automatic, Some("hunter2"), false);
-        let _session = launch_with(&fake, &runtime, &s, move |e| tx.send(e).unwrap()).unwrap();
+        // A proxy with a (synthetic) password: only through the pipe and
+        // the private file, never the environment (review F03).
+        let proxy = FreeRdpProxy {
+            https_proxy: Some("http://anna:pr0xy-pw@proxy.example:3128".into()),
+            no_proxy: Some(".corp.example".into()),
+        };
+        let _session = launch_with(&fake, &runtime, &s, &proxy, move |e| {
+            tx.send(e).unwrap();
+        })
+        .unwrap();
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(10)).unwrap(),
             SessionEvent::Connected
@@ -1624,6 +1750,18 @@ Do you trust the above certificate? (Y/T/N) [15:13:10:299] [675264:000a4dc2] [ER
         assert!(got.contains("FILTER_OK"), "{got}");
         assert!(!got.contains("DRIVES"));
         assert!(!got.contains("LEAKED_ENV"));
+        assert!(
+            got.contains("ARG:/proxy:http://anna:pr0xy-pw@proxy.example:3128"),
+            "{got}"
+        );
+        assert!(!got.contains("PROXY_IN_ENV"), "{got}");
+        assert!(got.contains("NO_PROXY_OK"), "{got}");
+        assert!(
+            got.contains(
+                r#"PROXYFILE:600:{"uri":"http://anna:pr0xy-pw@proxy.example:3128","no_proxy":".corp.example"}"#
+            ),
+            "{got}"
+        );
         // The connection file and its folder are gone.
         assert_eq!(
             fs::read_dir(runtime.join("cosmic-ext-deskfeed"))
@@ -1652,8 +1790,14 @@ Do you trust the above certificate? (Y/T/N) [15:13:10:299] [675264:000a4dc2] [ER
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let s = spec(LogonSetting::Automatic, Some("pw"), false);
-        let session =
-            launch_with(&fake, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
+        let session = launch_with(
+            &fake,
+            &dir.join("run"),
+            &s,
+            &FreeRdpProxy::default(),
+            move |e| tx.send(e).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             rx.recv_timeout(Duration::from_secs(3)).unwrap(),
             SessionEvent::Connected
@@ -1680,8 +1824,14 @@ Do you trust the above certificate? (Y/T/N) [15:13:10:299] [675264:000a4dc2] [ER
             fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
             let (tx, rx) = std::sync::mpsc::channel();
             let s = spec(LogonSetting::Automatic, Some("pw"), false);
-            let _session =
-                launch_with(&fake, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
+            let _session = launch_with(
+                &fake,
+                &dir.join("run"),
+                &s,
+                &FreeRdpProxy::default(),
+                move |e| tx.send(e).unwrap(),
+            )
+            .unwrap();
             match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
                 SessionEvent::Ended { end, log } => {
                     assert_eq!(end, want, "{script}");
@@ -1721,8 +1871,14 @@ sleep 300
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let s = spec(LogonSetting::Automatic, Some("pw"), false);
-        let session =
-            launch_with(&fake, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
+        let session = launch_with(
+            &fake,
+            &dir.join("run"),
+            &s,
+            &FreeRdpProxy::default(),
+            move |e| tx.send(e).unwrap(),
+        )
+        .unwrap();
         let child: i32 = (0..100)
             .find_map(|_| {
                 std::thread::sleep(Duration::from_millis(50));
@@ -1768,7 +1924,15 @@ sleep 300
         let args = adjust(args);
         let (read_end, write_end) = pipe().unwrap();
         let (terminal, output) = output_terminal().unwrap();
-        let child = spawn_freerdp(&freerdp, &s.profile, &read_end, output).unwrap();
+        let child = spawn_freerdp(
+            &freerdp,
+            &s.profile,
+            &read_end,
+            output,
+            &FreeRdpProxy::default(),
+            None,
+        )
+        .unwrap();
         drop(read_end);
         send_args(write_end, &args).unwrap();
         let session = supervise(
@@ -2050,8 +2214,14 @@ sleep 300
         };
         let (tx, rx) = std::sync::mpsc::channel();
         let freerdp = find_freerdp().expect("xfreerdp3 installed");
-        let _session =
-            launch_with(&freerdp, &dir.join("run"), &s, move |e| tx.send(e).unwrap()).unwrap();
+        let _session = launch_with(
+            &freerdp,
+            &dir.join("run"),
+            &s,
+            &FreeRdpProxy::default(),
+            move |e| tx.send(e).unwrap(),
+        )
+        .unwrap();
         let SessionEvent::Ended { log, .. } = rx.recv_timeout(Duration::from_secs(30)).unwrap()
         else {
             panic!("expected end")

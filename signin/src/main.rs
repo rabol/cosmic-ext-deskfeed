@@ -16,6 +16,7 @@
 mod bounded_lines;
 mod freerdp;
 mod protocol;
+mod proxy;
 mod session_jar;
 mod view;
 
@@ -54,20 +55,27 @@ fn main() -> ExitCode {
     if view::private_dir(&profile).is_err() {
         return fail("profile_dir", 1);
     }
+    let Ok(proxy) = proxy::from_env() else {
+        return fail("proxy", 1);
+    };
     if view::init_gtk().is_err() {
         return fail("no_display", 1);
     }
-    run_app_mode(&profile, &request)
+    run_app_mode(&profile, &request, proxy.as_ref())
 }
 
-fn run_app_mode(profile: &std::path::Path, request: &ValidRequest) -> ExitCode {
+fn run_app_mode(
+    profile: &std::path::Path,
+    request: &ValidRequest,
+    proxy: Option<&proxy::Proxy>,
+) -> ExitCode {
     let main_loop = glib::MainLoop::new(None, false);
     let title = if request.title.is_empty() {
         "Sign in"
     } else {
         &request.title
     };
-    let view = SignInView::new(profile, title);
+    let view = SignInView::new(profile, title, proxy);
     let done = Rc::new(Cell::new(false));
     {
         let main_loop = main_loop.clone();

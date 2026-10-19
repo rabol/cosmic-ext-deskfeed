@@ -17,8 +17,9 @@ use gtk::prelude::*;
 use gtk::{gio, glib};
 use webkit6::prelude::*;
 use webkit6::{
-    CookieManager, CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkSession,
-    PolicyDecision, PolicyDecisionType, ResponsePolicyDecision, Settings, WebView,
+    CookieManager, CookiePersistentStorage, LoadEvent, NavigationPolicyDecision, NetworkProxyMode,
+    NetworkProxySettings, NetworkSession, PolicyDecision, PolicyDecisionType,
+    ResponsePolicyDecision, Settings, WebView,
 };
 
 use crate::protocol::{self, BROKER_SCHEME, Navigation, RedirectTarget, Reply};
@@ -84,10 +85,17 @@ pub fn private_dir(dir: &Path) -> std::io::Result<()> {
 
 impl SignInView {
     /// `profile` holds this account's cookies; it must already exist.
-    pub fn new(profile: &Path, title: &str) -> Self {
+    /// `proxy`: the app's proxy (`proxy.rs`); without it the desktop's
+    /// proxy settings apply.
+    pub fn new(profile: &Path, title: &str, proxy: Option<&crate::proxy::Proxy>) -> Self {
         let data_dir = profile.join("data");
         let cache_dir = profile.join("cache");
         let session = NetworkSession::new(data_dir.to_str(), cache_dir.to_str());
+        if let Some(proxy) = proxy {
+            let ignore: Vec<&str> = proxy.ignore_hosts.iter().map(String::as_str).collect();
+            let settings = NetworkProxySettings::new(Some(&proxy.uri), &ignore);
+            session.set_proxy_settings(NetworkProxyMode::Custom, Some(&settings));
+        }
         let cookies = session.cookie_manager();
         if let Some(cookies) = &cookies {
             let path = data_dir.join("cookies.sqlite");

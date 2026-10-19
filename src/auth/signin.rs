@@ -226,6 +226,11 @@ fn run_helper(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     crate::sessions::launcher::pass_environment(&mut cmd, &["GTK_THEME"]);
+    // The app's proxy, from a private file (review F03); removed when this
+    // sign-in ends.
+    let proxy = crate::sessions::launcher::HelperProxy::new()
+        .map_err(|_| SignInError::HelperFailed("proxy".into()))?;
+    proxy.apply(&mut cmd);
     let mut child = crate::sessions::launcher::spawn_tied(cmd)
         .map_err(|e| SignInError::HelperFailed(e.kind().to_string()))?;
     cancel.started(child.id());

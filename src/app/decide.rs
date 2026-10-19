@@ -72,7 +72,12 @@ pub(super) fn end_outcome(
     }
     // Not about how the user logged on: the session was taken over, or
     // Windows wouldn't start the app (that comes after logon).
-    if was_connected || matches!(end, SessionEnd::Replaced | SessionEnd::AppRefused(_)) {
+    if was_connected
+        || matches!(
+            end,
+            SessionEnd::Replaced | SessionEnd::AppRefused(_) | SessionEnd::ProxyAuthRefused
+        )
+    {
         return EndOutcome::Failed;
     }
     match tried {
@@ -128,6 +133,7 @@ pub(super) fn reconnects(
         // app stays refused.
         SessionEnd::Replaced
         | SessionEnd::AppRefused(_)
+        | SessionEnd::ProxyAuthRefused
         | SessionEnd::Closed
         | SessionEnd::DisconnectedByServer
         | SessionEnd::Cancelled
@@ -455,6 +461,7 @@ mod tests {
         for end in [
             SessionEnd::Replaced,
             SessionEnd::AppRefused(AppRefusal::NotFound),
+            SessionEnd::ProxyAuthRefused,
         ] {
             for (was_connected, reconnecting) in [(true, false), (false, true), (true, true)] {
                 assert!(

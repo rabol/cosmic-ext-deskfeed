@@ -201,7 +201,9 @@ pub fn run(args: &[String]) -> ExitCode {
     let usable = profile
         .as_deref()
         .is_some_and(|p| p.is_absolute() && view::private_dir(p).is_ok());
-    if !usable || view::init_gtk().is_err() {
+    // Never without the app's proxy (`proxy.rs`).
+    let proxy = crate::proxy::from_env();
+    if !usable || proxy.is_err() || view::init_gtk().is_err() {
         // Answer hello with an error, so FreeRDP reports a clear failure
         // instead of waiting.
         serve_errors(cmd_in, &send);
@@ -223,7 +225,7 @@ pub fn run(args: &[String]) -> ExitCode {
     });
 
     let main_loop = glib::MainLoop::new(None, false);
-    let view = SignInView::new(&profile, &window_title());
+    let view = SignInView::new(&profile, &window_title(), proxy.ok().flatten().as_ref());
     let send = Arc::new(send);
     {
         let main_loop = main_loop.clone();
