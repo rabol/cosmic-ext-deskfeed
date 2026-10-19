@@ -64,3 +64,18 @@ pub(super) fn describe_session_end(end: &SessionEnd) -> String {
         SessionEnd::Closed | SessionEnd::Cancelled => String::new(),
     }
 }
+
+/// A fetch failed right after a fresh renewal: a refusal (401) now means
+/// the account must sign in again; anything else is shown.
+pub(super) fn refused_or_shown(e: FetchError) -> StepError {
+    match e {
+        FetchError::Http(HttpError::Status { status: 401, .. }) => {
+            StepError::SignInAgain(fl!("error-session-expired"))
+        }
+        e => StepError::Show(describe_fetch_error(&e)),
+    }
+}
+
+pub(super) fn refused_or_shown_http(e: HttpError) -> StepError {
+    refused_or_shown(FetchError::Http(e))
+}

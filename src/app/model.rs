@@ -572,6 +572,7 @@ mod tests {
                 refresh_token: None,
                 id_token: None,
                 expires_at: Instant::now(),
+                expires_wall: SystemTime::now(),
             },
         }
     }

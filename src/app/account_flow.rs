@@ -495,8 +495,21 @@ impl AppModel {
             let result = tokio::task::spawn_blocking(move || {
                 // An expired access token would only get "session expired".
                 let signed_in = accounts::renew_if_needed(&http, signed_in)?;
-                let feeds = discovery::discover(&http, &signed_in.tokens.access_token)
-                    .map_err(|e| StepError::Show(describe_fetch_error(&e)))?;
+                let (feeds, signed_in) =
+                    match discovery::discover(&http, &signed_in.tokens.access_token) {
+                        // Refused although it looked valid: renew once and retry.
+                        Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
+                            crate::app_log!("desktop list: access token refused; renewing");
+                            let renewed = accounts::renew_now(&http, signed_in)?;
+                            let feeds = discovery::discover(&http, &renewed.tokens.access_token)
+                                .map_err(refused_or_shown)?;
+                            (feeds, renewed)
+                        }
+                        other => (
+                            other.map_err(|e| StepError::Show(describe_fetch_error(&e)))?,
+                            signed_in,
+                        ),
+                    };
                 let list = feeds
                     .into_iter()
                     .map(|f| workspace_view(&signed_in, f))

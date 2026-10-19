@@ -211,13 +211,23 @@ impl AppModel {
                 // The access token also goes to FreeRDP, so it must stay
                 // valid through the connection.
                 let signed_in = accounts::renew_if_needed(&http, signed_in)?;
-                let resp = http
-                    .get(
-                        &url,
-                        Role::ConnectionFile,
-                        Some(&signed_in.tokens.access_token),
-                    )
-                    .map_err(|e| StepError::Show(describe_fetch_error(&FetchError::Http(e))))?;
+                let get = |s: &SignedIn| {
+                    http.get(&url, Role::ConnectionFile, Some(&s.tokens.access_token))
+                };
+                let (resp, signed_in) = match get(&signed_in) {
+                    // Refused although it looked valid: renew once and retry.
+                    Err(HttpError::Status { status: 401, .. }) => {
+                        crate::app_log!("connection file: access token refused; renewing");
+                        let renewed = accounts::renew_now(&http, signed_in)?;
+                        (get(&renewed).map_err(refused_or_shown_http)?, renewed)
+                    }
+                    other => (
+                        other.map_err(|e| {
+                            StepError::Show(describe_fetch_error(&FetchError::Http(e)))
+                        })?,
+                        signed_in,
+                    ),
+                };
                 ConnectionFile::parse(&resp.body)
                     .map(|c| (Arc::new(c), signed_in))
                     .map_err(|e| {

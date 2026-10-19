@@ -501,11 +501,22 @@ pub enum RenewError {
 /// Renews the tokens when the access token expires within the margin, and
 /// saves a rotated refresh token.
 pub fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, RenewError> {
-    renew_in(http, &system(), account)
+    renew_in(http, &system(), account, false)
 }
 
-fn renew_in(http: &Http, env: &Env, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, RenewError> {
-    if !account.tokens.needs_refresh(Instant::now()) {
+/// Renews the tokens now: the service refused an access token that looked
+/// valid (revoked, or the clocks disagree).
+pub fn renew_now(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, RenewError> {
+    renew_in(http, &system(), account, true)
+}
+
+fn renew_in(
+    http: &Http,
+    env: &Env,
+    account: Arc<SignedIn>,
+    force: bool,
+) -> Result<Arc<SignedIn>, RenewError> {
+    if !force && !account.tokens.needs_refresh(Instant::now()) {
         return Ok(account);
     }
     let started = sign_out_count(&account_id(&account.identity));
@@ -513,8 +524,14 @@ fn renew_in(http: &Http, env: &Env, account: Arc<SignedIn>) -> Result<Arc<Signed
     let _account = lock.lock();
     // Another renewal may have finished while this one waited for the
     // lock: use its result, or at least its (rotated) refresh token.
+    let refused = account.tokens.access_token.expose().to_owned();
     let account = match newest(&account) {
-        Some(known) if !known.tokens.needs_refresh(Instant::now()) => return Ok(known),
+        Some(known)
+            if !known.tokens.needs_refresh(Instant::now())
+                && !(force && known.tokens.access_token.expose() == refused) =>
+        {
+            return Ok(known);
+        }
         Some(known) => known,
         None => account,
     };
@@ -663,6 +680,7 @@ mod tests {
                 refresh_token: refresh.map(|t| Secret::new(t.into())),
                 id_token: None,
                 expires_at: Instant::now() + valid_for,
+                expires_wall: SystemTime::now() + valid_for,
             },
         })
     }
@@ -794,8 +812,32 @@ mod tests {
         let store = FakeStore::default();
         let account = signed_in(&me, Some("rt-old"), Duration::from_secs(3600));
         // Port 1: any request would fail, so success means none was made.
-        let renewed = renew_in(&http(1), &env(1, &store), account.clone()).unwrap();
+        let renewed = renew_in(&http(1), &env(1, &store), account.clone(), false).unwrap();
         assert!(Arc::ptr_eq(&renewed, &account));
+    }
+
+    #[test]
+    fn renewal_counts_time_asleep() {
+        // The monotonic clock says an hour is left, but the computer slept
+        // through it: the wall clock says it has expired.
+        let me = identity("00000000-0000-0000-0000-0000000000b7");
+        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let store = FakeStore::with(&me, "rt-old");
+        let mut account =
+            Arc::into_inner(signed_in(&me, Some("rt-old"), Duration::from_secs(3600))).unwrap();
+        account.tokens.expires_wall = SystemTime::now() - Duration::from_secs(5 * 3600);
+        let renewed = renew_in(&http(port), &env(port, &store), Arc::new(account), false).unwrap();
+        assert_eq!(renewed.tokens.access_token.expose(), "new-access");
+    }
+
+    #[test]
+    fn forced_renewal_renews_a_fresh_looking_token() {
+        let me = identity("00000000-0000-0000-0000-0000000000b8");
+        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let store = FakeStore::with(&me, "rt-old");
+        let account = signed_in(&me, Some("rt-old"), Duration::from_secs(3600));
+        let renewed = renew_in(&http(port), &env(port, &store), account, true).unwrap();
+        assert_eq!(renewed.tokens.access_token.expose(), "new-access");
     }
 
     #[test]
@@ -804,7 +846,7 @@ mod tests {
         let (port, _) = serve_once("200 OK", OK_ROTATED);
         let store = FakeStore::with(&me, "rt-old");
         let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
-        let renewed = renew_in(&http(port), &env(port, &store), account).unwrap();
+        let renewed = renew_in(&http(port), &env(port, &store), account, false).unwrap();
         assert_eq!(renewed.tokens.access_token.expose(), "new-access");
         assert_eq!(store.tokens(), ["rt-new"]);
     }
@@ -816,25 +858,25 @@ mod tests {
         let (port, _) = serve_once("503 Service Unavailable", "busy");
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
-            renew_in(&http(port), &env(port, &store), account).unwrap_err(),
+            renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
             RenewError::Retry(fl!("error-generic"))
         );
         let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
-            renew_in(&http(port), &env(port, &store), account).unwrap_err(),
+            renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
             RenewError::SignInAgain(fl!("error-session-expired"))
         );
         let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
-            renew_in(&http(port), &env(port, &store), account).unwrap_err(),
+            renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
             RenewError::SignInAgain(fl!("error-sign-in-frequency"))
         );
         // No refresh token: nothing to renew with, no request.
         let account = signed_in(&me, None, Duration::ZERO);
         assert_eq!(
-            renew_in(&http(1), &env(1, &store), account).unwrap_err(),
+            renew_in(&http(1), &env(1, &store), account, false).unwrap_err(),
             RenewError::SignInAgain(fl!("error-session-expired"))
         );
     }
@@ -848,8 +890,8 @@ mod tests {
         let (port, sent) = serve_once("200 OK", OK_ROTATED);
         let store = FakeStore::with(&me, "rt-old");
         let copy = signed_in(&me, Some("rt-old"), Duration::ZERO);
-        let first = renew_in(&http(port), &env(port, &store), copy.clone()).unwrap();
-        let second = renew_in(&http(port), &env(port, &store), copy).unwrap();
+        let first = renew_in(&http(port), &env(port, &store), copy.clone(), false).unwrap();
+        let second = renew_in(&http(port), &env(port, &store), copy, false).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(
             sent.lock()
@@ -893,7 +935,7 @@ mod tests {
         let store = FakeStore::with(&me, "rt-old");
         let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
         assert!(matches!(
-            renew_in(&http(port), &env(port, &store), account),
+            renew_in(&http(port), &env(port, &store), account, false),
             Err(RenewError::Retry(_))
         ));
         assert_eq!(store.tokens(), ["rt-old"]);

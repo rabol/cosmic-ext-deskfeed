@@ -6,7 +6,7 @@
 //! (never to files). `Debug` output never shows token values.
 
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::Deserialize;
 use url::Url;
@@ -24,6 +24,10 @@ pub struct TokenSet {
     /// Raw ID token; validate with `id_token::validate` before using claims.
     pub id_token: Option<String>,
     pub expires_at: Instant,
+    /// The same on the wall clock: `Instant` stops while the computer
+    /// sleeps (Linux `CLOCK_MONOTONIC`), so after a night asleep it would
+    /// still look fresh.
+    pub expires_wall: SystemTime,
 }
 
 impl fmt::Debug for TokenSet {
@@ -38,6 +42,7 @@ impl fmt::Debug for TokenSet {
 impl TokenSet {
     pub fn needs_refresh(&self, now: Instant) -> bool {
         now + EXPIRY_MARGIN >= self.expires_at
+            || SystemTime::now() + EXPIRY_MARGIN >= self.expires_wall
     }
 }
 
@@ -163,6 +168,7 @@ fn request(
     previous_refresh: Option<&Secret>,
 ) -> Result<TokenSet, TokenError> {
     let started = Instant::now();
+    let started_wall = SystemTime::now();
     let body = match http.post_form(&token_url(config), Role::Token, form) {
         Ok(resp) => resp.body,
         Err(HttpError::Status { status, body }) => return Err(classify_error(status, &body)),
@@ -188,6 +194,7 @@ fn request(
             .or_else(|| previous_refresh.cloned()),
         id_token: resp.id_token.filter(|t| !t.is_empty()),
         expires_at: started + lifetime,
+        expires_wall: started_wall + lifetime,
     })
 }
 
