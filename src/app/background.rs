@@ -87,14 +87,14 @@ impl AppModel {
             TrayEvent::Connect(key) => {
                 // A password, a certificate or a failure opens the window
                 // (`window_needed`).
-                self.tray_connects.insert(key.clone());
+                self.desks.at(&key).from_tray = true;
                 self.route(Message::Connect(key))
             }
             TrayEvent::ShowDesktop(key) => self.route(Message::ShowSession(key)),
             TrayEvent::Quit => {
                 // Asked in the window when desktops are open.
                 self.quit_from_tray = true;
-                let show = if self.running.is_empty() && self.launching.is_empty() {
+                let show = if self.desks.open_count() == 0 {
                     Task::none()
                 } else {
                     self.show_window()
@@ -109,14 +109,14 @@ impl AppModel {
     /// the tray that failed).
     pub(super) fn window_needed(&mut self) -> Task<cosmic::Action<Message>> {
         if self.core.main_window_id().is_some() {
-            self.tray_connects.clear();
+            self.desks.retain_from_tray(|_, _| false);
             return Task::none();
         }
         let failed = self
-            .tray_connects
-            .iter()
-            .any(|k| matches!(self.connections.get(k), Some(Connection::Failed(_))));
-        let needs_sign_in = self.tray_connects.iter().any(|k| {
+            .desks
+            .tray_keys()
+            .any(|k| matches!(self.desks.conn(k), Some(Connection::Failed(_))));
+        let needs_sign_in = self.desks.tray_keys().any(|k| {
             self.account_of_resource(k).is_none()
                 && self
                     .accounts
@@ -124,9 +124,9 @@ impl AppModel {
                     .any(|a| matches!(a.state, AccountState::NeedsSignIn { .. }))
         });
         // Settled ones don't need watching any more.
-        self.tray_connects.retain(|k| {
+        self.desks.retain_from_tray(|_, d| {
             matches!(
-                self.connections.get(k),
+                d.connection,
                 Some(
                     Connection::Preparing
                         | Connection::AwaitingUser
@@ -141,7 +141,7 @@ impl AppModel {
             || failed
             || needs_sign_in
         {
-            self.tray_connects.clear();
+            self.desks.retain_from_tray(|_, _| false);
             return self.show_window();
         }
         Task::none()
@@ -158,11 +158,7 @@ impl AppModel {
             enabled: true,
         };
         let mut items = Vec::new();
-        let connected = self
-            .connections
-            .values()
-            .filter(|c| matches!(c, Connection::Connected))
-            .count();
+        let connected = self.desks.connected_count();
         if connected > 0 {
             let count = u32::try_from(connected).unwrap_or(u32::MAX);
             items.push(TrayItem::Note(fl!("tray-connected", count = count)));
@@ -219,7 +215,7 @@ impl AppModel {
             checked: false,
             enabled: false,
         };
-        match self.connections.get(&r.key) {
+        match self.desks.conn(&r.key) {
             Some(Connection::Connected) => TrayItem::Action {
                 label: r.title.clone(),
                 // An app's windows can't be told apart (ADR 0020): open
@@ -267,8 +263,9 @@ impl AppModel {
     /// screen" (by window title); none, no watcher.
     pub(super) fn awake_subscription(&self) -> Subscription<Message> {
         let mut titles: Vec<String> = self
-            .running
-            .values()
+            .desks
+            .all_running()
+            .map(|(_, r)| r)
             .filter(|r| r.keep_awake)
             .map(|r| r.title.clone())
             .collect();

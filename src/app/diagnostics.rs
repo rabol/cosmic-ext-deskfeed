@@ -82,7 +82,7 @@ impl AppModel {
                         r.title.clone(),
                         format!("<desktop {}.{}.{}>", n + 1, w + 1, d + 1),
                     ));
-                    if let Some(c) = self.connections.get(&r.key) {
+                    if let Some(c) = self.desks.conn(&r.key) {
                         summary.push(format!("  desktop {}.{}.{}: {c:?}", n + 1, w + 1, d + 1));
                     }
                 }

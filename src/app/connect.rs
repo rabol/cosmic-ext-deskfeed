@@ -17,7 +17,7 @@ impl AppModel {
                     return Task::none();
                 }
                 // Cancelled while it was being prepared (review F08).
-                if !matches!(self.connections.get(&key), Some(Connection::Preparing)) {
+                if !matches!(self.desks.conn(&key), Some(Connection::Preparing)) {
                     return Task::none();
                 }
                 let result = match result {
@@ -27,8 +27,8 @@ impl AppModel {
                     }
                     Err(StepError::Show(e)) => Err(e),
                     Err(StepError::SignInAgain(e)) => {
-                        self.connections.remove(&key);
-                        self.reconnects.remove(&key);
+                        self.desks.clear_conn(&key);
+                        self.desks.take_reconnect(&key);
                         self.needs_sign_in(&id, e);
                         return Task::none();
                     }
@@ -64,7 +64,7 @@ impl AppModel {
             // Cancelled: back to Connect.
             Message::DialogCancel => {
                 if let Some(d) = self.dialog.take() {
-                    self.connections.remove(&d.key);
+                    self.desks.clear_conn(&d.key);
                 }
                 self.withdraw_dialogs(|_| false);
             }
@@ -72,7 +72,7 @@ impl AppModel {
             Message::Launched(id, epoch, key, attempt, result) => {
                 return self.launched(&id, epoch, key, attempt, result);
             }
-            Message::ConnectDeadline(key, attempt) => self.connect_deadline(key, attempt),
+            Message::ConnectDeadline(key, attempt) => self.connect_deadline(&key, attempt),
             Message::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
             Message::ShowSession(key) => return self.show_session(&key),
             Message::ToggleRememberPassword(on) => {
@@ -96,8 +96,7 @@ impl AppModel {
                 Ok(_) => {}
                 Err(e) => {
                     crate::app_log!("Windows password not remembered ({e})");
-                    self.session_notes
-                        .insert(key, fl!("password-not-saved", detail = e));
+                    self.desks.at(&key).note = Some(fl!("password-not-saved", detail = e));
                 }
             },
             Message::ForgetPassword(key) => return self.forget_password(&key),
@@ -113,7 +112,7 @@ impl AppModel {
                 let mut pins = self.config.certificate_pins.clone();
                 pins.insert(d.key.clone(), d.certificate.fingerprint);
                 self.save_certificate_pins(pins);
-                self.connections.remove(&d.key);
+                self.desks.clear_conn(&d.key);
                 return self.prepare_connection(&d.key);
             }
             Message::CloseCertificateDialog => self.certificate_dialog = None,
@@ -139,7 +138,10 @@ impl AppModel {
                 // Only the current attempt's events: a reader may still
                 // report after its session ended.
                 if self.account(&id).is_some_and(|a| a.epoch == epoch)
-                    && self.running.get(&key).is_some_and(|r| r.attempt == attempt)
+                    && self
+                        .desks
+                        .running(&key)
+                        .is_some_and(|r| r.attempt == attempt)
                 {
                     return self.session_event(&key, event);
                 }
@@ -149,33 +151,36 @@ impl AppModel {
                 // (review F06, F08). A connection file still on its way is
                 // dropped when it arrives.
                 if matches!(
-                    self.connections.get(&key),
+                    self.desks.conn(&key),
                     Some(Connection::Preparing | Connection::AwaitingUser)
                 ) {
-                    self.connections.remove(&key);
-                    self.reconnects.remove(&key);
+                    self.desks.clear_conn(&key);
+                    self.desks.take_reconnect(&key);
                     self.withdraw_dialogs(|d| d.key == key);
                     return Task::none();
                 }
                 // Stop also ends reconnecting.
-                if self.reconnects.remove(&key).is_some()
-                    && matches!(
-                        self.connections.get(&key),
-                        Some(Connection::Reconnecting { .. })
-                    )
+                if self.desks.take_reconnect(&key).is_some()
+                    && matches!(self.desks.conn(&key), Some(Connection::Reconnecting { .. }))
                 {
-                    self.connections.remove(&key);
+                    self.desks.clear_conn(&key);
                 }
-                if let Some(r) = self.running.get(&key) {
+                if let Some(r) = self.desks.running(&key) {
                     r.session.disconnect();
-                    self.connections
-                        .insert(key.clone(), Connection::Disconnecting);
-                } else if let Some(l) = self.launching.get_mut(&key) {
+                }
+                if self.desks.running(&key).is_some() {
+                    self.desks.set_conn(&key, Connection::Disconnecting);
+                } else if let Some(l) = self.desks.launching_mut(&key) {
                     l.stop = true;
                 }
             }
-            Message::WorkspaceMoved(key, result) => {
-                self.movers.remove(&key);
+            Message::WorkspaceMoved(key, done, result) => {
+                // Only this wait's: a newer one keeps its handle.
+                if let Some(d) = self.desks.get_mut(&key)
+                    && d.mover.as_ref().is_some_and(|m| Arc::ptr_eq(m, &done))
+                {
+                    d.mover = None;
+                }
                 // Not worth interrupting the user: the desktop opened, only
                 // not on a new workspace.
                 if let Err(e) = result {
@@ -196,19 +201,19 @@ impl AppModel {
         if let Some(checks) = &self.deps
             && !deps::required_ok(checks)
         {
-            self.connections.insert(
-                key.to_owned(),
-                Connection::Failed(fl!("error-deps-missing")),
-            );
+            self.desks
+                .set_conn(key, Connection::Failed(fl!("error-deps-missing")));
             return self.check_dependencies();
         }
         // Connecting takes its session back (ADR 0020).
-        self.moved_to.remove(key);
+        if let Some(d) = self.desks.get_mut(key) {
+            d.moved_to = None;
+        }
         if self.quit != Quit::No
-            || self.running.contains_key(key)
-            || self.launching.contains_key(key)
+            || self.desks.running(key).is_some()
+            || self.desks.launching(key).is_some()
             || matches!(
-                self.connections.get(key),
+                self.desks.conn(key),
                 Some(
                     Connection::Preparing
                         | Connection::AwaitingUser
@@ -230,14 +235,11 @@ impl AppModel {
         };
         let (id, epoch) = (account.id.clone(), account.epoch);
         let Some(url) = resource.connection_file.clone() else {
-            self.connections.insert(
-                key.to_owned(),
-                Connection::Failed(fl!("error-no-connection-file")),
-            );
+            self.desks
+                .set_conn(key, Connection::Failed(fl!("error-no-connection-file")));
             return Task::none();
         };
-        self.connections
-            .insert(key.to_owned(), Connection::Preparing);
+        self.desks.set_conn(key, Connection::Preparing);
         let http = self.http.clone();
         let key = key.to_owned();
         // Read now: a sign-out before this runs stops it (review F01).
@@ -302,15 +304,15 @@ impl AppModel {
         let connection = match result {
             Ok(c) => c,
             // Offline or a network error while reconnecting: try later.
-            Err(_) if self.reconnects.contains_key(&key) => return self.schedule_reconnect(&key),
+            Err(_) if self.desks.reconnect(&key).is_some() => return self.schedule_reconnect(&key),
             Err(e) => {
-                self.connections.insert(key, Connection::Failed(e));
+                self.desks.set_conn(&key, Connection::Failed(e));
                 return Task::none();
             }
         };
         let remembered = match decide::first_step(
             self.config.logon_settings.get(&key),
-            self.entra_failed.contains(&key),
+            self.desks.get(&key).is_some_and(|d| d.entra_failed),
         ) {
             decide::FirstStep::Entra => {
                 return self.launch(account, &key, &connection, LogonSetting::EntraSignIn, None);
@@ -322,9 +324,9 @@ impl AppModel {
                 return self.load_saved_password(account, key, connection, setting);
             }
             // Reconnecting never opens the password dialog by itself.
-            decide::FirstStep::AskPassword(_) if self.reconnects.remove(&key).is_some() => {
-                self.connections
-                    .insert(key, Connection::Failed(fl!("error-connection-lost")));
+            decide::FirstStep::AskPassword(_) if self.desks.take_reconnect(&key).is_some() => {
+                self.desks
+                    .set_conn(&key, Connection::Failed(fl!("error-connection-lost")));
                 return Task::none();
             }
             decide::FirstStep::AskPassword(setting) => setting,
@@ -347,7 +349,7 @@ impl AppModel {
             .map(|r| r.title.clone())
             .unwrap_or_default();
         let (logon, custom_domain) = logon_index(remembered);
-        let error = self.last_failure.remove(&key);
+        let error = self.desks.get_mut(&key).and_then(|d| d.last_failure.take());
         // What was typed last time for this desktop, else the account's.
         let username = self
             .config
@@ -359,8 +361,7 @@ impl AppModel {
                     .and_then(|a| a.identity.username.clone())
             })
             .unwrap_or_default();
-        self.connections
-            .insert(key.clone(), Connection::AwaitingUser);
+        self.desks.set_conn(&key, Connection::AwaitingUser);
         let dialog = PasswordDialog {
             account: account.to_owned(),
             key,
@@ -420,13 +421,13 @@ impl AppModel {
         result: Result<Option<Secret>, String>,
     ) -> Task<cosmic::Action<Message>> {
         if self.account(account).is_none_or(|a| a.epoch != epoch)
-            || !matches!(self.connections.get(&key), Some(Connection::Preparing))
+            || !matches!(self.desks.conn(&key), Some(Connection::Preparing))
         {
             return Task::none();
         }
         match result {
             Ok(Some(password)) => {
-                self.used_saved_password.insert(key.clone());
+                self.desks.at(&key).used_saved_password = true;
                 return self.launch(account, &key, &connection, logon, Some(password));
             }
             Ok(None) => {
@@ -435,9 +436,9 @@ impl AppModel {
             }
             Err(e) => crate::app_log!("remembered password not read ({e})"),
         }
-        if self.reconnects.remove(&key).is_some() {
-            self.connections
-                .insert(key, Connection::Failed(fl!("error-connection-lost")));
+        if self.desks.take_reconnect(&key).is_some() {
+            self.desks
+                .set_conn(&key, Connection::Failed(fl!("error-connection-lost")));
             return Task::none();
         }
         self.open_password_dialog(account, key, connection, &logon);
@@ -530,14 +531,10 @@ impl AppModel {
             self.remember_windows_user(&d.account, &d.key, &username);
         }
         // Kept only until the connection works (`session_event`).
-        match (&password, d.remember) {
-            (Some(p), true) => {
-                self.pending_password.insert(d.key.clone(), p.clone());
-            }
-            _ => {
-                self.pending_password.remove(&d.key);
-            }
-        }
+        self.desks.at(&d.key).pending_password = match (&password, d.remember) {
+            (Some(p), true) => Some(p.clone()),
+            _ => None,
+        };
         self.launch(&d.account, &d.key, &d.connection, logon, password)
     }
 
@@ -562,10 +559,8 @@ impl AppModel {
         let (Some(helper), Some(profile)) =
             (signin::find_helper(), accounts::prepared_profile(account))
         else {
-            self.connections.insert(
-                key.to_owned(),
-                Connection::Failed(fl!("error-helper-missing")),
-            );
+            self.desks
+                .set_conn(key, Connection::Failed(fl!("error-helper-missing")));
             return Task::none();
         };
         let mut settings = self.effective_settings(account, key);
@@ -579,7 +574,6 @@ impl AppModel {
         }
         // The administrator's device policy wins over the user's settings
         // (spec §Settings: respect server policy, show effective behaviour).
-        self.session_notes.remove(key);
         let mut notes = Vec::new();
         if settings.camera {
             let note = match connection.cameras {
@@ -607,9 +601,7 @@ impl AppModel {
                 Limited::Sound => fl!("sound-not-allowed"),
             },
         ));
-        if !notes.is_empty() {
-            self.session_notes.insert(key.to_owned(), notes.join(" · "));
-        }
+        self.desks.at(key).note = (!notes.is_empty()).then(|| notes.join(" · "));
         let window_title = self
             .account(account)
             .and_then(|a| Some(format!("{} – {}", a.resource(key)?.title, a.label())))
@@ -648,10 +640,9 @@ impl AppModel {
                 LogonSetting::EntraSignIn => "EntraSignIn",
             }
         );
-        self.connections
-            .insert(key.to_owned(), Connection::Connecting);
-        self.pending_logon
-            .insert(key.to_owned(), (logon, connection.clone()));
+        let desk = self.desks.at(key);
+        desk.connection = Some(Connection::Connecting);
+        desk.pending_logon = Some((logon, connection.clone()));
         let title = launcher::safe_title(&window_title);
         let attempt = self.next();
         // FreeRDP's own limits: `/timeout` for the session host, and 180 s
@@ -659,19 +650,16 @@ impl AppModel {
         // connection needs at most two; plus a minute for the network.
         let deadline =
             std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 2 * 180 + 60);
-        self.launching.insert(
-            key.to_owned(),
-            Launching {
-                attempt,
-                deadline,
-                account: account.to_owned(),
-                stop: false,
-                title: title.clone(),
-                grabs_shortcuts: settings.system_shortcuts,
-                keep_awake: settings.keep_awake,
-                remote_app,
-            },
-        );
+        self.desks.at(key).launching = Some(Launching {
+            attempt,
+            deadline,
+            account: account.to_owned(),
+            stop: false,
+            title: title.clone(),
+            grabs_shortcuts: settings.system_shortcuts,
+            keep_awake: settings.keep_awake,
+            remote_app,
+        });
         // Starting FreeRDP writes files and hands over the arguments: not on
         // the UI thread. Its events follow once it has started.
         let (tx, rx) = mpsc::unbounded();
@@ -723,11 +711,12 @@ impl AppModel {
         settings: &crate::settings::Effective,
     ) -> Task<cosmic::Action<Message>> {
         let stop = Arc::new(AtomicBool::new(false));
-        self.movers.insert(key.to_owned(), stop.clone());
+        self.desks.at(key).mover = Some(stop.clone());
         // The window appears after authentication: wait as long as the
         // connection may take, plus the sign-in page.
         let wait = std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 180);
         let key = key.to_owned();
+        let mine = stop.clone();
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
                 crate::workspace::move_to_new_workspace(
@@ -743,7 +732,7 @@ impl AppModel {
                 Ok(Err(e)) => Err(e.to_string()),
                 Err(_) => Err("task".to_owned()),
             };
-            Message::WorkspaceMoved(key, result)
+            Message::WorkspaceMoved(key, mine, result)
         })
     }
 
@@ -751,7 +740,7 @@ impl AppModel {
     fn quit_message(&mut self, message: &Message) -> Task<cosmic::Action<Message>> {
         match (message, self.quit) {
             (Message::QuitRequested, Quit::No) => {
-                let idle = self.running.is_empty() && self.launching.is_empty();
+                let idle = self.desks.open_count() == 0;
                 // Closing with background operation: nothing to ask.
                 if idle && self.can_run_in_background() && !self.quit_from_tray {
                     return self.hide_window();
@@ -779,13 +768,13 @@ impl AppModel {
     }
 
     /// The time to connect is up: end the attempt if it hasn't connected.
-    fn connect_deadline(&mut self, key: String, attempt: u64) {
-        if let Some(r) = self.running.get(&key).filter(|r| r.attempt == attempt)
-            && !matches!(self.connections.get(&key), Some(Connection::Connected))
+    fn connect_deadline(&mut self, key: &str, attempt: u64) {
+        if let Some(r) = self.desks.running(key).filter(|r| r.attempt == attempt)
+            && !matches!(self.desks.conn(key), Some(Connection::Connected))
         {
             crate::app_log!("connecting took too long; ending FreeRDP");
             r.session.disconnect();
-            self.timed_out.insert(key);
+            self.desks.at(key).timed_out = true;
         }
     }
 
@@ -800,8 +789,8 @@ impl AppModel {
         result: Result<launcher::Session, String>,
     ) -> Task<cosmic::Action<Message>> {
         if self
-            .launching
-            .get(&key)
+            .desks
+            .launching(&key)
             .is_none_or(|l| l.attempt != attempt)
         {
             // Nobody expects it any more.
@@ -819,7 +808,7 @@ impl AppModel {
             keep_awake,
             remote_app,
             ..
-        } = self.launching.remove(&key).expect("checked above");
+        } = self.desks.at(&key).launching.take().expect("checked above");
         let current = self.account(account).is_some_and(|a| a.epoch == epoch);
         match result {
             Ok(session) if self.quit != Quit::Stopping && self.signing_out.contains(&owner) => {
@@ -843,18 +832,15 @@ impl AppModel {
                 } else if !wanted {
                     session.disconnect();
                 }
-                self.running.insert(
-                    key.clone(),
-                    Running {
-                        attempt,
-                        account: owner,
-                        session,
-                        title,
-                        grabs_shortcuts,
-                        keep_awake,
-                        remote_app,
-                    },
-                );
+                self.desks.at(&key).running = Some(Running {
+                    attempt,
+                    account: owner,
+                    session,
+                    title,
+                    grabs_shortcuts,
+                    keep_awake,
+                    remote_app,
+                });
                 if wanted {
                     return cosmic::task::future(async move {
                         tokio::time::sleep(deadline).await;
@@ -863,16 +849,15 @@ impl AppModel {
                 }
             }
             Err(text) => {
-                if let Some(stop) = self.movers.remove(&key) {
-                    stop.store(true, Ordering::SeqCst);
-                }
+                let desk = self.desks.at(&key);
+                desk.stop_mover();
                 // A local problem (FreeRDP missing, …): retrying won't help.
-                self.reconnects.remove(&key);
-                self.pending_logon.remove(&key);
+                desk.reconnect = None;
+                desk.pending_logon = None;
                 if current {
-                    self.connections.insert(key, Connection::Failed(text));
+                    self.desks.set_conn(&key, Connection::Failed(text));
                 } else {
-                    self.connections.remove(&key);
+                    self.desks.clear_conn(&key);
                 }
             }
         }
@@ -885,13 +870,11 @@ impl AppModel {
     /// Quitting: once nothing is starting any more, ends every session and
     /// sign-in, waits for FreeRDP to be gone, then exits.
     pub(super) fn continue_quit(&mut self) -> Task<cosmic::Action<Message>> {
-        if !self.launching.is_empty() || !self.signing_out.is_empty() {
+        if self.desks.all_launching().next().is_some() || !self.signing_out.is_empty() {
             // `launched` or the end of the sign-out calls this again.
             return Task::none();
         }
-        for stop in self.movers.values() {
-            stop.store(true, Ordering::SeqCst);
-        }
+        self.desks.stop_all_movers();
         if let Some(Adding {
             cancel: Some(c), ..
         }) = &self.adding
@@ -903,8 +886,7 @@ impl AppModel {
                 cancel.cancel();
             }
         }
-        let sessions: Vec<launcher::Session> =
-            self.running.drain().map(|(_, r)| r.session).collect();
+        let sessions = self.desks.take_all_running();
         if !sessions.is_empty() {
             crate::app_log!("quitting: ending {} session(s)", sessions.len());
         }
@@ -920,7 +902,7 @@ impl AppModel {
 
     /// Asks before quitting while desktops are open.
     pub(super) fn quit_dialog(&self) -> Element<'_, Message> {
-        let open = u32::try_from(self.running.len() + self.launching.len()).unwrap_or(u32::MAX);
+        let open = u32::try_from(self.desks.open_count()).unwrap_or(u32::MAX);
         let mut dialog = widget::dialog()
             .title(fl!("quit-title"))
             .body(fl!("quit-body", count = open))
@@ -950,7 +932,7 @@ impl AppModel {
             SessionEvent::Stage(stage) => {
                 // Only while starting; Disconnect wins.
                 if let Some(c @ (Connection::Connecting | Connection::Authenticating)) =
-                    self.connections.get_mut(key)
+                    self.desks.conn_mut(key)
                 {
                     *c = match stage {
                         launcher::Stage::Connecting => Connection::Connecting,
@@ -959,14 +941,19 @@ impl AppModel {
                 }
             }
             SessionEvent::Connected => {
-                if matches!(self.connections.get(key), Some(Connection::Disconnecting)) {
+                if matches!(self.desks.conn(key), Some(Connection::Disconnecting)) {
                     return Task::none();
                 }
-                if let Some(r) = self.reconnects.remove(key) {
+                if let Some(r) = self.desks.take_reconnect(key) {
                     crate::app_log!("reconnected (attempt {})", r.attempt);
                 }
-                self.used_saved_password.remove(key);
-                if let Some(password) = self.pending_password.remove(key)
+                if let Some(d) = self.desks.get_mut(key) {
+                    d.used_saved_password = false;
+                }
+                if let Some(password) = self
+                    .desks
+                    .get_mut(key)
+                    .and_then(|d| d.pending_password.take())
                     && let Some(account) = self.account_of_resource(key)
                 {
                     let identity = account.identity.clone();
@@ -991,12 +978,12 @@ impl AppModel {
                         Message::PasswordSaved(key, id, ticket, result)
                     });
                 }
-                self.connections
-                    .insert(key.to_owned(), Connection::Connected);
-                self.entra_failed.remove(key);
-                self.entra_failures.remove(key);
+                let desk = self.desks.at(key);
+                desk.connection = Some(Connection::Connected);
+                desk.entra_failed = false;
+                desk.entra_failures = 0;
                 // Remember the logon setting that worked.
-                if let Some((logon, _)) = self.pending_logon.get(key).cloned() {
+                if let Some((logon, _)) = desk.pending_logon.clone() {
                     self.remember_logon(key, logon);
                 }
             }
@@ -1018,20 +1005,14 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         let mut save_task = Task::none();
         let ended = self
-            .running
-            .get(key)
+            .desks
+            .running(key)
             .map(|r| (r.attempt, r.remote_app, r.account.clone()));
-        self.running.remove(key);
-        self.session_notes.remove(key);
-        // Never remembered: this attempt didn't connect, or it did
-        // and was remembered already.
-        self.pending_password.remove(key);
-        let used_saved = self.used_saved_password.remove(key);
-        self.launching.remove(key);
-        if let Some(stop) = self.movers.remove(key) {
-            stop.store(true, Ordering::SeqCst);
-        }
-        let pending = self.pending_logon.remove(key);
+        // What belonged to this attempt goes (`Desk::end_attempt`).
+        let crate::app::desk::EndedAttempt {
+            used_saved_password: used_saved,
+            pending_logon: pending,
+        } = self.desks.at(key).end_attempt();
         if !log.is_empty() && *end != SessionEnd::Closed {
             crate::app_log!("FreeRDP ended ({end:?}); last log lines:");
             for line in log {
@@ -1040,15 +1021,13 @@ impl AppModel {
         }
         // Ended because the user disconnected: however FreeRDP
         // ended, that is a normal end, never a reason to reconnect.
-        if matches!(self.connections.get(key), Some(Connection::Disconnecting)) {
+        if matches!(self.desks.conn(key), Some(Connection::Disconnecting)) {
             // Windows shown through it are gone with it.
-            self.moved_to.retain(|_, to| to != key);
-            self.connections.remove(key);
-            self.reconnects.remove(key);
-            self.timed_out.remove(key);
+            self.desks.release_moved_to(key);
+            self.desks.at(key).clear_status();
             return Task::none();
         }
-        let was_connected = matches!(self.connections.get(key), Some(Connection::Connected));
+        let was_connected = matches!(self.desks.conn(key), Some(Connection::Connected));
         if let Some(to) =
             ended
                 .filter(|(_, remote_app, _)| *remote_app)
@@ -1057,25 +1036,20 @@ impl AppModel {
                 })
         {
             crate::app_log!("RemoteApp's session taken over by another app's connection");
-            self.connections.remove(key);
-            self.reconnects.remove(key);
-            self.timed_out.remove(key);
             // Windows that had moved here move on with them.
-            for target in self.moved_to.values_mut() {
-                if target == key {
-                    target.clone_from(&to);
-                }
-            }
-            self.moved_to.insert(key.to_owned(), to);
+            self.desks.repoint_moved_to(key, &to);
+            let desk = self.desks.at(key);
+            desk.clear_status();
+            desk.moved_to = Some(to);
             return save_task;
         }
-        self.moved_to.retain(|_, to| to != key);
+        self.desks.release_moved_to(key);
         let tried = pending.as_ref().map(|(logon, _)| logon);
-        let reconnecting = self.reconnects.contains_key(key);
+        let reconnecting = self.desks.reconnect(key).is_some();
         let wanted = self
             .account_of_resource(key)
             .is_some_and(|a| self.effective_settings(&a.id, key).reconnect);
-        let timed_out = self.timed_out.contains(key);
+        let timed_out = self.desks.get(key).is_some_and(|d| d.timed_out);
         if wanted
             && self.quit == Quit::No
             && ((timed_out && reconnecting)
@@ -1088,16 +1062,14 @@ impl AppModel {
                         self.config.saved_passwords.contains(key),
                     )))
         {
-            self.timed_out.remove(key);
+            self.desks.at(key).timed_out = false;
             return self.schedule_reconnect(key);
         }
-        self.reconnects.remove(key);
-        if self.timed_out.remove(key) {
+        let desk = self.desks.at(key);
+        desk.reconnect = None;
+        if std::mem::take(&mut desk.timed_out) {
             // Ended by the app: not about how the user logged on.
-            self.connections.insert(
-                key.to_owned(),
-                Connection::Failed(fl!("error-connect-too-long")),
-            );
+            desk.connection = Some(Connection::Failed(fl!("error-connect-too-long")));
             return Task::none();
         }
         let outcome = decide::end_outcome(
@@ -1105,13 +1077,13 @@ impl AppModel {
             was_connected,
             self.config.logon_settings.get(key),
             tried,
-            self.entra_failures.get(key).copied().unwrap_or(0),
+            self.desks.get(key).map_or(0, |d| d.entra_failures),
         );
         if outcome != decide::EndOutcome::Clear
             && !was_connected
             && tried == Some(&LogonSetting::EntraSignIn)
         {
-            *self.entra_failures.entry(key.to_owned()).or_insert(0) += 1;
+            self.desks.at(key).entra_failures += 1;
         }
         if let SessionEnd::CertificateNotTrusted(certificate) = end {
             let pinned = self.config.certificate_pins.get(key).cloned();
@@ -1122,8 +1094,8 @@ impl AppModel {
                 .and_then(|a| a.resource(key))
                 .map(|r| r.title.clone())
                 .unwrap_or_default();
-            self.connections.insert(
-                key.to_owned(),
+            self.desks.set_conn(
+                key,
                 Connection::Failed(match step {
                     decide::CertificateStep::Ask => fl!("error-certificate-untrusted"),
                     decide::CertificateStep::Changed => fl!("error-certificate-changed"),
@@ -1141,19 +1113,17 @@ impl AppModel {
         }
         match outcome {
             decide::EndOutcome::Clear => {
-                self.connections.remove(key);
+                self.desks.clear_conn(key);
             }
             decide::EndOutcome::OfferPassword => {
                 // Offer password logon next time, and say why.
-                self.entra_failed.insert(key.to_owned());
-                self.connections.insert(
-                    key.to_owned(),
-                    Connection::Failed(fl!("status-entra-failed")),
-                );
-                self.last_failure.insert(
-                    key.to_owned(),
-                    fl!("error-entra-failed", detail = describe_session_end(end)),
-                );
+                let desk = self.desks.at(key);
+                desk.entra_failed = true;
+                desk.connection = Some(Connection::Failed(fl!("status-entra-failed")));
+                desk.last_failure = Some(fl!(
+                    "error-entra-failed",
+                    detail = describe_session_end(end)
+                ));
             }
             decide::EndOutcome::WrongPassword => {
                 // Stop and explain; the user decides whether to try
@@ -1169,17 +1139,13 @@ impl AppModel {
                 } else {
                     fl!("error-logon-failed", setting = tried)
                 };
-                self.connections.insert(
-                    key.to_owned(),
-                    Connection::Failed(fl!("status-logon-failed")),
-                );
-                self.last_failure.insert(key.to_owned(), message);
+                let desk = self.desks.at(key);
+                desk.connection = Some(Connection::Failed(fl!("status-logon-failed")));
+                desk.last_failure = Some(message);
             }
             decide::EndOutcome::Failed => {
-                self.connections.insert(
-                    key.to_owned(),
-                    Connection::Failed(describe_session_end(end)),
-                );
+                self.desks
+                    .set_conn(key, Connection::Failed(describe_session_end(end)));
             }
         }
         save_task
@@ -1196,15 +1162,15 @@ impl AppModel {
         was_connected: bool,
         attempt: u64,
     ) -> Option<String> {
-        let leaving = |k: &str| matches!(self.connections.get(k), Some(Connection::Disconnecting));
+        let leaving = |k: &str| matches!(self.desks.conn(k), Some(Connection::Disconnecting));
         let running = self
-            .running
-            .iter()
+            .desks
+            .all_running()
             .filter(|(k, r)| r.remote_app && r.account == account && *k != key && !leaving(k))
             .map(|(k, r)| (k.as_str(), r.attempt));
         let launching = self
-            .launching
-            .iter()
+            .desks
+            .all_launching()
             .filter(|(k, l)| l.remote_app && l.account == account && *k != key && !leaving(k))
             .map(|(k, l)| (k.as_str(), l.attempt));
         decide::moved_to(end, was_connected, attempt, running.chain(launching)).map(str::to_owned)
@@ -1222,7 +1188,7 @@ impl AppModel {
     /// Brings a running session's window to the front (COSMIC switches to
     /// its workspace), in the background.
     fn show_session(&self, key: &str) -> Task<cosmic::Action<Message>> {
-        let Some(title) = self.running.get(key).map(|r| r.title.clone()) else {
+        let Some(title) = self.desks.running(key).map(|r| r.title.clone()) else {
             return Task::none();
         };
         cosmic::task::future(async move {
@@ -1243,24 +1209,23 @@ impl AppModel {
             .account_of_resource(key)
             .map(|a| self.effective_settings(&a.id, key).reconnect_attempts)
         else {
-            self.reconnects.remove(key);
+            self.desks.take_reconnect(key);
             return Task::none();
         };
         let timer = self.next();
         let r = self
-            .reconnects
-            .entry(key.to_owned())
-            .or_insert(Reconnect { attempt: 0, timer });
+            .desks
+            .at(key)
+            .reconnect
+            .get_or_insert(Reconnect { attempt: 0, timer });
         r.attempt += 1;
         r.timer = timer;
         let attempt = r.attempt;
         if attempt > of {
-            self.reconnects.remove(key);
+            self.desks.take_reconnect(key);
             crate::app_log!("connection lost; gave up after {of} reconnect attempts");
-            self.connections.insert(
-                key.to_owned(),
-                Connection::Failed(fl!("error-reconnect-gave-up")),
-            );
+            self.desks
+                .set_conn(key, Connection::Failed(fl!("error-reconnect-gave-up")));
             return Task::none();
         }
         let wait = decide::reconnect_delay(attempt);
@@ -1268,8 +1233,8 @@ impl AppModel {
             "connection lost; reconnect attempt {attempt} of {of} in {} s",
             wait.as_secs()
         );
-        self.connections
-            .insert(key.to_owned(), Connection::Reconnecting { attempt, of });
+        self.desks
+            .set_conn(key, Connection::Reconnecting { attempt, of });
         let key = key.to_owned();
         cosmic::task::future(async move {
             tokio::time::sleep(wait).await;
@@ -1280,19 +1245,16 @@ impl AppModel {
     /// The wait is over: connect again, unless stopped or replaced
     /// meanwhile (Stop, Connect, sign-out).
     fn reconnect_due(&mut self, key: &str, timer: u64) -> Task<cosmic::Action<Message>> {
-        if self.reconnects.get(key).is_none_or(|r| r.timer != timer)
-            || !matches!(
-                self.connections.get(key),
-                Some(Connection::Reconnecting { .. })
-            )
+        if self.desks.reconnect(key).is_none_or(|r| r.timer != timer)
+            || !matches!(self.desks.conn(key), Some(Connection::Reconnecting { .. }))
         {
             return Task::none();
         }
-        self.connections.remove(key);
+        self.desks.clear_conn(key);
         let task = self.prepare_connection(key);
         // Nothing started (signed out, quitting, …): stop reconnecting.
-        if !self.connections.contains_key(key) {
-            self.reconnects.remove(key);
+        if self.desks.conn(key).is_none() {
+            self.desks.take_reconnect(key);
         }
         task
     }

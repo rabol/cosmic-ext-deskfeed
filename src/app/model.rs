@@ -410,7 +410,13 @@ pub enum Message {
     /// `None`: follow the account.
     DesktopNumber(String, Number, Option<u32>),
     /// Resource key; outcome of "open on a new workspace" (log text).
-    WorkspaceMoved(String, Result<(), String>),
+    /// "Open on a new workspace" finished: resource key, that wait's stop
+    /// flag (to tell it from a newer wait), and how it went.
+    WorkspaceMoved(
+        String,
+        Arc<std::sync::atomic::AtomicBool>,
+        Result<(), String>,
+    ),
     /// The window's close button or the desktop asked the app to close.
     QuitRequested,
     QuitConfirm,

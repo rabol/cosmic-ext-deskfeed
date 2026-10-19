@@ -114,7 +114,7 @@ impl AppModel {
                 }
                 // A session still starting removes the files once more
                 // when it has been stopped (`launched`).
-                if !self.launching.values().any(|l| l.account == id) {
+                if !self.desks.all_launching().any(|(_, l)| l.account == id) {
                     self.signing_out.remove(&id);
                 }
                 if self.quit == Quit::Stopping {
@@ -813,8 +813,7 @@ impl AppModel {
 
     /// The account's open connections: running or starting.
     fn open_sessions(&self, id: &str) -> usize {
-        self.running.values().filter(|r| r.account == id).count()
-            + self.launching.values().filter(|l| l.account == id).count()
+        self.desks.open_count_for(id)
     }
 
     /// Sign-out asks first while the account has desktops or apps open
@@ -864,37 +863,23 @@ impl AppModel {
         // refresh may have removed a desktop that is still connected.
         let mut keys: HashSet<String> = account.resource_keys().into_iter().collect();
         keys.extend(
-            self.running
-                .iter()
+            self.desks
+                .all_running()
                 .filter(|(_, r)| r.account == id)
                 .map(|(k, _)| k.clone()),
         );
         keys.extend(
-            self.launching
-                .iter()
+            self.desks
+                .all_launching()
                 .filter(|(_, l)| l.account == id)
                 .map(|(k, _)| k.clone()),
         );
         let mut sessions = Vec::new();
         for key in keys {
-            if let Some(r) = self.running.remove(&key) {
-                sessions.push(r.session);
-            }
-            // Stopped as soon as it has started (`launched`).
-            if let Some(l) = self.launching.get_mut(&key) {
-                l.stop = true;
-            }
-            if let Some(stop) = self.movers.remove(&key) {
-                stop.store(true, Ordering::SeqCst);
-            }
-            self.connections.remove(&key);
-            self.pending_logon.remove(&key);
-            self.last_failure.remove(&key);
-            self.reconnects.remove(&key);
-            self.pending_password.remove(&key);
+            // Everything about the desk goes; one still starting is stopped
+            // as soon as it has started (`launched`).
+            sessions.extend(self.desks.at(&key).sign_out());
             self.set_saved_password(&key, false);
-            self.entra_failed.remove(&key);
-            self.entra_failures.remove(&key);
         }
         self.withdraw_dialogs(|d| d.account == id);
         self.signing_out.insert(id.to_owned());

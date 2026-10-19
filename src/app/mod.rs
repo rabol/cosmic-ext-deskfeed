@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant, SystemTime};
 
 use base64::Engine as _;
@@ -39,6 +39,7 @@ mod account_flow;
 mod background;
 mod connect;
 mod decide;
+mod desk;
 mod diagnostics;
 mod errors;
 mod model;
@@ -88,22 +89,11 @@ pub struct AppModel {
     /// Source of generations and epochs; results tagged with an older value
     /// are stale and ignored (spec §8).
     counter: u64,
-    /// Connection state per resource key (keys include the account).
-    connections: HashMap<String, Connection>,
-    running: HashMap<String, Running>,
-    /// FreeRDP starting (in the background), per resource key.
-    launching: HashMap<String, Launching>,
+    /// Everything tracked per desktop or app (`desk.rs`).
+    desks: desk::Desks,
     /// Accounts whose sign-out is still ending their processes and deleting
     /// their files; they can't be signed in again until it's done.
     signing_out: HashSet<String>,
-    /// Sessions stopped because connecting took too long.
-    timed_out: HashSet<String>,
-    /// Why a running session doesn't have something the user turned on
-    /// (the camera, when the desktop's policy doesn't allow it).
-    session_notes: HashMap<String, String>,
-    /// RemoteApps whose connection another app's connection took over,
-    /// with their windows (ADR 0020): app key → the other app's key.
-    moved_to: HashMap<String, String>,
     /// The account whose sign-out waits for an answer: it has desktops or
     /// apps open (spec §6).
     sign_out_asking: Option<String>,
@@ -111,8 +101,6 @@ pub struct AppModel {
     cleanup_retry: Option<CleanupRetry>,
     /// The last list check (monotonic and wall clock), to notice sleep.
     last_check: Option<(Instant, SystemTime)>,
-    /// Desktops being reconnected after a lost connection.
-    reconnects: HashMap<String, Reconnect>,
     /// The search field's text; filters the desktop list.
     search: String,
     /// The tray, while background operation is on and a tray answers.
@@ -123,8 +111,6 @@ pub struct AppModel {
     quit_from_tray: bool,
     /// The menu the tray shows now (sent again only when it changes).
     tray_menu: Option<Vec<crate::tray::TrayItem>>,
-    /// Desktops connected from the tray: their failure opens the window.
-    tray_connects: HashSet<String>,
     /// "Start when you log in" (its autostart entry is there).
     autostart: bool,
     /// The diagnostics report while its page is open (`None`: building).
@@ -137,26 +123,11 @@ pub struct AppModel {
     /// URLs (`?v=`), so a fetched one stays valid.
     icons: HashMap<(String, Url), widget::icon::Handle>,
     quit: Quit,
-    /// Logon setting and connection file of sessions not yet connected, to
-    /// remember the setting on success or ask again on logon failure.
-    pending_logon: HashMap<String, (LogonSetting, Arc<ConnectionFile>)>,
     dialog: Option<PasswordDialog>,
     /// Password dialogs waiting their turn behind `dialog` (review F06:
     /// each resource keeps its own, none replaces another).
     waiting_dialogs: std::collections::VecDeque<PasswordDialog>,
     certificate_dialog: Option<CertificateDialog>,
-    /// Passwords to remember once their connection worked (resource keys).
-    pending_password: HashMap<String, Secret>,
-    /// Connections that use a remembered password.
-    used_saved_password: HashSet<String>,
-    /// Why the last attempt for a resource failed, shown at the top of the
-    /// next password dialog.
-    last_failure: HashMap<String, String>,
-    /// Resources where Entra sign-in failed in this run: the next Connect
-    /// asks for a password instead of trying it again.
-    entra_failed: HashSet<String>,
-    /// Entra attempts that failed per resource since it last connected.
-    entra_failures: HashMap<String, u32>,
     logon_labels: Vec<String>,
     /// Last dependency check; `None` while it runs.
     deps: Option<Vec<Check>>,
@@ -167,8 +138,6 @@ pub struct AppModel {
     follow_app_off: Vec<String>,
     follow_account_on: Vec<String>,
     follow_account_off: Vec<String>,
-    /// "Open on a new workspace" waits per running session; set to stop.
-    movers: HashMap<String, Arc<AtomicBool>>,
 }
 
 /// Desktop lists are refreshed this often (spec §7: hourly)...
@@ -239,38 +208,25 @@ impl cosmic::Application for AppModel {
             adding: None,
             notice: None,
             counter: 0,
-            connections: HashMap::new(),
-            running: HashMap::new(),
-            launching: HashMap::new(),
+            desks: desk::Desks::default(),
             signing_out: HashSet::new(),
-            timed_out: HashSet::new(),
-            session_notes: HashMap::new(),
-            moved_to: HashMap::new(),
             sign_out_asking: None,
             cleanup_retry: None,
             last_check: None,
-            reconnects: HashMap::new(),
             search: String::new(),
             tray: None,
             tray_unavailable: None,
             quit_from_tray: false,
             tray_menu: None,
-            tray_connects: HashSet::new(),
             autostart: crate::autostart::enabled(),
             diagnostics: None,
             diagnostics_status: None,
             cache: crate::cache::Store::user(),
             icons: HashMap::new(),
             quit: Quit::No,
-            pending_logon: HashMap::new(),
             dialog: None,
             waiting_dialogs: std::collections::VecDeque::new(),
             certificate_dialog: None,
-            pending_password: HashMap::new(),
-            used_saved_password: HashSet::new(),
-            last_failure: HashMap::new(),
-            entra_failed: HashSet::new(),
-            entra_failures: HashMap::new(),
             logon_labels: vec![
                 fl!("logon-automatic"),
                 fl!("logon-empty-domain"),
@@ -283,7 +239,6 @@ impl cosmic::Application for AppModel {
             follow_app_off: vec![fl!("follow-app-off"), fl!("on"), fl!("off")],
             follow_account_on: vec![fl!("follow-account-on"), fl!("on"), fl!("off")],
             follow_account_off: vec![fl!("follow-account-off"), fl!("on"), fl!("off")],
-            movers: HashMap::new(),
         };
         app.rebuild_nav(&Page::Add);
         let title = app.update_title();
@@ -610,6 +565,8 @@ impl cosmic::Application for AppModel {
         // something needs the user, and keep the tray's menu current.
         let window = self.window_needed();
         let tray = self.update_tray();
+        // Desks with nothing left to remember go.
+        self.desks.tidy();
         Task::batch([task, window, tray])
     }
 }

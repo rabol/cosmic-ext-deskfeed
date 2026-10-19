@@ -223,7 +223,7 @@ impl AppModel {
         r: &'a ResourceView,
         live: bool,
     ) -> Element<'a, Message> {
-        let conn = self.connections.get(&r.key);
+        let conn = self.desks.conn(&r.key);
         let kind = match r.kind {
             ResourceKind::Desktop => fl!("kind-desktop"),
             ResourceKind::RemoteApp => fl!("kind-remoteapp"),
@@ -269,7 +269,11 @@ impl AppModel {
             ),
             Some(Connection::Connected) => (
                 Some(
-                    if self.running.get(&r.key).is_some_and(|s| s.grabs_shortcuts) {
+                    if self
+                        .desks
+                        .running(&r.key)
+                        .is_some_and(|s| s.grabs_shortcuts)
+                    {
                         fl!("status-connected-shortcuts")
                     } else {
                         fl!("status-connected")
@@ -304,17 +308,23 @@ impl AppModel {
             ),
         };
         // The note only belongs to a session that is starting or running.
-        let note = self.session_notes.get(&r.key).filter(|_| {
-            matches!(
-                conn,
-                Some(Connection::Connecting | Connection::Authenticating | Connection::Connected)
-            )
-        });
+        let note = self
+            .desks
+            .get(&r.key)
+            .and_then(|d| d.note.as_ref())
+            .filter(|_| {
+                matches!(
+                    conn,
+                    Some(
+                        Connection::Connecting | Connection::Authenticating | Connection::Connected
+                    )
+                )
+            });
         // A RemoteApp whose windows another app's connection now shows
         // (ADR 0020), while that connection lasts.
         let status = status.or_else(|| {
-            let to = self.moved_to.get(&r.key)?;
-            if !self.running.contains_key(to) && !self.launching.contains_key(to) {
+            let to = self.desks.get(&r.key)?.moved_to.as_deref()?;
+            if self.desks.running(to).is_none() && self.desks.launching(to).is_none() {
                 return None;
             }
             let title = self.account_of_resource(to)?.resource(to)?.title.clone();
