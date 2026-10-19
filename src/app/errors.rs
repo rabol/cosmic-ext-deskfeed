@@ -69,7 +69,9 @@ pub(super) fn describe_session_end(end: &SessionEnd) -> String {
             AppRefusal::SessionLocked => fl!("error-app-session-locked"),
             AppRefusal::Other => fl!("error-app-refused"),
         },
-        SessionEnd::Closed | SessionEnd::Cancelled => String::new(),
+        SessionEnd::Closed | SessionEnd::Cancelled | SessionEnd::DisconnectedByServer => {
+            String::new()
+        }
     }
 }
 

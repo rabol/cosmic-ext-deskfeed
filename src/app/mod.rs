@@ -101,6 +101,9 @@ pub struct AppModel {
     /// Why a running session doesn't have something the user turned on
     /// (the camera, when the desktop's policy doesn't allow it).
     session_notes: HashMap<String, String>,
+    /// RemoteApps whose connection another app's connection took over,
+    /// with their windows (ADR 0020): app key → the other app's key.
+    moved_to: HashMap<String, String>,
     /// Desktops being reconnected after a lost connection.
     reconnects: HashMap<String, Reconnect>,
     /// The search field's text; filters the desktop list.
@@ -232,6 +235,7 @@ impl cosmic::Application for AppModel {
             signing_out: HashSet::new(),
             timed_out: HashSet::new(),
             session_notes: HashMap::new(),
+            moved_to: HashMap::new(),
             reconnects: HashMap::new(),
             search: String::new(),
             tray: None,

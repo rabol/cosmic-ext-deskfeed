@@ -32,7 +32,7 @@ Install the current build first (`just install`, or the package).
 ### Only when available
 
 12. **Remembered Windows password** (ADR 0009 addendum), on a desktop that asks for a Windows password. Tick "Remember this password", connect, disconnect, connect again. *Expected:* no password question the second time.
-13. **RemoteApp from Azure Virtual Desktop** (ADR 0020), once a RemoteApp is assigned to your account. Connect it. *Expected:* the app's window opens like any other window. Open a second app from the same place: both windows stay and the first row says another connection took over (or shows Connect).
+13. **RemoteApp from Azure Virtual Desktop** (ADR 0020), once a RemoteApp is assigned to your account. Connect it. *Expected:* the app's window opens like any other window. Open a second app from the same place. *Expected:* both windows stay open, and the first app's row says "Its windows are in <second app>'s connection".
 14. **Stability** (spec §8, §13): a few hours of use with a desktop open, including idle time, changing audio devices, plugging in a monitor, and sleep.
 
 ## Done

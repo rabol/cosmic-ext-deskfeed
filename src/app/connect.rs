@@ -171,6 +171,8 @@ impl AppModel {
             );
             return self.check_dependencies();
         }
+        // Connecting takes its session back (ADR 0020).
+        self.moved_to.remove(key);
         if self.quit != Quit::No
             || self.running.contains_key(key)
             || self.launching.contains_key(key)
@@ -559,6 +561,7 @@ impl AppModel {
                 title: title.clone(),
                 grabs_shortcuts: settings.system_shortcuts,
                 keep_awake: settings.keep_awake,
+                remote_app,
             },
         );
         // Starting FreeRDP writes files and hands over the arguments: not on
@@ -703,6 +706,7 @@ impl AppModel {
             stop,
             grabs_shortcuts,
             keep_awake,
+            remote_app,
             ..
         } = self.launching.remove(&key).expect("checked above");
         let current = self.account(account).is_some_and(|a| a.epoch == epoch);
@@ -737,6 +741,7 @@ impl AppModel {
                         title,
                         grabs_shortcuts,
                         keep_awake,
+                        remote_app,
                     },
                 );
                 if wanted {
@@ -880,6 +885,10 @@ impl AppModel {
                 }
             }
             SessionEvent::Ended { end, log } => {
+                let ended = self
+                    .running
+                    .get(key)
+                    .map(|r| (r.attempt, r.remote_app, r.account.clone()));
                 self.running.remove(key);
                 self.session_notes.remove(key);
                 // Never remembered: this attempt didn't connect, or it did
@@ -900,6 +909,8 @@ impl AppModel {
                 // Ended because the user disconnected: however FreeRDP
                 // ended, that is a normal end, never a reason to reconnect.
                 if matches!(self.connections.get(key), Some(Connection::Disconnecting)) {
+                    // Windows shown through it are gone with it.
+                    self.moved_to.retain(|_, to| to != key);
                     self.connections.remove(key);
                     self.reconnects.remove(key);
                     self.timed_out.remove(key);
@@ -907,6 +918,25 @@ impl AppModel {
                 }
                 let was_connected =
                     matches!(self.connections.get(key), Some(Connection::Connected));
+                if let Some(to) = ended.filter(|(_, remote_app, _)| *remote_app).and_then(
+                    |(attempt, _, account)| {
+                        self.newer_app_connection(key, &account, &end, was_connected, attempt)
+                    },
+                ) {
+                    crate::app_log!("RemoteApp's session taken over by another app's connection");
+                    self.connections.remove(key);
+                    self.reconnects.remove(key);
+                    self.timed_out.remove(key);
+                    // Windows that had moved here move on with them.
+                    for target in self.moved_to.values_mut() {
+                        if target == key {
+                            target.clone_from(&to);
+                        }
+                    }
+                    self.moved_to.insert(key.to_owned(), to);
+                    return save_task;
+                }
+                self.moved_to.retain(|_, to| to != key);
                 let tried = pending.as_ref().map(|(logon, _)| logon);
                 let reconnecting = self.reconnects.contains_key(key);
                 let wanted = self
@@ -1023,6 +1053,31 @@ impl AppModel {
             }
         }
         save_task
+    }
+
+    /// The RemoteApp connection that took over this one's Windows session,
+    /// if any (`decide::moved_to`): the same account's, starting or
+    /// connected, not being disconnected.
+    fn newer_app_connection(
+        &self,
+        key: &str,
+        account: &str,
+        end: &SessionEnd,
+        was_connected: bool,
+        attempt: u64,
+    ) -> Option<String> {
+        let leaving = |k: &str| matches!(self.connections.get(k), Some(Connection::Disconnecting));
+        let running = self
+            .running
+            .iter()
+            .filter(|(k, r)| r.remote_app && r.account == account && *k != key && !leaving(k))
+            .map(|(k, r)| (k.as_str(), r.attempt));
+        let launching = self
+            .launching
+            .iter()
+            .filter(|(k, l)| l.remote_app && l.account == account && *k != key && !leaving(k))
+            .map(|(k, l)| (k.as_str(), l.attempt));
+        decide::moved_to(end, was_connected, attempt, running.chain(launching)).map(str::to_owned)
     }
 
     fn save_certificate_pins(&mut self, pins: BTreeMap<String, String>) {

@@ -303,6 +303,16 @@ impl AppModel {
                 Some(Connection::Connecting | Connection::Authenticating | Connection::Connected)
             )
         });
+        // A RemoteApp whose windows another app's connection now shows
+        // (ADR 0020), while that connection lasts.
+        let status = status.or_else(|| {
+            let to = self.moved_to.get(&r.key)?;
+            if !self.running.contains_key(to) && !self.launching.contains_key(to) {
+                return None;
+            }
+            let title = self.account_of_resource(to)?.resource(to)?.title.clone();
+            Some(fl!("status-moved", app = title))
+        });
         let description = match (status, note) {
             (Some(s), Some(n)) => format!("{kind} · {s} · {n}"),
             (Some(s), None) => format!("{kind} · {s}"),

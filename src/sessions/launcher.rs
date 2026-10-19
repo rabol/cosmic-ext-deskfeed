@@ -219,6 +219,11 @@ pub enum LaunchError {
 pub enum SessionEnd {
     /// Normal end: disconnect, log off, or the user closed the window.
     Closed,
+    /// Windows disconnected this connection (exit code 1,
+    /// `ERRINFO_RPC_INITIATED_DISCONNECT`): an administrator, or, on the
+    /// Windows host tested in ADR 0020, another connection taking over the
+    /// session. A normal end otherwise.
+    DisconnectedByServer,
     LogonFailed,
     AccountLockedOut,
     PasswordExpired,
@@ -458,7 +463,8 @@ pub fn classify_exit(
         Some(5) => SessionEnd::Replaced,
         _ if log_says_logon_failure => SessionEnd::LogonFailed,
         _ if connection_lost => SessionEnd::ConnectionLost,
-        Some(0..=3 | 11 | 12) => SessionEnd::Closed,
+        Some(1) => SessionEnd::DisconnectedByServer,
+        Some(0 | 2 | 3 | 11 | 12) => SessionEnd::Closed,
         Some(134) => SessionEnd::LogonFailed,
         Some(135) => SessionEnd::AccountLockedOut,
         Some(148 | 149 | 152) => SessionEnd::PasswordExpired,
@@ -1283,6 +1289,11 @@ mod tests {
         assert_eq!(classify_exit(None, false, false), SessionEnd::Crashed);
         // Another connection took over: never a lost connection.
         assert_eq!(classify_exit(Some(5), false, true), SessionEnd::Replaced);
+        assert_eq!(
+            classify_exit(Some(1), false, false),
+            SessionEnd::DisconnectedByServer
+        );
+        assert_eq!(classify_exit(Some(12), false, false), SessionEnd::Closed);
     }
 
     #[test]
@@ -1658,8 +1669,10 @@ sleep 300
     /// A RemoteApp from a Windows host with RemoteApp allowed (ADR 0020):
     /// `DESKFEED_TEST_RAIL_HOST`, `_USER`, `_PASSWORD`, `_PROGRAM` (a path
     /// or `||alias`), optional `_SECS` (default 15). `_EXPECT=missing`
-    /// expects Windows to refuse a program that isn't there. Checks the
-    /// launcher's events; the window shows on the running session.
+    /// expects Windows to refuse a program that isn't there;
+    /// `_EXPECT=taken` expects another connection (a second run, started
+    /// within `_SECS`) to take the session over. Checks the launcher's
+    /// events; the window shows on the running session.
     #[test]
     #[ignore = "needs a Windows host with RemoteApp allowed"]
     fn windows_host_remote_app() {
@@ -1712,6 +1725,13 @@ sleep 300
                     if connected && var("EXPECT").is_err() {
                         break None;
                     }
+                    if connected && var("EXPECT").is_ok_and(|v| v == "taken") {
+                        let left = Duration::from_secs(secs);
+                        match rx.recv_timeout(left) {
+                            Ok(SessionEvent::Ended { end, log }) => break Some((end, log)),
+                            other => panic!("not taken over: {other:?}"),
+                        }
+                    }
                 }
                 Err(_) => panic!("nothing happened in time: {events:?}"),
             }
@@ -1723,6 +1743,16 @@ sleep 300
                 println!("  {line}");
             }
             assert_eq!(end, SessionEnd::AppRefused(AppRefusal::NotFound));
+        } else if var("EXPECT").is_ok_and(|v| v == "taken") {
+            let (end, log) = ended.expect("an end");
+            println!("ended: {end:?}");
+            for line in log.iter().filter(|l| l.contains("ERRINFO")) {
+                println!("  {line}");
+            }
+            assert!(
+                matches!(end, SessionEnd::DisconnectedByServer | SessionEnd::Replaced),
+                "{end:?}"
+            );
         } else {
             assert!(ended.is_none(), "{ended:?}");
             std::thread::sleep(Duration::from_secs(secs));

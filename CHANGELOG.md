@@ -7,6 +7,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 ### Added
 
 - RemoteApps (preview): apps from the feed connect and open as ordinary windows, grouped under Deskfeed in the dock, on every monitor. Settings that only fit a desktop (full screen, keyboard, workspace, keep the screen on) are left out for apps. When Windows won't start an app, the row says why. Checked against a Windows host, not yet with an AVD RemoteApp (ADR 0020).
+- When a second app from the same place takes over the first app's session, the first app's row says its windows are now in the second app's connection.
 - When another connection takes over a session (the desktop opened somewhere else, or a second app from the same host pool), the row says so, and Deskfeed doesn't reconnect and take it back.
 - App settings (View → Settings): defaults for every account. New settings: time allowed for signing in and how often desktop lists refresh (app and account), and the log file size (app). Account settings now follow the app's setting or override it, as desktop settings do for the account.
 - View → Diagnostics: a report for support that you read in full before saving. It has no passwords, tokens or cookies, and account, workspace and desktop names are replaced.

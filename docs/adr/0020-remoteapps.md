@@ -27,6 +27,7 @@ The owner's tenant has no RemoteApps and the owner can't publish one, so there i
   - `Replaced` (exit 5, or the `ERRINFO_DISCONNECTED_BY_OTHER_CONNECTION` line): "Another connection took over this session". Never reconnected, because two connections would keep taking the session from each other. This also applies to desktops opened from another device.
   - `AppRefused` (the `RAIL exec error` line): not allowed, not found, session locked, or other, each with its own message instead of a silent cancel. Never reconnected.
 - The tray count and the quit question say "connected" instead of "desktops".
+- Addendum (2026-10-19): an app whose session another app's connection took over says so. Exit code 1 (`ERRINFO_RPC_INITIATED_DISCONNECT`) becomes its own end, `DisconnectedByServer`, still a normal end for desktops. When a connected RemoteApp ends that way or as `Replaced`, and a newer RemoteApp connection of the same account is starting or connected (`decide::moved_to`), its row says "Its windows are in <app>'s connection" while that connection lasts. Connect on it takes the session back, and the other app's row then says the same about it.
 
 ## Evidence (Windows 11 Pro VM, FreeRDP 3.32.2, COSMIC on Wayland)
 
@@ -40,6 +41,7 @@ The owner's tenant has no RemoteApps and the owner can't publish one, so there i
 
 ## Consequences
 
-- One FreeRDP process per app. FreeRDP's client can't start a second app on a connection that is already open, so a second app from the same host pool takes over the session, and its connection shows both apps' windows. The first app's row then shows it as not connected while its window is still open. Connect on it takes the session back, with both windows.
+- One FreeRDP process per app. FreeRDP's client can't start a second app on a connection that is already open, so a second app from the same host pool takes over the session, and its connection shows both apps' windows. The first app's row says where its windows went (addendum above; checked with two launcher sessions on the test host: the first ended as `DisconnectedByServer`). Disconnecting the second app closes both apps' windows.
+- Two apps from different host pools don't share a session, so neither takes over the other. If one of them happens to be ended by the server while the other is starting, its row would wrongly say its windows moved. This needs both at the same moment and goes away when the other app's connection ends.
 - A connection whose last app closed shows "Connected" until Windows signs the session out (about a minute and a half on the test host; on AVD it depends on the host pool's policies).
 - Still to check with a RemoteApp from an AVD feed: the gateway and Entra sign-in in RemoteApp mode, `||alias` programs, which reason AVD sends when a second app takes over, and the sign-out policy. Until then RemoteApps stay marked as a preview (spec §3).

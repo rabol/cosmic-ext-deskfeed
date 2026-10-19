@@ -130,6 +130,8 @@ pub(super) struct Running {
     pub(super) grabs_shortcuts: bool,
     /// Started with "Keep the screen on in full screen".
     pub(super) keep_awake: bool,
+    /// A RemoteApp, not a desktop (ADR 0020).
+    pub(super) remote_app: bool,
 }
 
 /// A FreeRDP start in progress.
@@ -145,6 +147,7 @@ pub(super) struct Launching {
     pub(super) title: String,
     pub(super) grabs_shortcuts: bool,
     pub(super) keep_awake: bool,
+    pub(super) remote_app: bool,
 }
 
 /// Quitting the app.

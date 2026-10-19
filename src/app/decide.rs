@@ -64,7 +64,10 @@ pub(super) fn end_outcome(
     tried: Option<&LogonSetting>,
     earlier_entra_failures: u32,
 ) -> EndOutcome {
-    if matches!(end, SessionEnd::Closed | SessionEnd::Cancelled) {
+    if matches!(
+        end,
+        SessionEnd::Closed | SessionEnd::Cancelled | SessionEnd::DisconnectedByServer
+    ) {
         return EndOutcome::Clear;
     }
     // Not about how the user logged on: the session was taken over, or
@@ -125,6 +128,7 @@ pub(super) fn reconnects(
         // stays refused.
         SessionEnd::Replaced | SessionEnd::AppRefused(_) => false,
         SessionEnd::Closed
+        | SessionEnd::DisconnectedByServer
         | SessionEnd::Cancelled
         | SessionEnd::CertificateNotTrusted(_)
         | SessionEnd::LogonFailed
@@ -133,6 +137,31 @@ pub(super) fn reconnects(
         | SessionEnd::AccountDisabled
         | SessionEnd::AuthenticationFailed => false,
     }
+}
+
+/// Where a RemoteApp's windows went when its connection ended (ADR 0020).
+///
+/// A newer RemoteApp connection of the same account takes over the Windows
+/// session, and Windows ends the older one (`Replaced`, or
+/// `DisconnectedByServer` on the Windows host tested), but the session and
+/// its apps live on in the newer connection. So: the ended connection was
+/// connected, ended that way, and `others` (key and attempt of the same
+/// account's other RemoteApp connections that are starting or connected)
+/// has one started after it (a higher attempt). The newest one wins.
+pub(super) fn moved_to<'a>(
+    end: &SessionEnd,
+    was_connected: bool,
+    attempt: u64,
+    others: impl IntoIterator<Item = (&'a str, u64)>,
+) -> Option<&'a str> {
+    if !was_connected || !matches!(end, SessionEnd::Replaced | SessionEnd::DisconnectedByServer) {
+        return None;
+    }
+    others
+        .into_iter()
+        .filter(|&(_, a)| a > attempt)
+        .max_by_key(|&(_, a)| a)
+        .map(|(key, _)| key)
 }
 
 /// How long to wait before reconnect attempt `attempt` (1-based): 5 s,
@@ -359,6 +388,27 @@ mod tests {
                 "{end:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_apps_windows_move_to_the_newer_connection() {
+        let others = [("b", 7), ("c", 9), ("old", 2)];
+        for end in [SessionEnd::Replaced, SessionEnd::DisconnectedByServer] {
+            assert_eq!(moved_to(&end, true, 5, others), Some("c"));
+            // Only connections started after it took over.
+            assert_eq!(moved_to(&end, true, 9, others), None);
+            // Not connected: nothing was open to move.
+            assert_eq!(moved_to(&end, false, 5, others), None);
+        }
+        // Other ends: the windows are gone, not moved.
+        for end in [
+            SessionEnd::Closed,
+            SessionEnd::ConnectionLost,
+            SessionEnd::Crashed,
+        ] {
+            assert_eq!(moved_to(&end, true, 5, others), None, "{end:?}");
+        }
+        assert_eq!(moved_to(&SessionEnd::Replaced, true, 5, []), None);
     }
 
     #[test]
