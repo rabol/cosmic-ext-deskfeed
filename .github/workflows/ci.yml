@@ -3,6 +3,8 @@
 # Runs in an Arch Linux container, the distribution the app is packaged for
 # (packaging/aur). The sign-in helper needs GTK >= 4.10 and WebKitGTK >= 2.42
 # (signin/Cargo.toml, ADR 0007 addendum).
+# Rust is the release in rust-toolchain.toml, through rustup; rust-analyzer
+# is a pinned release (what editors run), checked by its SHA-256 (ADR 0025).
 # Third-party actions are pinned to a commit; the job can only read the
 # repository.
 
@@ -30,7 +32,7 @@ jobs:
       - name: Install build and check tools
         run: >
           pacman -Syu --noconfirm --needed
-          git rust just pkgconf
+          git rustup just pkgconf
           gtk4 webkitgtk-6.0 libxkbcommon wayland
           desktop-file-utils appstream
           dbus cargo-deny
@@ -40,6 +42,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version
 
       - name: Formatting
         run: cargo fmt --all --check
@@ -52,6 +57,17 @@ jobs:
 
       - name: Dependencies (advisories, licenses, sources; deny.toml)
         run: cargo deny --locked check
+
+      - name: rust-analyzer (what editors report)
+        env:
+          # Release 2026-10-19 (0.3.3089-standalone). To update: change both.
+          RA_URL: https://github.com/rust-lang/rust-analyzer/releases/download/2026-10-19/rust-analyzer-x86_64-unknown-linux-gnu.gz
+          RA_SHA256: 8fde1c9dae81459f98e99eedae3654846a9166abea686306c26e57773be558da
+        run: |
+          curl -sSfL -o /tmp/ra.gz "$RA_URL"
+          echo "$RA_SHA256  /tmp/ra.gz" | sha256sum -c -
+          gunzip /tmp/ra.gz && chmod +x /tmp/ra
+          /tmp/ra diagnostics .
 
       - name: Release build
         run: cargo build --locked --release --workspace

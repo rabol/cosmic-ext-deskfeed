@@ -1,0 +1,11 @@
+# The Rust release this project is built and checked with; CI installs it
+# through rustup. With rustup, cargo here uses it automatically. Without
+# rustup (for example Arch's `rust` package) this file is ignored; keep your
+# system Rust at least `rust-version` in Cargo.toml.
+# rust-src is what rust-analyzer reads to understand the standard library.
+# rust-analyzer itself isn't pinned here: editors bring their own, and CI
+# checks with a pinned release (.github/workflows/ci.yml, ADR 0025).
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy", "rust-src"]
+profile = "minimal"

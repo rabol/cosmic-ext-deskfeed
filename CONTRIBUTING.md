@@ -15,7 +15,9 @@ Don't put real credentials, tokens, cookies, tenant or workspace IDs, host names
 
 ## Working on the code
 
-Editors use rust-analyzer, which needs the Rust standard library's source. On Arch Linux it is a separate package: `sudo pacman -S rust-src`. Without it, the editor shows false errors (`{unknown}` types, `None`, `!` on `bool`) while `cargo build` is fine. To see exactly what an editor will report, run rust-analyzer's own check: `rust-analyzer diagnostics .`.
+Recommended tools (ADR 0025): `rustup`, which uses the Rust release pinned in `rust-toolchain.toml` with rust-src, and `cargo-deny`. On Arch Linux: `sudo pacman -S rustup cargo-deny` (rustup replaces the `rust` package), then `rustup toolchain install` in this folder. With Arch's `rust` package instead, also install `rust-src`, or editors show false errors (`{unknown}` types, `None`, `!` on `bool`) while `cargo build` is fine.
+
+The checks CI runs, besides the ones below: `cargo deny --locked check` (dependencies, licenses, sources; `deny.toml`) and `rust-analyzer diagnostics .` (what editors report; CI uses a pinned release).
 
 ```sh
 just build-debug
