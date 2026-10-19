@@ -563,6 +563,16 @@ impl cosmic::Application for AppModel {
     }
 }
 
+/// A message `route` sent to a handler that doesn't handle it: a bug.
+/// Debug builds stop; release builds log the message's name only (its
+/// fields may hold a password or token).
+fn misrouted(message: &Message) {
+    let text = format!("{message:?}");
+    let name = text.split(['(', ' ', '{']).next().unwrap_or("?");
+    crate::app_log!("bug: message {name} routed to the wrong handler");
+    debug_assert!(false, "message routed to the wrong handler: {name}");
+}
+
 impl AppModel {
     /// Hands each message to the part of the app it belongs to.
     fn route(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
@@ -749,7 +759,7 @@ impl AppModel {
                 }
             }
             // `update` routes only this handler's messages here.
-            other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
+            other => misrouted(&other),
         }
         Task::none()
     }

@@ -77,7 +77,7 @@ impl AppModel {
                 }
             }
             // `update` routes only this handler's messages here.
-            other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
+            other => misrouted(&other),
         }
         Task::none()
     }

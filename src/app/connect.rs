@@ -112,6 +112,7 @@ impl AppModel {
                 }
             }
             Message::QuitRequested
+            | Message::QuitToBackground
             | Message::QuitConfirm
             | Message::QuitCancel
             | Message::ReadyToQuit => return self.quit_message(&message),
@@ -151,7 +152,7 @@ impl AppModel {
                 }
             }
             // `update` routes only this handler's messages here.
-            other => debug_assert!(false, "message routed to the wrong handler: {other:?}"),
+            other => misrouted(&other),
         }
         Task::none()
     }
