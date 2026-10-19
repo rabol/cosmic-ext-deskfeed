@@ -324,6 +324,15 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
         _ => "/gateway:type:arm".to_owned(),
     };
     let mut args = vec![rdp_path.to_string_lossy().into_owned(), gateway];
+    // FreeRDP runs `~/.config/freerdp/action.sh` for key combinations it
+    // lists, and that can take keys from the session. The app sets the
+    // session's keys itself (spec §5), so FreeRDP gets a script path that
+    // doesn't exist, in the session's private folder (`client/X11/xf_utils.c`
+    // `run_action_script`: no file, no script).
+    args.push(format!(
+        "/action-script:{}",
+        rdp_path.with_file_name("no-action-script").display()
+    ));
     // The chosen logon decides, not the file's `enablerdsaadauth`: FreeRDP
     // applies the file first and then the arguments, and a lone `/sec:nla`
     // switches Entra (AAD) security off (3.32.2 `client/common/cmdline.c`).

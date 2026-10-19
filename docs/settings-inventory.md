@@ -21,7 +21,8 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Copy files through the clipboard (in the clipboard's direction) | off | A, Ac, C | `settings.rs` `Toggle::ClipboardFiles` | Done |
 | Keep the screen on in full screen | off | A, Ac, C | `settings.rs` `Toggle::KeepAwake`, `awake.rs` | Done (ADR 0019) |
 | Send shortcuts like Super and Alt+Tab to the desktop | on (`+grab-keyboard`) | A, Ac, C | `settings.rs` `Toggle::SystemShortcuts` | Done (ADR 0018) |
-| FreeRDP's own hotkeys (Ctrl+Alt+Enter, Ctrl+Alt+M, Right Ctrl) | FreeRDP's defaults | A, Ac, C | not passed | Later (spec §5): `-toggle-fullscreen` exists; Right Ctrl and Ctrl+Alt+M have no switch in 3.32.2 |
+| Ctrl+Alt+Enter switches full screen | on (`+toggle-fullscreen`) | A, Ac, C | `settings.rs` `Toggle::FullscreenKey` | Done (ADR 0018 addendum) |
+| Ctrl+Alt+M (minimize), Ctrl+Alt+D (disconnect), Right Ctrl (release) | FreeRDP's own | — | — | No switch in FreeRDP 3.32.2; said in the setting's description (ADR 0018 addendum) |
 | Reconnect after a lost connection | on | A, Ac, C | `settings.rs` `Toggle::Reconnect` | Done |
 | Reconnect attempts | 5 (1–10) | A, Ac, C | `settings.rs` `Number::ReconnectAttempts` | Done |
 | Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | With roadmap item 5: the alternative, scaling the picture (`/smart-sizing`), gives Windows a fixed 1 024×768 desktop unless a size is set too (`client/X11/xf_client.c`), so it needs a desktop-size setting beside it |
@@ -60,6 +61,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | FreeRDP stop grace 5 s; 60 kept log lines; 4 096-char output lines | `sessions/launcher.rs` | Internal process handling |
 | Dependency check: 5 s per command, 256 KiB output | `deps.rs` | Internal |
 | Tray menu: at most 200 lines | `tray.rs` `MAX_ITEMS` | Bound on what is served; the window lists all |
+| No FreeRDP action script (`/action-script:` to a missing file) | `sessions/launcher.rs` `build_args` | Spec §5: the app sets the session's keys, not `~/.config/freerdp/action.sh` |
 | Keep-screen-on check every 1 s | `workspace.rs` `WATCH_POLL` | Internal timing; a blank or lock comes after minutes |
 | Workspace move: poll 200 ms, wait 3 s for a new workspace | `workspace.rs` | Internal timing |
 | Refresh check every 5 min (and after resume) | `app/mod.rs` `REFRESH_CHECK` | Internal; the refresh interval is a setting |

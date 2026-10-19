@@ -29,3 +29,22 @@ The result matches what the spec asks of shortcuts-inhibit: shortcuts go to the 
 - In full screen the pointer can't leave, so Right Ctrl is the way back. After Right Ctrl, FreeRDP grabs again only when the pointer enters the window again.
 - With the setting off, FreeRDP never grabs. COSMIC keeps all its shortcuts, and Windows still gets the other keys.
 - FreeRDP's own hotkeys (Ctrl+Alt+Enter for full screen, Ctrl+Alt+M to minimize) stay as they are. Settings for those are a separate item.
+
+## Addendum (2026-10-19): FreeRDP's own hotkeys
+
+FreeRDP 3.32.2's X11 client (`client/X11/xf_keyboard.c`, `xf_keyboard_handle_special_keys`) handles these keys itself:
+
+| Keys | What it does | Switch |
+|---|---|---|
+| Ctrl+Alt+Enter | full screen on and off | `-toggle-fullscreen` |
+| Ctrl+Alt+M | minimizes the window | none |
+| Ctrl+Alt+D | disconnects at once (not in `/help`) | none |
+| Right Ctrl, pressed and released alone | releases the keyboard | none (it is the way back) |
+
+Before any of these, FreeRDP runs an action script, `~/.config/freerdp/action.sh` by default, for the key combinations the script lists. The script can take keys from the session.
+
+Decision:
+- Setting "Ctrl+Alt+Enter switches full screen" (Keyboard, at every level), on by default, passed as `+toggle-fullscreen` or `-toggle-fullscreen`.
+- Its description says Ctrl+Alt+M and Ctrl+Alt+D can't be turned off in this FreeRDP version (spec §5: unavailable capabilities are shown with a reason). An action script that answers `key-local` could swallow them, but FreeRDP refuses to start when such a script returns nothing (`xf_utils.c`, `run_action_script`), and it would run a shell on each such key press. That is too fragile for the gain.
+- Every session gets `/action-script:` with a path that doesn't exist, in its private folder. The user's own `action.sh` doesn't change keys in Deskfeed's sessions (spec §5: never the user's FreeRDP configuration). Checked with the local test server: the session connects as before.
+

@@ -46,6 +46,9 @@ pub struct ConnectionSettings {
     /// has focus (ADR 0019).
     #[serde(default)]
     pub keep_awake: Option<bool>,
+    /// FreeRDP's Ctrl+Alt+Enter (full screen on and off).
+    #[serde(default)]
+    pub fullscreen_key: Option<bool>,
     /// App and account levels only.
     #[serde(default)]
     pub refresh_mins: Option<u32>,
@@ -119,12 +122,14 @@ pub enum Toggle {
     SystemShortcuts,
     /// Keep the screen on while a full-screen session has focus.
     KeepAwake,
+    /// FreeRDP's Ctrl+Alt+Enter.
+    FullscreenKey,
     Reconnect,
 }
 
 impl Toggle {
     #[cfg(test)]
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Fullscreen,
         Self::AllMonitors,
         Self::NewWorkspace,
@@ -134,6 +139,7 @@ impl Toggle {
         Self::ClipboardFiles,
         Self::SystemShortcuts,
         Self::KeepAwake,
+        Self::FullscreenKey,
         Self::Reconnect,
     ];
 }
@@ -197,6 +203,7 @@ impl ConnectionSettings {
             Toggle::ClipboardFiles => self.clipboard_files,
             Toggle::SystemShortcuts => self.system_shortcuts,
             Toggle::KeepAwake => self.keep_awake,
+            Toggle::FullscreenKey => self.fullscreen_key,
             Toggle::Reconnect => self.reconnect,
         }
     }
@@ -212,6 +219,7 @@ impl ConnectionSettings {
             Toggle::ClipboardFiles => &mut self.clipboard_files,
             Toggle::SystemShortcuts => &mut self.system_shortcuts,
             Toggle::KeepAwake => &mut self.keep_awake,
+            Toggle::FullscreenKey => &mut self.fullscreen_key,
             Toggle::Reconnect => &mut self.reconnect,
         };
         *slot = value;
@@ -284,6 +292,7 @@ pub struct Effective {
     pub clipboard_files: bool,
     pub system_shortcuts: bool,
     pub keep_awake: bool,
+    pub fullscreen_key: bool,
     pub refresh_mins: u32,
     pub sign_in_mins: u32,
     pub offline_days: u32,
@@ -313,6 +322,8 @@ pub const DEFAULTS: Effective = Effective {
     system_shortcuts: true,
     // Spec §9: only when the user turns it on.
     keep_awake: false,
+    // FreeRDP's default.
+    fullscreen_key: true,
     refresh_mins: 60,
     sign_in_mins: 5,
     offline_days: 30,
@@ -341,6 +352,7 @@ impl Effective {
             clipboard_files: s.clipboard_files.unwrap_or(self.clipboard_files),
             system_shortcuts: s.system_shortcuts.unwrap_or(self.system_shortcuts),
             keep_awake: s.keep_awake.unwrap_or(self.keep_awake),
+            fullscreen_key: s.fullscreen_key.unwrap_or(self.fullscreen_key),
             refresh_mins: number(Number::Refresh, self.refresh_mins),
             sign_in_mins: number(Number::SignIn, self.sign_in_mins),
             offline_days: number(Number::OfflineDays, self.offline_days),
@@ -381,6 +393,7 @@ impl Effective {
             Toggle::ClipboardFiles => self.clipboard_files,
             Toggle::SystemShortcuts => self.system_shortcuts,
             Toggle::KeepAwake => self.keep_awake,
+            Toggle::FullscreenKey => self.fullscreen_key,
             Toggle::Reconnect => self.reconnect,
         }
     }
@@ -433,6 +446,17 @@ impl Effective {
                 "+grab-keyboard"
             } else {
                 "-grab-keyboard"
+            }
+            .to_owned(),
+        );
+        // A bool option, on by default (`client/X11/xf_keyboard.c`,
+        // `fullscreen_toggle`). Ctrl+Alt+M (minimize) and Ctrl+Alt+D
+        // (disconnect) have no switch in 3.32.2.
+        args.push(
+            if self.fullscreen_key {
+                "+toggle-fullscreen"
+            } else {
+                "-toggle-fullscreen"
             }
             .to_owned(),
         );
@@ -547,6 +571,18 @@ mod tests {
         assert!(!a.iter().any(|x| x.starts_with("/microphone")));
         assert!(!a.iter().any(|x| x.contains("rdpecam")));
         assert!(a.contains(&"/sound".into()));
+    }
+
+    #[test]
+    fn fullscreen_key_follows_the_setting() {
+        assert!(
+            DEFAULTS
+                .freerdp_args()
+                .contains(&"+toggle-fullscreen".into())
+        );
+        let mut e = DEFAULTS;
+        e.fullscreen_key = false;
+        assert!(e.freerdp_args().contains(&"-toggle-fullscreen".into()));
     }
 
     #[test]
