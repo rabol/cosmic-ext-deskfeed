@@ -141,6 +141,9 @@ pub struct AppModel {
     /// remember the setting on success or ask again on logon failure.
     pending_logon: HashMap<String, (LogonSetting, Arc<ConnectionFile>)>,
     dialog: Option<PasswordDialog>,
+    /// Password dialogs waiting their turn behind `dialog` (review F06:
+    /// each resource keeps its own, none replaces another).
+    waiting_dialogs: std::collections::VecDeque<PasswordDialog>,
     certificate_dialog: Option<CertificateDialog>,
     /// Passwords to remember once their connection worked (resource keys).
     pending_password: HashMap<String, Secret>,
@@ -261,6 +264,7 @@ impl cosmic::Application for AppModel {
             quit: Quit::No,
             pending_logon: HashMap::new(),
             dialog: None,
+            waiting_dialogs: std::collections::VecDeque::new(),
             certificate_dialog: None,
             pending_password: HashMap::new(),
             used_saved_password: HashSet::new(),

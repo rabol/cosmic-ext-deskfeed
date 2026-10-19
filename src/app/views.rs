@@ -238,13 +238,18 @@ impl AppModel {
                 }
                 (None, b.into())
             }
+            // Not started yet: Cancel stops it (review F06, F08).
             Some(Connection::Preparing) => (
                 Some(fl!("status-preparing")),
-                widget::button::standard(fl!("connect")).into(),
+                widget::button::standard(fl!("cancel"))
+                    .on_press(Message::Disconnect(r.key.clone()))
+                    .into(),
             ),
             Some(Connection::AwaitingUser) => (
                 Some(fl!("status-awaiting-user")),
-                widget::button::standard(fl!("connect")).into(),
+                widget::button::standard(fl!("cancel"))
+                    .on_press(Message::Disconnect(r.key.clone()))
+                    .into(),
             ),
             Some(Connection::Connecting) => (
                 Some(fl!("status-connecting")),

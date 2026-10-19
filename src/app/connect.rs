@@ -16,6 +16,10 @@ impl AppModel {
                 if self.account(&id).is_none_or(|a| a.epoch != epoch) {
                     return Task::none();
                 }
+                // Cancelled while it was being prepared (review F08).
+                if !matches!(self.connections.get(&key), Some(Connection::Preparing)) {
+                    return Task::none();
+                }
                 let result = match result {
                     Ok((connection, renewed)) => {
                         self.adopt_tokens(&id, epoch, &renewed);
@@ -57,6 +61,7 @@ impl AppModel {
                 if let Some(d) = self.dialog.take() {
                     self.connections.remove(&d.key);
                 }
+                self.withdraw_dialogs(|_| false);
             }
             Message::DialogConnect => return self.dialog_connect(),
             Message::Launched(id, epoch, key, attempt, result) => {
@@ -129,6 +134,18 @@ impl AppModel {
                 }
             }
             Message::Disconnect(key) => {
+                // Not started yet: preparing, or waiting for its password
+                // (review F06, F08). A connection file still on its way is
+                // dropped when it arrives.
+                if matches!(
+                    self.connections.get(&key),
+                    Some(Connection::Preparing | Connection::AwaitingUser)
+                ) {
+                    self.connections.remove(&key);
+                    self.reconnects.remove(&key);
+                    self.withdraw_dialogs(|d| d.key == key);
+                    return Task::none();
+                }
                 // Stop also ends reconnecting.
                 if self.reconnects.remove(&key).is_some()
                     && matches!(
@@ -311,7 +328,7 @@ impl AppModel {
         let error = self.last_failure.remove(&key);
         self.connections
             .insert(key.clone(), Connection::AwaitingUser);
-        self.dialog = Some(PasswordDialog {
+        let dialog = PasswordDialog {
             account: account.to_owned(),
             key,
             title,
@@ -322,7 +339,16 @@ impl AppModel {
             custom_domain,
             error,
             remember: false,
+        };
+        // Another resource's dialog is open: this one waits its turn.
+        decide::offer_dialog(&mut self.dialog, &mut self.waiting_dialogs, dialog, |d| {
+            &d.key
         });
+    }
+
+    /// Drops the password dialogs `gone` matches and shows the next one.
+    pub(super) fn withdraw_dialogs(&mut self, gone: impl Fn(&PasswordDialog) -> bool) {
+        decide::withdraw_dialogs(&mut self.dialog, &mut self.waiting_dialogs, gone);
     }
 
     /// Reads a desktop's remembered password in the background.
@@ -455,6 +481,7 @@ impl AppModel {
             None
         };
         let d = self.dialog.take().expect("checked above");
+        self.withdraw_dialogs(|_| false);
         // Kept only until the connection works (`session_event`).
         match (&password, d.remember) {
             (Some(p), true) => {

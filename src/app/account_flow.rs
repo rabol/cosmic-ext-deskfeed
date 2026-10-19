@@ -872,9 +872,7 @@ impl AppModel {
             self.entra_failed.remove(&key);
             self.entra_failures.remove(&key);
         }
-        if self.dialog.as_ref().is_some_and(|d| d.account == id) {
-            self.dialog = None;
-        }
+        self.withdraw_dialogs(|d| d.account == id);
         self.signing_out.insert(id.to_owned());
         self.select_first_account();
         // Its cookies go only after everything that could still write them

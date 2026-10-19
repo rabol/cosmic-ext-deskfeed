@@ -188,6 +188,38 @@ pub(super) fn slept(monotonic: std::time::Duration, wall: std::time::Duration) -
     wall > monotonic + std::time::Duration::from_secs(60)
 }
 
+/// Password dialogs, one per resource (review F06): `open` is shown, the
+/// rest wait in order. A newer dialog for the same resource replaces its
+/// older one; another resource's waits its turn.
+pub(super) fn offer_dialog<T>(
+    open: &mut Option<T>,
+    waiting: &mut std::collections::VecDeque<T>,
+    dialog: T,
+    key: impl Fn(&T) -> &str,
+) {
+    waiting.retain(|d| key(d) != key(&dialog));
+    match open {
+        Some(shown) if key(shown) != key(&dialog) => waiting.push_back(dialog),
+        _ => *open = Some(dialog),
+    }
+}
+
+/// Drops the dialogs `gone` matches (cancelled, signed out), shown or
+/// waiting, then shows the next one if none is open.
+pub(super) fn withdraw_dialogs<T>(
+    open: &mut Option<T>,
+    waiting: &mut std::collections::VecDeque<T>,
+    gone: impl Fn(&T) -> bool,
+) {
+    waiting.retain(|d| !gone(d));
+    if open.as_ref().is_some_and(&gone) {
+        *open = None;
+    }
+    if open.is_none() {
+        *open = waiting.pop_front();
+    }
+}
+
 /// How long to wait before reconnect attempt `attempt` (1-based): 5 s,
 /// doubling, at most a minute.
 pub(super) fn reconnect_delay(attempt: u32) -> std::time::Duration {
@@ -433,6 +465,37 @@ mod tests {
             assert_eq!(moved_to(&end, true, 5, others), None, "{end:?}");
         }
         assert_eq!(moved_to(&SessionEnd::Replaced, true, 5, []), None);
+    }
+
+    #[test]
+    fn password_dialogs_take_turns() {
+        use std::collections::VecDeque;
+        fn key<'a>(d: &'a (&'static str, u32)) -> &'a str {
+            d.0
+        }
+        let (mut open, mut waiting) = (None, VecDeque::new());
+        // Two resources finish in either order: both get their dialog.
+        offer_dialog(&mut open, &mut waiting, ("a", 1), key);
+        offer_dialog(&mut open, &mut waiting, ("b", 1), key);
+        assert_eq!(open, Some(("a", 1)));
+        assert_eq!(waiting, [("b", 1)]);
+        // A newer dialog for a waiting resource replaces its older one.
+        offer_dialog(&mut open, &mut waiting, ("b", 2), key);
+        assert_eq!(waiting, [("b", 2)]);
+        // And for the shown one, replaces it in place.
+        offer_dialog(&mut open, &mut waiting, ("a", 2), key);
+        assert_eq!(open, Some(("a", 2)));
+        // Answering or cancelling "a" shows "b".
+        withdraw_dialogs(&mut open, &mut waiting, |d| d.0 == "a");
+        assert_eq!(open, Some(("b", 2)));
+        assert!(waiting.is_empty());
+        // Cancelling a waiting one leaves the shown one alone.
+        offer_dialog(&mut open, &mut waiting, ("c", 1), key);
+        withdraw_dialogs(&mut open, &mut waiting, |d| d.0 == "c");
+        assert_eq!(open, Some(("b", 2)));
+        assert!(waiting.is_empty());
+        withdraw_dialogs(&mut open, &mut waiting, |d| d.0 == "b");
+        assert_eq!(open, None);
     }
 
     #[test]
