@@ -112,6 +112,8 @@ pub struct AppModel {
     tray_unavailable: Option<String>,
     /// The tray's Quit: really quit, not close to the background.
     quit_from_tray: bool,
+    /// "Start when you log in" (its autostart entry is there).
+    autostart: bool,
     /// The diagnostics report while its page is open (`None`: building).
     diagnostics: Option<String>,
     /// Where the report was saved, or why it wasn't.
@@ -232,6 +234,7 @@ impl cosmic::Application for AppModel {
             tray: None,
             tray_unavailable: None,
             quit_from_tray: false,
+            autostart: crate::autostart::enabled(),
             diagnostics: None,
             diagnostics_status: None,
             cache: crate::cache::Store::user(),
@@ -269,7 +272,16 @@ impl cosmic::Application for AppModel {
         });
         let deps = app.check_dependencies();
         let theme = settings_ui::apply_theme(app.config.app_theme.unwrap_or(0));
-        (app, Task::batch([title, load, deps, theme]))
+        // Started at login without a window (`--background`): it stays
+        // hidden only with background operation on; the tray's answer
+        // decides the rest (`tray_event`).
+        let window = if app.core.main_window_id().is_none() && !app.config.background {
+            crate::app_log!("started in the background, but background operation is off");
+            app.show_window()
+        } else {
+            Task::none()
+        };
+        (app, Task::batch([title, load, deps, theme, window]))
     }
 
     fn nav_model(&self) -> Option<&nav_bar::Model> {
@@ -590,6 +602,7 @@ impl cosmic::Application for AppModel {
             | Message::AppLogSize(..)
             | Message::AppTheme(..)
             | Message::AppBackground(..)
+            | Message::AppAutostart(..)
             | Message::AppChoice(..)
             | Message::AccountChoice(..)
             | Message::DesktopChoice(..)
@@ -689,7 +702,12 @@ impl AppModel {
                         crate::app_log!("dependency {:?}: {:?}", c.dependency, c.status);
                     }
                 }
+                let missing = checks.iter().any(|c| !c.status.is_ok());
                 self.deps = Some(checks);
+                // Started hidden: a missing dependency needs the window.
+                if missing {
+                    return self.show_window();
+                }
             }
             Message::ToggleContextPage(page) => {
                 if self.context_page == page {

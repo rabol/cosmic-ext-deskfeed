@@ -3,6 +3,7 @@
 mod accounts;
 mod app;
 mod auth;
+mod autostart;
 mod awake;
 mod bounded_lines;
 mod cache;
@@ -37,7 +38,14 @@ fn main() -> cosmic::iced::Result {
                 .min_width(360.0)
                 .min_height(180.0),
         )
-        .exit_on_close(false);
+        .exit_on_close(false)
+        // Started at login (`autostart.rs`): no window until the app knows
+        // there is a tray to come back from (`app/background.rs`).
+        .no_main_window(
+            std::env::args()
+                .skip(1)
+                .any(|a| a == autostart::BACKGROUND_ARG),
+        );
 
     // One Deskfeed per user: a second start asks the running one to show
     // its window (also when it runs in the background, ADR 0017) and ends.

@@ -35,6 +35,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Display scaling | Automatic (the X11 scale from XSETTINGS); 100–300 % | A, Ac, C | `settings.rs` `Choice::Scale`, `display.rs` | Done (ADR 0015) |
 | Theme: match desktop, dark, light | match desktop | A | config `app_theme`, `app/settings_ui.rs` `apply_theme` | Done |
 | Keep running in the background (tray icon) | off | A | config `background`, `app/background.rs`, `tray.rs` | Done (ADR 0017) |
+| Start when you log in (in the background) | off | A | the autostart entry itself, `autostart.rs` | Done (ADR 0017 addendum) |
 
 ## Fixed on purpose
 

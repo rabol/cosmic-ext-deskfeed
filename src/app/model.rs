@@ -331,6 +331,8 @@ pub enum Message {
     StartedAgain(Option<String>),
     /// App settings → Background.
     AppBackground(bool),
+    /// App settings → Background → Start when you log in.
+    AppAutostart(bool),
     /// Quit dialog: close the window, keep the desktops.
     QuitToBackground,
     /// View → Diagnostics: build the report and show it.

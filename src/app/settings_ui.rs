@@ -81,6 +81,13 @@ impl AppModel {
                     self.tray_unavailable = None;
                 }
             }
+            Message::AppAutostart(on) => match crate::autostart::set(on) {
+                Ok(()) => {
+                    self.autostart = on;
+                    crate::app_log!("start at login: {}", if on { "on" } else { "off" });
+                }
+                Err(e) => crate::app_log!("start at login not changed: {e}"),
+            },
             Message::AppLogSize(mib) => {
                 let (min, max, _) = crate::log::MAX_SIZE_MIB;
                 let mib = mib.clamp(min, max);
@@ -233,6 +240,11 @@ impl AppModel {
                     .control(
                         widget::toggler(self.config.background).on_toggle(Message::AppBackground),
                     ),
+            )
+            .add(
+                widget::settings::item::builder(fl!("setting-autostart"))
+                    .description(fl!("setting-autostart-desc"))
+                    .control(widget::toggler(self.autostart).on_toggle(Message::AppAutostart)),
             );
         let (min, max, default) = crate::log::MAX_SIZE_MIB;
         let mib = self.config.log_max_mib.unwrap_or(default).clamp(min, max);

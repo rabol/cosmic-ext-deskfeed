@@ -32,3 +32,10 @@ libcosmic closes the app when its main window closes, unless the `multi-window` 
 - With no status area in the panel, background operation is unavailable, not silently broken.
 - `start minimized` (roadmap) can build on this later.
 - The dbusmenu implementation is minimal: it always returns the whole menu, and it has no icons or submenus.
+
+## Addendum (2026-10-19): start when you log in
+
+- App settings → Background → "Start when you log in" writes an XDG autostart entry, `~/.config/autostart/io.github.rabol.cosmic-ext-deskfeed.desktop`, with `Exec=cosmic-ext-deskfeed --background`. Removing it turns the setting off; the file is the setting. COSMIC runs these entries at login.
+- `--background` starts without a window (libcosmic `no_main_window`). The window still opens when background operation is off, when no tray answers, or when a dependency is missing, so Deskfeed is never hidden without a way back.
+- Checked on the live session: with background on, `--background` showed only the tray icon, and a tray click opened the window. With it off, the window opened.
+
