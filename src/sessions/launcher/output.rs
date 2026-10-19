@@ -34,6 +34,11 @@ pub(super) const REPLACED_MARKER: &str = "ERRINFO_DISCONNECTED_BY_OTHER_CONNECTI
 /// FreeRDP's log line with the proxy's answer (`http_proxy_connect`).
 pub(super) const PROXY_ANSWER_MARKER: &str = "[http_proxy_connect]: HTTP Proxy: ";
 
+/// The sign-in helper refused a sign-in as another account than the app's
+/// (signin/src/freerdp.rs, `WRONG_ACCOUNT_LINE`; review U1).
+pub(super) const WRONG_ACCOUNT_MARKER: &str =
+    "cosmic-ext-deskfeed-signin: signed in as a different account";
+
 pub(super) const MAX_LOG_LINES: usize = 60;
 
 pub(super) const STATE_LOGGER: &str = "com.freerdp.core.rdp";
@@ -73,6 +78,9 @@ pub enum SessionEnd {
     /// `size - 1` on `winpr_asprintf`'s length, which has no NUL; still so
     /// on FreeRDP's master branch, 2026-10-19).
     ProxyAuthRefused,
+    /// The user signed in to the desktop as a different account than the
+    /// app's, and the sign-in helper refused it (review U1).
+    WrongAccount,
     /// FreeRDP couldn't verify the session host's certificate (ADR 0016).
     CertificateNotTrusted(CertificateInfo),
     Failed {
@@ -197,6 +205,8 @@ pub(super) struct Log {
     pub(super) app_refused: Option<AppRefusal>,
     /// The proxy asked for a password (`PROXY_ANSWER_MARKER`, 407).
     pub(super) proxy_auth: bool,
+    /// The sign-in helper refused another account (`WRONG_ACCOUNT_MARKER`).
+    pub(super) wrong_account: bool,
     /// The certificate FreeRDP is describing (`Certificate details for`).
     pub(super) certificate: Option<CertificateInfo>,
     /// A complete description (it has a well-formed thumbprint).
@@ -314,6 +324,9 @@ impl Log {
             .is_some_and(|(_, answer)| answer.split_whitespace().nth(1) == Some("407"))
         {
             self.proxy_auth = true;
+        }
+        if line.starts_with(WRONG_ACCOUNT_MARKER) {
+            self.wrong_account = true;
         }
         self.read_certificate(line);
         if line.contains("[ERROR]") || line.contains("[WARN]") || is_state_change(line) {

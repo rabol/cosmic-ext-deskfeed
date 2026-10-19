@@ -6,6 +6,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Added
 
+- The sign-in for a desktop now has your account filled in, and signing in to it with a different account is refused with a clear message instead of connecting as that account (ADR 0026, review U1).
 - RemoteApps (preview): apps from the feed connect and open as ordinary windows, grouped under Deskfeed in the dock, on every monitor. Settings that only fit a desktop (full screen, keyboard, workspace, keep the screen on) are left out for apps. When Windows won't start an app, the row says why. Checked against a Windows host, not yet with an AVD RemoteApp (ADR 0020).
 - The log now also hides IPv6 addresses and user names written as `name@DOMAIN`.
 - If the panel's tray goes away while Deskfeed's window is closed, the window opens, so there is always a way back; the tray icon returns when the panel's tray does.

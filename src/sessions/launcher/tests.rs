@@ -22,6 +22,11 @@ fn spec(logon: LogonSetting, password: Option<&str>, entra_file: bool) -> Launch
         settings: crate::settings::DEFAULTS,
         window_title: String::new(),
         app_id: String::new(),
+        account: Some(HelperAccount {
+            object_id: "0a1b-2c".into(),
+            tenant_id: "3d4e-5f".into(),
+            username: Some("anna@example.com".into()),
+        }),
     }
 }
 
@@ -539,6 +544,8 @@ fn launch_hands_arguments_over_privately() {
              [ -n \"$pf\" ] && echo \"PROXYFILE:$(stat -c %a \"$pf\"):$(cat \"$pf\")\" >> \"$out\"\n\
              env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_PROFILE=/tmp/p$' && echo PROFILE_OK >> \"$out\"\n\
              env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
+             env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_ACCOUNT=0a1b-2c.3d4e-5f$' && echo ACCOUNT_OK >> \"$out\"\n\
+             env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_LOGIN_HINT=anna@example.com$' && echo HINT_OK >> \"$out\"\n\
              echo '[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_FINALIZATION_CLIENT_FONT_MAP --> CONNECTION_STATE_ACTIVE'\n\
              exit 0\n",
             out = out.display()
@@ -584,6 +591,8 @@ fn launch_hands_arguments_over_privately() {
     assert!(got.contains("DIRMODE:700"), "{got}");
     assert!(got.contains("PROFILE_OK"), "{got}");
     assert!(got.contains("FILTER_OK"), "{got}");
+    assert!(got.contains("ACCOUNT_OK"), "{got}");
+    assert!(got.contains("HINT_OK"), "{got}");
     assert!(!got.contains("DRIVES"));
     assert!(!got.contains("LEAKED_ENV"));
     assert!(
@@ -653,6 +662,13 @@ fn reports_crash_and_failure_codes() {
             SessionEnd::LogonFailed,
         ),
         ("kill -9 $$", SessionEnd::Crashed),
+        // The sign-in helper refused another account; FreeRDP then fails
+        // its Entra logon. The refusal is the reason shown (review U1).
+        (
+            "echo 'cosmic-ext-deskfeed-signin: signed in as a different account; refused' >&2; \
+             echo '[ERROR][x] - ERRCONNECT_LOGON_FAILURE [0x00020014]'; exit 131",
+            SessionEnd::WrongAccount,
+        ),
         ("exit 140", SessionEnd::DnsFailed),
     ] {
         let fake = dir.join("fake");
@@ -767,6 +783,7 @@ fn start_without_gateway(
         output,
         &FreeRdpProxy::default(),
         None,
+        None,
     )
     .unwrap();
     drop(read_end);
@@ -821,6 +838,7 @@ fn windows_host_remote_app() {
         },
         window_title: "Deskfeed RemoteApp test".into(),
         app_id: "io.github.rabol.DeskfeedTest".into(),
+        account: None,
     };
     // A test host's self-signed certificate.
     let (session, rx) = start_without_gateway(&s, &dir, |mut args| {
@@ -924,6 +942,7 @@ fn local_test_server_session() {
         window_title: std::env::var("DESKFEED_TEST_TITLE")
             .unwrap_or_else(|_| "Deskfeed local test \u{2013} t\u{e9}st".into()),
         app_id: "io.github.rabol.DeskfeedTest".into(),
+        account: None,
     };
     // The two arguments the test server can't take: TLS instead of
     // NLA; and without a pin its self-signed certificate is ignored,
@@ -1046,6 +1065,7 @@ fn real_freerdp_accepts_all_kept_properties() {
         settings: crate::settings::DEFAULTS,
         window_title: String::new(),
         app_id: String::new(),
+        account: None,
     };
     let (tx, rx) = std::sync::mpsc::channel();
     let freerdp = find_freerdp().expect("xfreerdp3 installed");

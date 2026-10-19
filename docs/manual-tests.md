@@ -19,6 +19,8 @@ Install the current build first (`just install`, or the package).
 
 3d. **Cancel before a desktop starts.** Select Connect, and while the row says "Preparing" or "Waiting for your password", select Cancel. *Expected:* the row goes back to Connect, any password dialog for it closes, and nothing starts afterwards. With two desktops that both ask for a password, the second dialog appears after you answer or cancel the first.
 
+3e. **The desktop sign-in uses the account** (ADR 0026). On a desktop that uses Entra sign-in, sign out of Microsoft in the sign-in window if one is remembered, or use a fresh account, then select Connect. *Expected:* if Microsoft's page appears, your account is already filled in or selected; the desktop connects; the log (View → Diagnostics) has no "account not confirmed" and no "different account" line. Then, if you have a second work account: when the page appears, choose "Use another account" and sign in with the other one. *Expected:* the row says "You signed in to the desktop with a different account…" (if it says only that the sign-in was rejected, note it: the helper's message didn't reach Deskfeed), and nothing reconnects. Select Connect once more. *Expected:* Microsoft's page shows the list of accounts; picking your own connects. If you use a guest account in another organization, try that too: it must connect normally.
+
 ### Background and tray (ADR 0017)
 
 3. **Connect from the tray with the window closed.** Turn on Settings → Background, close the window, use the tray menu's "Connect …". *Expected:* the desktop connects without the window opening. A password question or a failure opens the window. The connected desktop has a check mark, and the top of the menu says "1 connected".

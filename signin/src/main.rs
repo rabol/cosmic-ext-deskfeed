@@ -12,6 +12,7 @@
 //!   `COSMIC_EXT_DESKFEED_SIGNIN_PROFILE`, which the app sets for FreeRDP, so the
 //!   account's sign-in cookies make these requests silent when possible.
 
+mod account;
 mod freerdp;
 mod protocol;
 mod proxy;

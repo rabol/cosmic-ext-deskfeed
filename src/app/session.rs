@@ -168,6 +168,8 @@ impl AppModel {
         if outcome != decide::EndOutcome::Clear
             && !was_connected
             && tried == Some(&LogonSetting::EntraSignIn)
+            // Picking another account is a slip, not Entra sign-in failing.
+            && *end != SessionEnd::WrongAccount
         {
             self.desks.at(key).entra_failures += 1;
         }

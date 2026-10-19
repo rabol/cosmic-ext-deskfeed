@@ -157,7 +157,7 @@ pub fn error(id: u64, message: &str) -> String {
 /// The `navigate` response for a sign-in outcome.
 pub fn navigate_response(id: u64, redirect_uri: &str, reply: Reply) -> String {
     match reply {
-        Reply::Ok { code, state } => {
+        Reply::Ok { code, state, .. } => {
             let query = url::form_urlencoded::Serializer::new(String::new())
                 .append_pair("code", &code)
                 .append_pair("state", &state)
@@ -227,6 +227,8 @@ pub fn run(args: &[String]) -> ExitCode {
     let main_loop = glib::MainLoop::new(None, false);
     let view = SignInView::new(&profile, &window_title(), proxy.ok().flatten().as_ref());
     let send = Arc::new(send);
+    // Which account the app expects (review U1, `account.rs`).
+    let expected = Arc::new(crate::account::Expected::from_env());
     {
         let main_loop = main_loop.clone();
         glib::timeout_add_local(Duration::from_millis(50), move || {
@@ -241,7 +243,7 @@ pub fn run(args: &[String]) -> ExitCode {
                         return glib::ControlFlow::Break;
                     }
                     Some(Some(line)) => {
-                        if !handle(&parse_incoming(&line), &view, &send) {
+                        if !handle(&parse_incoming(&line), &view, &send, &expected) {
                             main_loop.quit();
                             return glib::ControlFlow::Break;
                         }
@@ -254,8 +256,72 @@ pub fn run(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// The status line for an answer naming another account; the app's
+/// launcher watches FreeRDP's output for it.
+pub const WRONG_ACCOUNT_LINE: &str =
+    "cosmic-ext-deskfeed-signin: signed in as a different account; refused";
+
+/// An `Ok` naming a different account than the app's becomes a failure,
+/// so FreeRDP never gets a token for it (review U1). Others pass.
+pub fn vet(reply: Reply, expected: Option<&crate::account::Account>) -> Reply {
+    use crate::account::{Check, check};
+    let Reply::Ok { account, .. } = &reply else {
+        return reply;
+    };
+    match check(expected, account.as_ref()) {
+        Check::Same => reply,
+        Check::Different => {
+            // One write, so the line can't be split by FreeRDP's own
+            // output on the same pipe (the launcher matches its start).
+            let _ = std::io::Write::write_all(
+                &mut std::io::stderr().lock(),
+                format!("{WRONG_ACCOUNT_LINE}\n").as_bytes(),
+            );
+            Reply::Failed {
+                reason: "wrong_account".into(),
+            }
+        }
+        Check::Unknown => {
+            if expected.is_some() {
+                eprintln!("cosmic-ext-deskfeed-signin: account not confirmed (no client_info)");
+            }
+            reply
+        }
+    }
+}
+
+/// What follows the silent attempt.
+#[derive(Debug, PartialEq, Eq)]
+pub enum AfterSilent {
+    /// Answer FreeRDP with it.
+    Answer,
+    /// Microsoft needs the user: the normal sign-in.
+    Interactive,
+    /// The remembered session is another account: the sign-in with the
+    /// account list, so the user can pick the right one (review U1).
+    PickAccount,
+}
+
+pub fn after_silent(reply: &Reply, expected: Option<&crate::account::Account>) -> AfterSilent {
+    use crate::account::{Check, check};
+    if protocol::needs_interaction(reply) {
+        return AfterSilent::Interactive;
+    }
+    match reply {
+        Reply::Ok { account, .. } if check(expected, account.as_ref()) == Check::Different => {
+            AfterSilent::PickAccount
+        }
+        _ => AfterSilent::Answer,
+    }
+}
+
 /// Handles one message. Returns `false` when the helper should exit.
-fn handle(msg: &Incoming, view: &SignInView, send: &Arc<impl Fn(String) + 'static>) -> bool {
+fn handle(
+    msg: &Incoming,
+    view: &SignInView,
+    send: &Arc<impl Fn(String) + 'static>,
+    expected: &Arc<crate::account::Expected>,
+) -> bool {
     match msg {
         Incoming::Hello { id } => send(result(
             *id,
@@ -273,13 +339,20 @@ fn handle(msg: &Incoming, view: &SignInView, send: &Arc<impl Fn(String) + 'stati
             timeout_ms,
         } => {
             let (id, redirect_uri, reply_send) = (*id, redirect_uri.clone(), send.clone());
-            let respond = move |reply| reply_send(navigate_response(id, &redirect_uri, reply));
+            let want = expected.clone();
+            let respond = move |reply| {
+                let reply = vet(reply, want.account.as_ref());
+                reply_send(navigate_response(id, &redirect_uri, reply));
+            };
+            // The account's name as a hint, and its ID in the answer.
+            let url = &crate::account::prepare(url, expected.login_hint.as_deref());
             let timeout = Duration::from_millis(*timeout_ms);
             // First without any page (`prompt=none`); the normal sign-in only
             // if Microsoft says it needs the user.
             let started = match protocol::with_prompt_none(url) {
                 Some(silent_url) => {
                     let (view2, url, target2) = (view.clone(), url.clone(), target.clone());
+                    let want = expected.clone();
                     view.navigate(
                         &silent_url,
                         target.clone(),
@@ -293,10 +366,16 @@ fn handle(msg: &Incoming, view: &SignInView, send: &Arc<impl Fn(String) + 'stati
                                 other => format!("{other:?}"),
                             };
                             eprintln!("cosmic-ext-deskfeed-signin: silent token request (prompt=none): {outcome}");
-                            if protocol::needs_interaction(&reply) {
-                                view2.navigate(&url, target2, Show::IfNeeded, timeout, respond);
-                            } else {
-                                respond(reply);
+                            match after_silent(&reply, want.account.as_ref()) {
+                                AfterSilent::Answer => respond(reply),
+                                AfterSilent::Interactive => {
+                                    view2.navigate(&url, target2, Show::IfNeeded, timeout, respond);
+                                }
+                                AfterSilent::PickAccount => {
+                                    eprintln!("cosmic-ext-deskfeed-signin: remembered sign-in is another account; showing the account list");
+                                    let pick = crate::account::with_select_account(&url);
+                                    view2.navigate(&pick, target2, Show::IfNeeded, timeout, respond);
+                                }
                             }
                         },
                     )
@@ -443,6 +522,7 @@ mod tests {
             Reply::Ok {
                 code: "c.1-x".into(),
                 state: "s1".into(),
+                account: None,
             },
         );
         let v: Value = serde_json::from_str(&ok).unwrap();
@@ -469,6 +549,79 @@ mod tests {
         assert_eq!(v["error"]["message"], "user_cancelled");
         let v: Value = serde_json::from_str(&navigate_response(2, BROKER, Reply::Timeout)).unwrap();
         assert_eq!(v["error"]["message"], "timeout");
+    }
+
+    #[test]
+    fn another_account_is_refused() {
+        use crate::account::Account;
+        let me = Account {
+            oid: "o1".into(),
+            tid: "t1".into(),
+        };
+        let ok = |account: Option<Account>| Reply::Ok {
+            code: "c".into(),
+            state: "s".into(),
+            account,
+        };
+        let other = Account {
+            oid: "o2".into(),
+            tid: "t1".into(),
+        };
+        assert_eq!(vet(ok(Some(me.clone())), Some(&me)), ok(Some(me.clone())));
+        assert_eq!(
+            vet(ok(Some(other.clone())), Some(&me)),
+            Reply::Failed {
+                reason: "wrong_account".into()
+            }
+        );
+        // The refusal reaches FreeRDP as an error, never as a code.
+        let line = navigate_response(1, BROKER, vet(ok(Some(other)), Some(&me)));
+        assert!(!line.contains("code="), "{line}");
+        assert!(line.contains("wrong_account"), "{line}");
+        // Nothing to compare: let through (and noted).
+        assert_eq!(vet(ok(None), Some(&me)), ok(None));
+        assert_eq!(vet(ok(Some(me.clone())), None), ok(Some(me.clone())));
+        assert_eq!(vet(Reply::Cancelled, Some(&me)), Reply::Cancelled);
+        // The app's launcher looks for this text (src/sessions/launcher/
+        // output.rs, `WRONG_ACCOUNT_MARKER`): keep the two the same.
+        assert!(
+            WRONG_ACCOUNT_LINE
+                .starts_with("cosmic-ext-deskfeed-signin: signed in as a different account")
+        );
+    }
+
+    #[test]
+    fn a_silent_answer_as_another_account_shows_the_account_list() {
+        use crate::account::Account;
+        let me = Account {
+            oid: "o1".into(),
+            tid: "t1".into(),
+        };
+        let ok = |oid: &str| Reply::Ok {
+            code: "c".into(),
+            state: "s".into(),
+            account: Some(Account {
+                oid: oid.into(),
+                tid: "t1".into(),
+            }),
+        };
+        assert_eq!(after_silent(&ok("o1"), Some(&me)), AfterSilent::Answer);
+        assert_eq!(after_silent(&ok("o2"), Some(&me)), AfterSilent::PickAccount);
+        assert_eq!(after_silent(&ok("o2"), None), AfterSilent::Answer);
+        let needs = Reply::Error {
+            error: "login_required".into(),
+            error_codes: None,
+            state: None,
+        };
+        assert_eq!(after_silent(&needs, Some(&me)), AfterSilent::Interactive);
+        assert_eq!(
+            after_silent(&Reply::Timeout, Some(&me)),
+            AfterSilent::Interactive
+        );
+        assert_eq!(
+            after_silent(&Reply::Cancelled, Some(&me)),
+            AfterSilent::Answer
+        );
     }
 
     #[test]
