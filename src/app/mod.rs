@@ -37,12 +37,17 @@ use crate::settings::{self, Choice, ConnectionSettings, Limited, Number, Toggle}
 
 mod account_flow;
 mod background;
+mod certificate;
 mod connect;
 mod decide;
 mod desk;
 mod diagnostics;
 mod errors;
+mod launch;
 mod model;
+mod password;
+mod quit;
+mod session;
 mod settings_ui;
 mod views;
 
@@ -416,7 +421,7 @@ impl cosmic::Application for AppModel {
             return Some(self.sign_out_dialog(id));
         }
         if let Some(d) = &self.certificate_dialog {
-            return Some(connect::certificate_dialog(d));
+            return Some(certificate::certificate_dialog(d));
         }
         let d = self.dialog.as_ref()?;
         let account = self
