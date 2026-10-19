@@ -107,6 +107,8 @@ pub struct AppModel {
     /// The account whose sign-out waits for an answer: it has desktops or
     /// apps open (spec §6).
     sign_out_asking: Option<String>,
+    /// What the last sign-out couldn't remove.
+    cleanup_retry: Option<CleanupRetry>,
     /// Desktops being reconnected after a lost connection.
     reconnects: HashMap<String, Reconnect>,
     /// The search field's text; filters the desktop list.
@@ -240,6 +242,7 @@ impl cosmic::Application for AppModel {
             session_notes: HashMap::new(),
             moved_to: HashMap::new(),
             sign_out_asking: None,
+            cleanup_retry: None,
             reconnects: HashMap::new(),
             search: String::new(),
             tray: None,
@@ -537,6 +540,24 @@ impl cosmic::Application for AppModel {
         if let Some(notice) = &self.notice {
             col = col.push(widget::warning(notice.clone()).on_close(Message::DismissNotice));
         }
+        if self.cleanup_retry.is_some() {
+            col = col.push(
+                widget::row::with_capacity(2)
+                    .push(
+                        widget::container(
+                            widget::warning(fl!("error-sign-out-incomplete"))
+                                .on_close(Message::DismissSignOutCleanup),
+                        )
+                        .width(Length::Fill),
+                    )
+                    .push(
+                        widget::button::standard(fl!("try-again"))
+                            .on_press(Message::RetrySignOutCleanup),
+                    )
+                    .spacing(cosmic::theme::spacing().space_xs)
+                    .align_y(Alignment::Center),
+            );
+        }
         col.push(self.page_view()).into()
     }
 
@@ -606,6 +627,8 @@ impl AppModel {
             | Message::SignOutConfirm
             | Message::SignOutCancel
             | Message::SignOutFinished(..)
+            | Message::RetrySignOutCleanup
+            | Message::DismissSignOutCleanup
             | Message::SignOutFilesRemoved(..) => self.account_message(message),
             Message::Connect(..)
             | Message::ConnectionFileReady(..)

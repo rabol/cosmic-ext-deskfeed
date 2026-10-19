@@ -64,14 +64,18 @@ impl AppModel {
                 }
             }
             Message::SignOutCancel => self.sign_out_asking = None,
-            Message::SignOutFinished(result) => {
+            Message::SignOutFinished(id, identity, result) => {
                 if let Err(e) = result {
-                    self.notice = Some(e);
+                    crate::app_log!("sign-out: keyring not cleaned ({e})");
+                    self.cleanup_retry(&id).keyring = Some(*identity);
                 }
             }
+            Message::RetrySignOutCleanup => return self.retry_sign_out_cleanup(),
+            Message::DismissSignOutCleanup => self.cleanup_retry = None,
             Message::SignOutFilesRemoved(id, result) => {
                 if result.is_err() {
-                    self.notice = Some(fl!("error-sign-out-incomplete"));
+                    crate::app_log!("sign-out: sign-in files not removed");
+                    self.cleanup_retry(&id).files = true;
                 }
                 // A session still starting removes the files once more
                 // when it has been stopped (`launched`).
@@ -703,6 +707,45 @@ impl AppModel {
         }
     }
 
+    /// The leftovers of this account's sign-out (a newer one replaces an
+    /// older one's).
+    fn cleanup_retry(&mut self, id: &str) -> &mut CleanupRetry {
+        if self.cleanup_retry.as_ref().is_some_and(|r| r.id != id) {
+            self.cleanup_retry = None;
+        }
+        self.cleanup_retry.get_or_insert_with(|| CleanupRetry {
+            id: id.to_owned(),
+            keyring: None,
+            files: false,
+        })
+    }
+
+    /// Removes what a sign-out left behind. Not when the account has been
+    /// signed in again meanwhile: its data is in use again.
+    fn retry_sign_out_cleanup(&mut self) -> Task<cosmic::Action<Message>> {
+        let Some(retry) = self.cleanup_retry.take() else {
+            return Task::none();
+        };
+        if self.account(&retry.id).is_some() {
+            return Task::none();
+        }
+        let mut tasks = Vec::new();
+        if retry.files {
+            let id = retry.id.clone();
+            tasks.push(cosmic::task::future(async move {
+                let owner = id.clone();
+                let result = tokio::task::spawn_blocking(move || accounts::remove_files(&owner))
+                    .await
+                    .unwrap_or(Err(()));
+                Message::SignOutFilesRemoved(id, result)
+            }));
+        }
+        if let Some(identity) = retry.keyring {
+            tasks.push(keyring_cleanup(retry.id, identity));
+        }
+        Task::batch(tasks)
+    }
+
     /// The account's open connections: running or starting.
     fn open_sessions(&self, id: &str) -> usize {
         self.running.values().filter(|r| r.account == id).count()
@@ -812,24 +855,31 @@ impl AppModel {
                 Message::SignOutFilesRemoved(id, result)
             })
         };
-        // The keyring may block (for example on an unlock prompt), so on its
-        // own.
-        let identity = account.identity;
-        let keyring = cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                // Remembered Windows passwords go with the account (spec §8).
-                let passwords = crate::secrets::delete_passwords(&identity, None);
-                crate::app_log!(
-                    "remembered passwords deleted (sign-out): {:?}",
-                    passwords.is_ok()
-                );
-                let signed_out = accounts::delete(&identity);
-                signed_out.and(passwords.map_err(|_| fl!("error-sign-out-incomplete")))
-            })
-            .await
-            .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
-            Message::SignOutFinished(result)
-        });
+        let keyring = keyring_cleanup(id.to_owned(), account.identity);
         Task::batch([files, keyring])
     }
+}
+
+/// Deletes an account's keyring entries: its saved sign-in and its
+/// remembered Windows passwords (spec §8). The keyring may block (for
+/// example on an unlock prompt), so on its own.
+fn keyring_cleanup(
+    id: String,
+    identity: crate::auth::id_token::Identity,
+) -> Task<cosmic::Action<Message>> {
+    cosmic::task::future(async move {
+        let kept = identity.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let passwords = crate::secrets::delete_passwords(&identity, None);
+            crate::app_log!(
+                "remembered passwords deleted (sign-out): {:?}",
+                passwords.is_ok()
+            );
+            let signed_out = accounts::delete(&identity);
+            signed_out.and(passwords.map_err(|_| fl!("error-sign-out-incomplete")))
+        })
+        .await
+        .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
+        Message::SignOutFinished(id, Box::new(kept), result)
+    })
 }

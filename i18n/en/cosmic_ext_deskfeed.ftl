@@ -66,7 +66,8 @@ error-session-expired = Your sign-in has expired. Sign in again to continue.
 error-forbidden = The desktop service refused access to this account.
 error-feed = Couldn't load your desktops: { $detail }
 error-generic = Something went wrong. Try again.
-error-sign-out-incomplete = Sign-out couldn't remove all sign-in data. Try signing out again.
+error-sign-out-incomplete = Sign-out couldn't remove all of the account's sign-in data from this computer.
+try-again = Try again
 error-still-signing-out = This account is still being signed out. Try again in a moment.
 
 # Connecting

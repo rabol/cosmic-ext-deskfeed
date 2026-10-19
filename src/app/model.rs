@@ -150,6 +150,17 @@ pub(super) struct Launching {
     pub(super) remote_app: bool,
 }
 
+/// What a sign-out couldn't remove, to try again (spec §6: report that
+/// removal is incomplete and offer retry).
+#[derive(Debug, Clone)]
+pub(super) struct CleanupRetry {
+    pub(super) id: String,
+    /// The keyring entries (saved sign-in, remembered passwords).
+    pub(super) keyring: Option<crate::auth::id_token::Identity>,
+    /// The sign-in window's files (cookies).
+    pub(super) files: bool,
+}
+
 /// Quitting the app.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Quit {
@@ -269,7 +280,16 @@ pub enum Message {
     SignOutConfirm,
     SignOutCancel,
     /// The keyring item of a signed-out account is gone (or not).
-    SignOutFinished(Result<(), String>),
+    /// The keyring part of a sign-out: the account ID, its identity (to
+    /// try again), and how it went.
+    SignOutFinished(
+        String,
+        Box<crate::auth::id_token::Identity>,
+        Result<(), String>,
+    ),
+    /// Sign-out's "Try again": removes what was left (`CleanupRetry`).
+    RetrySignOutCleanup,
+    DismissSignOutCleanup,
     /// Account ID: its sign-in window and sessions have ended and its
     /// files are deleted (`Err`: some couldn't be).
     SignOutFilesRemoved(String, Result<(), ()>),
