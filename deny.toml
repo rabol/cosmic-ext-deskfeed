@@ -1,0 +1,131 @@
+# cargo-deny: checks the dependency tree in CI (`cargo deny check`).
+#
+# - advisories: known vulnerabilities (RustSec). Unmaintained crates are
+#   listed with the reason they stay, below.
+# - licenses: only the permissive licenses listed; exceptions per crate.
+# - bans: duplicate versions are allowed (libcosmic pulls several); no
+#   wildcard version requirements.
+# - sources: crates.io, and only the Git repositories libcosmic pins.
+
+[graph]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+# Accepted "unmaintained" notices (not vulnerabilities), checked 2026-10-19.
+# None has a fix Deskfeed can make alone; look again when updating
+# libcosmic (ADR 0002). Any other advisory fails the check.
+ignore = [
+    # zbus 6 absorbed these; Deskfeed and libcosmic both use zbus 5, and
+    # moving Deskfeed alone would build two zbus versions.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: part of zbus 5, used by Deskfeed and libcosmic; follows libcosmic to zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: as zvariant" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: as zvariant" },
+    # Inside libcosmic's graphics stack (wgpu, resvg, cosmic-text).
+    { id = "RUSTSEC-2024-0436", reason = "paste: via wgpu (libcosmic's renderer)" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz: via resvg (libcosmic's SVG icons)" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: via cosmic-text/fontdb (libcosmic's text)" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unlicense",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+    # Weak copyleft per file; libcosmic and its parts use it.
+    "MPL-2.0",
+]
+exceptions = [
+    # Build-only: build.rs runs it to write the .desktop and AppStream
+    # files. It isn't compiled into the programs (THIRD-PARTY-LICENSES.md).
+    { crate = "xdgen", allow = ["GPL-3.0-only"] },
+]
+
+# Crates from libcosmic's Git repositories (and `apply`) have no license
+# field and no license file in their own folder; their license is the
+# repository's file, as THIRD-PARTY-LICENSES.md reads it. The hash is the
+# file's XXH32 when it was reviewed (2026-10-19). Note: cargo-deny 0.20.2
+# still applies a clarification when the hash differs (tried), so a license
+# change there isn't caught here; look at these files when updating
+# libcosmic (ADR 0002). `libcosmic` itself has its own LICENSE file, which
+# cargo-deny reads.
+[[licenses.clarify]]
+crate = "cosmic-config"
+expression = "MPL-2.0"
+license-files = [{ path = "../LICENSE", hash = 0x3b6981e6 }]
+
+[[licenses.clarify]]
+crate = "cosmic-config-derive"
+expression = "MPL-2.0"
+license-files = [{ path = "../LICENSE", hash = 0x3b6981e6 }]
+
+[[licenses.clarify]]
+crate = "cosmic-theme"
+expression = "MPL-2.0"
+license-files = [{ path = "../LICENSE", hash = 0x3b6981e6 }]
+
+[[licenses.clarify]]
+crate = "cosmic-settings-daemon"
+expression = "MPL-2.0"
+license-files = [{ path = "../LICENSE.md", hash = 0x0d4a6b51 }]
+
+[[licenses.clarify]]
+crate = "iced_accessibility"
+expression = "MIT"
+license-files = [{ path = "../LICENSE", hash = 0xa244f17c }]
+
+[[licenses.clarify]]
+crate = "dnd"
+expression = "MIT"
+license-files = [{ path = "../LICENSE", hash = 0xfd9601dd }]
+
+[[licenses.clarify]]
+crate = "mime@0.1.0"
+expression = "MIT"
+license-files = [{ path = "../LICENSE", hash = 0xfd9601dd }]
+
+[[licenses.clarify]]
+crate = "apply"
+expression = "Unlicense"
+license-files = [{ path = "License.md", hash = 0x401a3405 }]
+
+[licenses.private]
+# The workspace's own crates (publish = false).
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# libcosmic's pinned dependencies (Cargo.lock records each revision).
+allow-git = [
+    "https://github.com/pop-os/libcosmic.git",
+    "https://github.com/pop-os/cosmic-protocols",
+    "https://github.com/pop-os/dbus-settings-bindings",
+    "https://github.com/pop-os/freedesktop-icons",
+    "https://github.com/pop-os/smithay-clipboard",
+    "https://github.com/pop-os/softbuffer",
+    "https://github.com/pop-os/window_clipboard.git",
+    "https://github.com/pop-os/winit.git",
+    "https://github.com/iced-rs/cryoglyph.git",
+    "https://github.com/jackpot51/rust-atomicwrites",
+    "https://github.com/wash2/accesskit",
+]

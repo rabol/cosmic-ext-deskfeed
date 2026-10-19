@@ -8,6 +8,8 @@ authors = ["Steen Rabol <cosmic-ext-avd@rabol.dev>"]
 license = "MIT"
 description = "Your work desktops on COSMIC™, working with Azure Virtual Desktop and Windows 365"
 repository = "https://github.com/rabol/cosmic-ext-deskfeed"
+# An application, not a library on crates.io.
+publish = false
 
 [workspace]
 members = ["signin", "lines"]

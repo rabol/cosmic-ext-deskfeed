@@ -33,7 +33,7 @@ jobs:
           git rust just pkgconf
           gtk4 webkitgtk-6.0 libxkbcommon wayland
           desktop-file-utils appstream
-          dbus
+          dbus cargo-deny
 
       - name: Check out
         # actions/checkout v7.0.1
@@ -49,6 +49,9 @@ jobs:
 
       - name: Tests
         run: cargo test --locked --workspace
+
+      - name: Dependencies (advisories, licenses, sources; deny.toml)
+        run: cargo deny --locked check
 
       - name: Release build
         run: cargo build --locked --release --workspace
