@@ -1,6 +1,6 @@
 # 0022. Child programs end with the app (PR_SET_PDEATHSIG from one spawner thread)
 
-- Status: Accepted
+- Status: Accepted (death signal changed to SIGKILL, see the addendum)
 - Date: 2026-10-19
 
 ## Context
@@ -20,3 +20,11 @@ Linux's `prctl(PR_SET_PDEATHSIG, sig)` makes the kernel signal a child when its 
 - Checked: a test process that started `sleep` this way and then aborted took `sleep` with it, and without the signal `sleep` outlived it (`children_end_when_the_app_crashes`). A real RemoteApp session's `xfreerdp3` ended within 2 s of the test process that started it being killed with SIGKILL.
 - FreeRDP once caught SIGTERM and didn't exit (ADR 0020). After a crash nothing would escalate to SIGKILL; such a leftover window can still be closed by hand.
 - Leftover runtime files are still cleaned at the next start (`clean_stale_runtime_dirs`).
+
+## Addendum (2026-10-19): SIGKILL, not SIGTERM (review F12)
+
+The external review pointed out that the guarantee above held only for children that obey SIGTERM. FreeRDP once caught SIGTERM and didn't exit (ADR 0020), and after a crash Deskfeed isn't there to escalate. The first test used `sleep`, which obeys, so it couldn't show this.
+
+- The parent-death signal is now SIGKILL, which can't be caught or ignored. Normal quitting is unchanged: SIGTERM, a grace period, then SIGKILL (`stop_all`). Only after a crash does a session end without a clean RDP disconnect, which Windows treats like a lost connection.
+- Descendants: FreeRDP's only child is the sign-in helper. Started the way FreeRDP starts it (`--cmdInFd=P…`), it exited 0.06 s after FreeRDP's end of its command pipe closed. The app's own sign-in helper is tied directly. WebKit's own subprocesses end with their UI process.
+- The crash test now uses a child that ignores SIGTERM (`trap '' TERM; exec sleep 60`). It fails with SIGTERM as the death signal ("outlived the app") and passes with SIGKILL.

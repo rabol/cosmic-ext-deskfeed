@@ -849,8 +849,11 @@ fn spawn_freerdp(
 type SpawnRequest = (Command, std::sync::mpsc::Sender<std::io::Result<Child>>);
 
 /// Starts `cmd` so that it ends when Deskfeed does, even after a crash or
-/// a kill (spec §6, §8: no orphaned sessions). The kernel sends it SIGTERM
-/// when its parent goes (`PR_SET_PDEATHSIG`). "Parent" is the *thread* that
+/// a kill (spec §6, §8: no orphaned sessions). The kernel sends it SIGKILL
+/// when its parent goes (`PR_SET_PDEATHSIG`): uncatchable, because after a
+/// crash nothing is left to escalate a SIGTERM that FreeRDP ignored
+/// (review F12; ADR 0022 addendum). Normal quitting stays graceful
+/// (`stop_all`). "Parent" is the *thread* that
 /// started it, and the async runtime's worker threads come and go, so every
 /// start happens on one thread that lasts as long as the app. A child in
 /// its own process group (FreeRDP) passes the signal on to its group by
@@ -863,7 +866,7 @@ pub fn spawn_tied(mut cmd: Command) -> std::io::Result<Child> {
     // and exec.
     unsafe {
         cmd.pre_exec(move || {
-            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) < 0 {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
             // The app ended before the line above took effect.
@@ -1411,9 +1414,11 @@ mod tests {
         if std::env::var("DESKFEED_TEST_CRASH").is_err() {
             return;
         }
-        let mut cmd = Command::new("sleep");
+        // A child that ignores SIGTERM, as FreeRDP once did (ADR 0020); an
+        // ignored signal stays ignored across `exec`.
+        let mut cmd = Command::new("sh");
         // No inherited output: the outer test reads until it closes.
-        cmd.arg("60")
+        cmd.args(["-c", "trap '' TERM; exec sleep 60"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
