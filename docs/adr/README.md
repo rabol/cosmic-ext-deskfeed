@@ -22,5 +22,6 @@ Each significant decision is recorded as a short Markdown file, `NNNN-title.md`,
 | [0016](0016-session-host-certificates.md) | Session host certificates: the broker's pin, else the user's approval | Accepted |
 | [0017](0017-background-operation-and-tray.md) | Background operation with a StatusNotifierItem tray over zbus | Accepted |
 | [0018](0018-system-shortcuts-through-xwayland-grab.md) | System shortcuts reach the desktop through XWayland's keyboard grab | Accepted |
+| [0019](0019-keep-screen-on-in-full-screen.md) | Keep the screen on in full screen through org.freedesktop.ScreenSaver | Accepted |
 
 Do not put tenant data (host names, tenant or workspace IDs, user names, feed URLs) in ADRs. Describe evidence in redacted form.

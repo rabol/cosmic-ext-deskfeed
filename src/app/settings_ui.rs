@@ -494,7 +494,8 @@ fn settings_column<'a>(
         .add(choice(Choice::Scale))
         .add(toggle(Toggle::Fullscreen))
         .add(toggle(Toggle::AllMonitors))
-        .add(toggle(Toggle::NewWorkspace));
+        .add(toggle(Toggle::NewWorkspace))
+        .add(toggle(Toggle::KeepAwake));
     let keyboard = widget::settings::section()
         .title(fl!("settings-keyboard"))
         .add(toggle(Toggle::SystemShortcuts));
@@ -614,6 +615,7 @@ pub(super) fn toggle_text(t: Toggle) -> (String, String) {
             fl!("setting-clipboard-files"),
             fl!("setting-clipboard-files-desc"),
         ),
+        Toggle::KeepAwake => (fl!("setting-keep-awake"), fl!("setting-keep-awake-desc")),
         Toggle::SystemShortcuts => (
             fl!("setting-system-shortcuts"),
             fl!("setting-system-shortcuts-desc"),

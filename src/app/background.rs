@@ -117,4 +117,20 @@ impl AppModel {
             .collect();
         Task::future(async move { handle.set_desktops(desktops).await }).discard()
     }
+
+    /// Watches the sessions started with "Keep the screen on in full
+    /// screen" (by window title); none, no watcher.
+    pub(super) fn awake_subscription(&self) -> Subscription<Message> {
+        let mut titles: Vec<String> = self
+            .running
+            .values()
+            .filter(|r| r.keep_awake)
+            .map(|r| r.title.clone())
+            .collect();
+        if titles.is_empty() {
+            return Subscription::none();
+        }
+        titles.sort();
+        Subscription::run_with(titles, crate::awake::watch).map(Message::Awake)
+    }
 }

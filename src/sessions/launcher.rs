@@ -1536,6 +1536,8 @@ sleep 300
                 // `DESKFEED_TEST_CAMERA=1`: with the camera channel
                 // (research/rdp-test-server logs what the client offers).
                 camera: std::env::var("DESKFEED_TEST_CAMERA").is_ok_and(|v| v == "1"),
+                // `DESKFEED_TEST_FULLSCREEN=1`: full screen.
+                fullscreen: std::env::var("DESKFEED_TEST_FULLSCREEN").is_ok_and(|v| v == "1"),
                 // "Automatic", resolved as `app/connect.rs` does.
                 scale: crate::display::resolve_percent(0),
                 ..crate::settings::DEFAULTS

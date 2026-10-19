@@ -524,6 +524,8 @@ impl cosmic::Application for AppModel {
             // Closing from the desktop (window menu, keyboard shortcut,
             // dock); the window's own close button goes to `on_app_exit`.
             cosmic::iced::window::close_requests().map(|_| Message::QuitRequested),
+            // Full-screen sessions that keep the screen on (`awake.rs`).
+            self.awake_subscription(),
             // Started again: show the window (`single.rs`).
             Subscription::run(crate::single::activations).map(Message::StartedAgain),
             if self.config.background {
@@ -605,6 +607,17 @@ impl AppModel {
     pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::Tray(event) => return self.tray_event(event),
+            Message::Awake(event) => match event {
+                crate::awake::AwakeEvent::Held(true) => {
+                    crate::app_log!("screen kept on: a full-screen desktop is in front");
+                }
+                crate::awake::AwakeEvent::Held(false) => {
+                    crate::app_log!("screen may turn off again");
+                }
+                crate::awake::AwakeEvent::Unavailable(why) => {
+                    crate::app_log!("can't keep the screen on: {why}");
+                }
+            },
             Message::StartedAgain(token) => {
                 crate::app_log!("started again: showing the window");
                 return self.tray_event(crate::tray::TrayEvent::Show(token));

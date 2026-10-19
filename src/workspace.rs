@@ -48,6 +48,9 @@ use cosmic::cctk::{
 };
 
 const POLL: Duration = Duration::from_millis(200);
+/// How often "keep the screen on" looks at the windows: a lock or screen
+/// blank comes after minutes, so a second is quick enough.
+const WATCH_POLL: Duration = Duration::from_secs(1);
 /// How long to wait for COSMIC to create a requested workspace.
 const CREATE_WAIT: Duration = Duration::from_secs(3);
 
@@ -330,6 +333,59 @@ fn with_window(
         }
         std::thread::sleep(POLL);
     }
+}
+
+/// Watches whether one of the windows with `app_id` and a title in
+/// `titles` is both focused and full screen. Calls `changed` with each new
+/// answer (first with the current one) and stops once `wanted` says no.
+/// Blocking, with its own Wayland connection; run it on its own thread.
+pub fn watch_fullscreen_focus(
+    app_id: &str,
+    titles: &[String],
+    wanted: impl Fn() -> bool,
+    mut changed: impl FnMut(bool),
+) -> Result<(), MoveError> {
+    use zcosmic_toplevel_handle_v1::State as S;
+    let conn = Connection::connect_to_env().map_err(|e| MoveError::NoWayland(e.to_string()))?;
+    let (globals, mut queue) =
+        registry_queue_init::<State>(&conn).map_err(|e| MoveError::NoWayland(e.to_string()))?;
+    let qh = queue.handle();
+    let registry = RegistryState::new(&globals);
+    let info = ToplevelInfoState::try_new(&registry, &qh)
+        .ok_or(MoveError::Unsupported("toplevel info"))?;
+    let manager = ToplevelManagerState::try_new(&registry, &qh)
+        .ok_or(MoveError::Unsupported("toplevel management"))?;
+    let workspaces = WorkspaceState::new(&registry, &qh);
+    let outputs = OutputState::new(&globals, &qh);
+    let seats = SeatState::new(&globals, &qh);
+    let mut state = State {
+        registry,
+        outputs,
+        info,
+        manager,
+        workspaces,
+        seats,
+        can_move: false,
+        can_activate: false,
+    };
+    let mut last = None;
+    while wanted() {
+        queue
+            .roundtrip(&mut state)
+            .map_err(|e| MoveError::NoWayland(e.to_string()))?;
+        let now = state.info.toplevels().any(|t| {
+            t.app_id == app_id
+                && titles.contains(&t.title)
+                && t.state.contains(&S::Activated)
+                && t.state.contains(&S::Fullscreen)
+        });
+        if last != Some(now) {
+            last = Some(now);
+            changed(now);
+        }
+        std::thread::sleep(WATCH_POLL);
+    }
+    Ok(())
 }
 
 /// The workspace group holding the window's workspace.

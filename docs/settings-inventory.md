@@ -19,6 +19,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Camera | off | A, Ac, C | `settings.rs` | Done |
 | Clipboard: off, both directions, only to the desktop, only to this computer | off | A, Ac, C | `settings.rs` `Choice::Clipboard` | Done |
 | Copy files through the clipboard (in the clipboard's direction) | off | A, Ac, C | `settings.rs` `Toggle::ClipboardFiles` | Done |
+| Keep the screen on in full screen | off | A, Ac, C | `settings.rs` `Toggle::KeepAwake`, `awake.rs` | Done (ADR 0019) |
 | Send shortcuts like Super and Alt+Tab to the desktop | on (`+grab-keyboard`) | A, Ac, C | `settings.rs` `Toggle::SystemShortcuts` | Done (ADR 0018) |
 | FreeRDP's own hotkeys (Ctrl+Alt+Enter, Ctrl+Alt+M, Right Ctrl) | FreeRDP's defaults | A, Ac, C | not passed | Later (spec §5): `-toggle-fullscreen` exists; Right Ctrl and Ctrl+Alt+M have no switch in 3.32.2 |
 | Reconnect after a lost connection | on | A, Ac, C | `settings.rs` `Toggle::Reconnect` | Done |
@@ -58,6 +59,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | FreeRDP stop grace 5 s; 60 kept log lines; 4 096-char output lines | `sessions/launcher.rs` | Internal process handling |
 | Dependency check: 5 s per command, 256 KiB output | `deps.rs` | Internal |
 | Tray menu: at most 20 desktops listed | `tray.rs` `MAX_DESKTOPS` | Each is a menu line; the window lists all |
+| Keep-screen-on check every 1 s | `workspace.rs` `WATCH_POLL` | Internal timing; a blank or lock comes after minutes |
 | Workspace move: poll 200 ms, wait 3 s for a new workspace | `workspace.rs` | Internal timing |
 | Refresh check every 5 min (and after resume) | `app/mod.rs` `REFRESH_CHECK` | Internal; the refresh interval is a setting |
 | Log line 2 000 chars; redaction lists | `log.rs` | Internal; privacy |

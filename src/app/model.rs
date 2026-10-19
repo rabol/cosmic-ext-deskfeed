@@ -128,6 +128,8 @@ pub(super) struct Running {
     /// Started with "Send shortcuts … to the desktop": its row says how
     /// to get them back.
     pub(super) grabs_shortcuts: bool,
+    /// Started with "Keep the screen on in full screen".
+    pub(super) keep_awake: bool,
 }
 
 /// A FreeRDP start in progress.
@@ -142,6 +144,7 @@ pub(super) struct Launching {
     /// Its window's title, as FreeRDP got it (`launcher::safe_title`).
     pub(super) title: String,
     pub(super) grabs_shortcuts: bool,
+    pub(super) keep_awake: bool,
 }
 
 /// Quitting the app.
@@ -322,6 +325,8 @@ pub enum Message {
     CacheLoaded(String, u64, Option<crate::cache::Cached>),
     /// From the tray (background operation).
     Tray(crate::tray::TrayEvent),
+    /// Keep the screen on: for the log (`awake.rs`).
+    Awake(crate::awake::AwakeEvent),
     /// Deskfeed was started again, with the launcher's activation token.
     StartedAgain(Option<String>),
     /// App settings → Background.

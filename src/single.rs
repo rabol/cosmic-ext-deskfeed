@@ -141,6 +141,14 @@ async fn hand_over(conn: &zbus::Connection, app_id: &str) -> bool {
     ok
 }
 
+/// The app's own session-bus connection and the runtime it runs on, for
+/// other blocking callers (`awake.rs`). `None` without a session bus.
+pub fn bus() -> Option<(tokio::runtime::Handle, zbus::Connection)> {
+    CONNECTION
+        .get()
+        .map(|(rt, conn)| (rt.handle().clone(), conn.clone()))
+}
+
 /// Activations from later starts, for a subscription (once).
 pub fn activations() -> impl cosmic::iced::futures::Stream<Item = Option<String>> {
     use cosmic::iced::futures::StreamExt;

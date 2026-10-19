@@ -3,6 +3,7 @@
 mod accounts;
 mod app;
 mod auth;
+mod awake;
 mod bounded_lines;
 mod cache;
 mod config;

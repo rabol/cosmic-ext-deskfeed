@@ -551,6 +551,7 @@ impl AppModel {
                 stop: false,
                 title: title.clone(),
                 grabs_shortcuts: settings.system_shortcuts,
+                keep_awake: settings.keep_awake,
             },
         );
         // Starting FreeRDP writes files and hands over the arguments: not on
@@ -694,6 +695,7 @@ impl AppModel {
             account: owner,
             stop,
             grabs_shortcuts,
+            keep_awake,
             ..
         } = self.launching.remove(&key).expect("checked above");
         let current = self.account(account).is_some_and(|a| a.epoch == epoch);
@@ -727,6 +729,7 @@ impl AppModel {
                         session,
                         title,
                         grabs_shortcuts,
+                        keep_awake,
                     },
                 );
                 if wanted {

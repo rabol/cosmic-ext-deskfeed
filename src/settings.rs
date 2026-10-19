@@ -42,6 +42,10 @@ pub struct ConnectionSettings {
     /// Super, Alt+Tab and the like go to the desktop (ADR 0018).
     #[serde(default)]
     pub system_shortcuts: Option<bool>,
+    /// No screen blanking, lock or suspend while a full-screen session
+    /// has focus (ADR 0019).
+    #[serde(default)]
+    pub keep_awake: Option<bool>,
     /// App and account levels only.
     #[serde(default)]
     pub refresh_mins: Option<u32>,
@@ -113,12 +117,14 @@ pub enum Toggle {
     ClipboardFiles,
     /// Super, Alt+Tab and the like go to the desktop (ADR 0018).
     SystemShortcuts,
+    /// Keep the screen on while a full-screen session has focus.
+    KeepAwake,
     Reconnect,
 }
 
 impl Toggle {
     #[cfg(test)]
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Fullscreen,
         Self::AllMonitors,
         Self::NewWorkspace,
@@ -127,6 +133,7 @@ impl Toggle {
         Self::Camera,
         Self::ClipboardFiles,
         Self::SystemShortcuts,
+        Self::KeepAwake,
         Self::Reconnect,
     ];
 }
@@ -189,6 +196,7 @@ impl ConnectionSettings {
             Toggle::Camera => self.camera,
             Toggle::ClipboardFiles => self.clipboard_files,
             Toggle::SystemShortcuts => self.system_shortcuts,
+            Toggle::KeepAwake => self.keep_awake,
             Toggle::Reconnect => self.reconnect,
         }
     }
@@ -203,6 +211,7 @@ impl ConnectionSettings {
             Toggle::Camera => &mut self.camera,
             Toggle::ClipboardFiles => &mut self.clipboard_files,
             Toggle::SystemShortcuts => &mut self.system_shortcuts,
+            Toggle::KeepAwake => &mut self.keep_awake,
             Toggle::Reconnect => &mut self.reconnect,
         };
         *slot = value;
@@ -274,6 +283,7 @@ pub struct Effective {
     pub clipboard: u32,
     pub clipboard_files: bool,
     pub system_shortcuts: bool,
+    pub keep_awake: bool,
     pub refresh_mins: u32,
     pub sign_in_mins: u32,
     pub offline_days: u32,
@@ -301,6 +311,8 @@ pub const DEFAULTS: Effective = Effective {
     // FreeRDP's own default: the desktop gets the keyboard while the
     // pointer is over its focused window.
     system_shortcuts: true,
+    // Spec §9: only when the user turns it on.
+    keep_awake: false,
     refresh_mins: 60,
     sign_in_mins: 5,
     offline_days: 30,
@@ -328,6 +340,7 @@ impl Effective {
                 .unwrap_or(self.clipboard),
             clipboard_files: s.clipboard_files.unwrap_or(self.clipboard_files),
             system_shortcuts: s.system_shortcuts.unwrap_or(self.system_shortcuts),
+            keep_awake: s.keep_awake.unwrap_or(self.keep_awake),
             refresh_mins: number(Number::Refresh, self.refresh_mins),
             sign_in_mins: number(Number::SignIn, self.sign_in_mins),
             offline_days: number(Number::OfflineDays, self.offline_days),
@@ -367,6 +380,7 @@ impl Effective {
             Toggle::Camera => self.camera,
             Toggle::ClipboardFiles => self.clipboard_files,
             Toggle::SystemShortcuts => self.system_shortcuts,
+            Toggle::KeepAwake => self.keep_awake,
             Toggle::Reconnect => self.reconnect,
         }
     }
