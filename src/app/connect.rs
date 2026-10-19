@@ -78,11 +78,17 @@ impl AppModel {
             Message::SavedPasswordLoaded(account, epoch, key, logon, connection, result) => {
                 return self.saved_password_loaded(&account, epoch, key, logon, connection, result);
             }
-            Message::PasswordSaved(key, result) => match result {
-                Ok(()) => {
+            Message::PasswordSaved(key, id, ticket, result) => match result {
+                // Only while nothing changed since: a sign-out or Forget
+                // meanwhile wins (review F01).
+                Ok(true)
+                    if self.account(&id).is_some()
+                        && crate::accounts::password_ticket(&id, &key) == ticket =>
+                {
                     crate::app_log!("Windows password remembered for a desktop");
                     self.set_saved_password(&key, true);
                 }
+                Ok(_) => {}
                 Err(e) => {
                     crate::app_log!("Windows password not remembered ({e})");
                     self.session_notes
@@ -229,11 +235,13 @@ impl AppModel {
             .insert(key.to_owned(), Connection::Preparing);
         let http = self.http.clone();
         let key = key.to_owned();
+        // Read now: a sign-out before this runs stops it (review F01).
+        let started = accounts::sign_out_count(&id);
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
                 // The access token also goes to FreeRDP, so it must stay
                 // valid through the connection.
-                let signed_in = accounts::renew_if_needed(&http, signed_in)?;
+                let signed_in = accounts::renew_if_needed(&http, signed_in, started)?;
                 let get = |s: &SignedIn| {
                     http.get(&url, Role::ConnectionFile, Some(&s.tokens.access_token))
                 };
@@ -241,7 +249,7 @@ impl AppModel {
                     // Refused although it looked valid: renew once and retry.
                     Err(HttpError::Status { status: 401, .. }) => {
                         crate::app_log!("connection file: access token refused; renewing");
-                        let renewed = accounts::renew_now(&http, signed_in)?;
+                        let renewed = accounts::renew_now(&http, signed_in, started)?;
                         (get(&renewed).map_err(refused_or_shown_http)?, renewed)
                     }
                     other => (
@@ -433,13 +441,18 @@ impl AppModel {
     /// background.
     fn forget_password(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
         self.set_saved_password(key, false);
-        let Some(identity) = self.account_of_resource(key).map(|a| a.identity.clone()) else {
+        let Some((identity, id)) = self
+            .account_of_resource(key)
+            .map(|a| (a.identity.clone(), a.id.clone()))
+        else {
             return Task::none();
         };
+        // At once: a save already on its way writes nothing (review F01).
+        let forget = crate::accounts::note_forget(&id, key);
         let key = key.to_owned();
         Task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
-                crate::secrets::delete_passwords(&identity, Some(&key))
+                crate::accounts::forget_password(&identity, &key, forget)
             })
             .await;
             crate::app_log!(
@@ -913,20 +926,25 @@ impl AppModel {
                     && let Some(account) = self.account_of_resource(key)
                 {
                     let identity = account.identity.clone();
+                    let id = account.id.clone();
                     let title = account
                         .resource(key)
                         .map(|r| r.title.clone())
                         .unwrap_or_default();
                     let key = key.to_owned();
+                    // Read now: a sign-out or Forget before the save runs
+                    // stops it (review F01).
+                    let ticket = crate::accounts::password_ticket(&id, &key);
                     save_task = cosmic::task::future(async move {
                         let owner = key.clone();
                         let result = tokio::task::spawn_blocking(move || {
-                            crate::secrets::save_password(&identity, &owner, &title, &password)
-                                .map_err(|e| crate::accounts::keyring_detail(&e))
+                            crate::accounts::save_password(
+                                &identity, &owner, &title, &password, ticket,
+                            )
                         })
                         .await
                         .unwrap_or_else(|_| Err("task".into()));
-                        Message::PasswordSaved(key, result)
+                        Message::PasswordSaved(key, id, ticket, result)
                     });
                 }
                 self.connections

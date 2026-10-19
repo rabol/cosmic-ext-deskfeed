@@ -335,7 +335,14 @@ pub enum Message {
         Result<Option<Secret>, String>,
     ),
     /// Resource key; whether its password was remembered.
-    PasswordSaved(String, Result<(), String>),
+    /// A remembered password's save: resource key, account ID, the ticket
+    /// it was scheduled under, and whether it was stored.
+    PasswordSaved(
+        String,
+        String,
+        crate::accounts::PasswordTicket,
+        Result<bool, String>,
+    ),
     /// Resource key: forget its remembered password.
     ForgetPassword(String),
     /// Trust the certificate in the certificate dialog and connect.

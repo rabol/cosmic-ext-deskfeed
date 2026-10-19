@@ -226,8 +226,13 @@ impl AppModel {
             return Task::none();
         };
         let (id, list) = (id.to_owned(), to_cached(list));
+        // Read now: a sign-out before the save runs stops it (review F05).
+        let started = accounts::sign_out_count(&id);
         Task::future(async move {
-            let result = tokio::task::spawn_blocking(move || store.save(&id, &list)).await;
+            let result = tokio::task::spawn_blocking(move || {
+                accounts::save_cache(&store, &id, &list, started)
+            })
+            .await;
             if let Ok(Err(e)) = result {
                 crate::app_log!("offline desktop list not saved: {e}");
             }
@@ -250,10 +255,13 @@ impl AppModel {
         account.can_retry = false;
         let http = self.http.clone();
         let id = id.to_owned();
+        // Read now: a sign-out before the restore runs stops it (review F01).
+        let started = accounts::sign_out_count(&id);
         cosmic::task::future(async move {
-            let outcome = tokio::task::spawn_blocking(move || accounts::restore(&http, &stored))
-                .await
-                .unwrap_or_else(|_| Restore::Retry(fl!("error-generic")));
+            let outcome =
+                tokio::task::spawn_blocking(move || accounts::restore(&http, &stored, started))
+                    .await
+                    .unwrap_or_else(|_| Restore::Retry(fl!("error-generic")));
             Message::Restored(id, generation, outcome)
         })
     }
@@ -539,16 +547,18 @@ impl AppModel {
         let epoch = account.epoch;
         let http = self.http.clone();
         let id = id.to_owned();
+        // Read now: a sign-out before this runs stops it (review F01).
+        let started = accounts::sign_out_count(&id);
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
                 // An expired access token would only get "session expired".
-                let signed_in = accounts::renew_if_needed(&http, signed_in)?;
+                let signed_in = accounts::renew_if_needed(&http, signed_in, started)?;
                 let (feeds, signed_in) =
                     match discovery::discover(&http, &signed_in.tokens.access_token) {
                         // Refused although it looked valid: renew once and retry.
                         Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
                             crate::app_log!("desktop list: access token refused; renewing");
-                            let renewed = accounts::renew_now(&http, signed_in)?;
+                            let renewed = accounts::renew_now(&http, signed_in, started)?;
                             let feeds = discovery::discover(&http, &renewed.tokens.access_token)
                                 .map_err(refused_or_shown)?;
                             (feeds, renewed)
@@ -908,17 +918,11 @@ fn keyring_cleanup(
 ) -> Task<cosmic::Action<Message>> {
     cosmic::task::future(async move {
         let kept = identity.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let passwords = crate::secrets::delete_passwords(&identity, None);
-            crate::app_log!(
-                "remembered passwords deleted (sign-out): {:?}",
-                passwords.is_ok()
-            );
-            let signed_out = accounts::delete(&identity);
-            signed_out.and(passwords.map_err(|_| fl!("error-sign-out-incomplete")))
-        })
-        .await
-        .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
+        // The saved sign-in and the remembered passwords, under the
+        // account's lock like their saves (review F01).
+        let result = tokio::task::spawn_blocking(move || accounts::delete(&identity))
+            .await
+            .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
         Message::SignOutFinished(id, Box::new(kept), result)
     })
 }

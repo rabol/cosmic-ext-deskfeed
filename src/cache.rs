@@ -74,6 +74,12 @@ impl Store {
         })
     }
 
+    /// Tests: a store in `root`.
+    #[cfg(test)]
+    pub fn at(root: PathBuf) -> Self {
+        Self { root }
+    }
+
     /// The account's folder; `None` for anything but an opaque hex ID.
     fn dir(&self, account: &str) -> Option<PathBuf> {
         let valid = !account.is_empty()

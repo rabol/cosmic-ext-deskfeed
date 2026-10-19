@@ -150,6 +150,9 @@ pub fn adopt_legacy_profile(id: &str) {
 /// Removes an account's cookies, RAM cookie folder and offline desktop
 /// list (sign-out, spec §6: credentials and account caches).
 pub fn remove_files(id: &str) -> Result<(), ()> {
+    // Under the account's lock, like the cache's saves (`save_cache`).
+    let lock = account_lock(id);
+    let _account = lock.lock();
     let mut ok = crate::cache::Store::user().is_none_or(|s| s.remove(id).is_ok());
     for dir in [profile_dir(id), jars_root().map(|j| j.join(id))]
         .into_iter()
@@ -264,6 +267,20 @@ trait Store {
         refresh_token: &Secret,
     ) -> Result<(), SecretsError>;
     fn delete(&self, config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError>;
+    /// A remembered Windows password for `desktop`.
+    fn save_password(
+        &self,
+        identity: &Identity,
+        desktop: &str,
+        title: &str,
+        password: &Secret,
+    ) -> Result<(), SecretsError>;
+    /// The account's remembered passwords, or one desktop's.
+    fn delete_passwords(
+        &self,
+        identity: &Identity,
+        desktop: Option<&str>,
+    ) -> Result<(), SecretsError>;
 }
 
 /// The desktop keyring (Secret Service).
@@ -286,6 +303,24 @@ impl Store for Keyring {
     fn delete(&self, config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
         let _keyring = KEYRING.lock();
         secrets::delete(config, identity)
+    }
+    fn save_password(
+        &self,
+        identity: &Identity,
+        desktop: &str,
+        title: &str,
+        password: &Secret,
+    ) -> Result<(), SecretsError> {
+        let _keyring = KEYRING.lock();
+        secrets::save_password(identity, desktop, title, password)
+    }
+    fn delete_passwords(
+        &self,
+        identity: &Identity,
+        desktop: Option<&str>,
+    ) -> Result<(), SecretsError> {
+        let _keyring = KEYRING.lock();
+        secrets::delete_passwords(identity, desktop)
     }
 }
 
@@ -343,7 +378,142 @@ fn delete_in(env: &Env, identity: &Identity) -> Result<(), String> {
     let _account = lock.lock();
     let deleted = env.store.delete(&env.config, identity);
     crate::app_log!("saved sign-in: deleted (sign-out): {deleted:?}");
-    deleted.map_err(|_| fl!("error-sign-out-incomplete"))
+    // Under the same lock as their saves (`save_password`, review F01).
+    let passwords = env.store.delete_passwords(identity, None);
+    crate::app_log!(
+        "remembered passwords deleted (sign-out): {:?}",
+        passwords.is_ok()
+    );
+    deleted
+        .and(passwords)
+        .map_err(|_| fl!("error-sign-out-incomplete"))
+}
+
+/// Saves the account's offline list, unless it was signed out since
+/// `started` ([`sign_out_count`] when the save was scheduled). Under the
+/// account's lock, like [`remove_files`], so a save queued before a
+/// sign-out can't bring the list back after it (review F05).
+pub fn save_cache(
+    store: &crate::cache::Store,
+    id: &str,
+    list: &[crate::cache::CachedWorkspace],
+    started: u64,
+) -> Result<(), String> {
+    let lock = account_lock(id);
+    let _account = lock.lock();
+    if sign_out_count(id) != started {
+        crate::app_log!("offline desktop list: not saved (signed out meanwhile)");
+        return Ok(());
+    }
+    store.save(id, list)
+}
+
+/// "Forget" per account and desktop, like [`SIGN_OUTS`]: a password save
+/// scheduled before a Forget writes nothing after it.
+static FORGETS: LazyLock<Mutex<HashMap<(String, String), u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// What a remembered-password save was scheduled under: the account's
+/// sign-outs and the desktop's forgets at that moment (review F01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PasswordTicket {
+    sign_outs: u64,
+    forgets: u64,
+}
+
+pub fn password_ticket(id: &str, desktop: &str) -> PasswordTicket {
+    PasswordTicket {
+        sign_outs: sign_out_count(id),
+        forgets: FORGETS.lock().map_or(0, |m| {
+            m.get(&(id.to_owned(), desktop.to_owned()))
+                .copied()
+                .unwrap_or(0)
+        }),
+    }
+}
+
+/// Per account and desktop: the forget count the last stored password was
+/// scheduled under. A Forget whose deletion runs after a newer save (one
+/// scheduled after that Forget) must leave the newer password alone.
+static SAVED_AFTER: LazyLock<Mutex<HashMap<(String, String), u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// The user forgot this desktop's password: saves scheduled earlier write
+/// nothing. Call at once, before deleting; give the result to
+/// [`forget_password`].
+pub fn note_forget(id: &str, desktop: &str) -> u64 {
+    FORGETS.lock().map_or(0, |mut m| {
+        let n = m.entry((id.to_owned(), desktop.to_owned())).or_insert(0);
+        *n += 1;
+        *n
+    })
+}
+
+/// Remembers a Windows password, unless the account signed out or the
+/// password was forgotten since `ticket`. `Ok(false)`: not saved for that
+/// reason. Under the account's lock, like the deletions.
+pub fn save_password(
+    identity: &Identity,
+    desktop: &str,
+    title: &str,
+    password: &Secret,
+    ticket: PasswordTicket,
+) -> Result<bool, String> {
+    save_password_in(&system(), identity, desktop, title, password, ticket)
+}
+
+fn save_password_in(
+    env: &Env,
+    identity: &Identity,
+    desktop: &str,
+    title: &str,
+    password: &Secret,
+    ticket: PasswordTicket,
+) -> Result<bool, String> {
+    let id = account_id(identity);
+    let lock = account_lock(&id);
+    let _account = lock.lock();
+    if password_ticket(&id, desktop) != ticket {
+        crate::app_log!("remembered password: not stored (signed out or forgotten meanwhile)");
+        return Ok(false);
+    }
+    env.store
+        .save_password(identity, desktop, title, password)
+        .map_err(|e| keyring_detail(&e))?;
+    if let Ok(mut m) = SAVED_AFTER.lock() {
+        m.insert((id, desktop.to_owned()), ticket.forgets);
+    }
+    Ok(true)
+}
+
+/// Deletes one desktop's remembered password. `forget`: what
+/// [`note_forget`] returned for this Forget.
+pub fn forget_password(identity: &Identity, desktop: &str, forget: u64) -> Result<(), String> {
+    forget_password_in(&system(), identity, desktop, forget)
+}
+
+fn forget_password_in(
+    env: &Env,
+    identity: &Identity,
+    desktop: &str,
+    forget: u64,
+) -> Result<(), String> {
+    let id = account_id(identity);
+    let lock = account_lock(&id);
+    let _account = lock.lock();
+    // A password saved after this Forget was asked for is the user's
+    // newer choice: keep it.
+    let newer = SAVED_AFTER
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&(id, desktop.to_owned())).copied())
+        .is_some_and(|saved| saved >= forget);
+    if newer {
+        return Ok(());
+    }
+    env.store
+        .delete_passwords(identity, Some(desktop))
+        .map_err(|e| keyring_detail(&e))
 }
 
 pub fn keyring_detail(e: &SecretsError) -> String {
@@ -400,17 +570,33 @@ pub enum Restore {
     Retry(String),
 }
 
-/// Signs in with a saved refresh token.
-pub fn restore(http: &Http, stored: &Stored) -> Restore {
-    restore_in(http, &system(), stored)
+/// Signs in with a saved refresh token. `started`: [`sign_out_count`] when
+/// this was scheduled, so a restore queued before a sign-out does nothing
+/// after it (review F01).
+pub fn restore(http: &Http, stored: &Stored, started: u64) -> Restore {
+    restore_at(http, &system(), stored, started)
 }
 
+/// Tests: `restore_at` scheduled now.
+#[cfg(test)]
 fn restore_in(http: &Http, env: &Env, stored: &Stored) -> Restore {
+    restore_at(
+        http,
+        env,
+        stored,
+        sign_out_count(&account_id(&stored.identity)),
+    )
+}
+
+fn restore_at(http: &Http, env: &Env, stored: &Stored, started: u64) -> Restore {
     let config = &env.config;
     let id = account_id(&stored.identity);
-    let started = sign_out_count(&id);
     let lock = account_lock(&id);
     let _account = lock.lock();
+    // Signed out since this was scheduled: no network, no saving.
+    if sign_out_count(&id) != started {
+        return Restore::SignInAgain(fl!("error-session-expired"));
+    }
     let renewed = token::refresh(http, config, &stored.refresh_token);
     if let Err(e) = &renewed {
         crate::app_log!("saved sign-in: renewal failed ({})", token_error_kind(e));
@@ -500,28 +686,53 @@ pub enum RenewError {
 
 /// Renews the tokens when the access token expires within the margin, and
 /// saves a rotated refresh token.
-pub fn renew_if_needed(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, RenewError> {
-    renew_in(http, &system(), account, false)
+pub fn renew_if_needed(
+    http: &Http,
+    account: Arc<SignedIn>,
+    started: u64,
+) -> Result<Arc<SignedIn>, RenewError> {
+    renew_at(http, &system(), account, false, started)
 }
 
 /// Renews the tokens now: the service refused an access token that looked
 /// valid (revoked, or the clocks disagree).
-pub fn renew_now(http: &Http, account: Arc<SignedIn>) -> Result<Arc<SignedIn>, RenewError> {
-    renew_in(http, &system(), account, true)
+pub fn renew_now(
+    http: &Http,
+    account: Arc<SignedIn>,
+    started: u64,
+) -> Result<Arc<SignedIn>, RenewError> {
+    renew_at(http, &system(), account, true, started)
 }
 
+/// Tests: `renew_at` scheduled now.
+#[cfg(test)]
 fn renew_in(
     http: &Http,
     env: &Env,
     account: Arc<SignedIn>,
     force: bool,
 ) -> Result<Arc<SignedIn>, RenewError> {
+    let started = sign_out_count(&account_id(&account.identity));
+    renew_at(http, env, account, force, started)
+}
+
+/// `started`: [`sign_out_count`] when the work was scheduled (review F01).
+fn renew_at(
+    http: &Http,
+    env: &Env,
+    account: Arc<SignedIn>,
+    force: bool,
+    started: u64,
+) -> Result<Arc<SignedIn>, RenewError> {
     if !force && !account.tokens.needs_refresh(Instant::now()) {
         return Ok(account);
     }
-    let started = sign_out_count(&account_id(&account.identity));
     let lock = account_lock(&account_id(&account.identity));
     let _account = lock.lock();
+    // Signed out since this was scheduled: no network, no saving.
+    if sign_out_count(&account_id(&account.identity)) != started {
+        return Err(RenewError::SignInAgain(fl!("error-session-expired")));
+    }
     // Another renewal may have finished while this one waited for the
     // lock: use its result, or at least its (rotated) refresh token.
     let refused = account.tokens.access_token.expose().to_owned();
@@ -589,6 +800,8 @@ mod tests {
     #[derive(Default)]
     struct FakeStore {
         saved: Mutex<Vec<(Identity, String)>>,
+        /// Remembered passwords: account and desktop.
+        passwords: Mutex<Vec<(Identity, String)>>,
         fail: bool,
     }
 
@@ -649,6 +862,30 @@ mod tests {
                 return Err(Self::err());
             }
             self.saved.lock().unwrap().retain(|(i, _)| i != identity);
+            Ok(())
+        }
+        fn save_password(
+            &self,
+            identity: &Identity,
+            desktop: &str,
+            _: &str,
+            _: &Secret,
+        ) -> Result<(), SecretsError> {
+            self.passwords
+                .lock()
+                .unwrap()
+                .push((identity.clone(), desktop.to_owned()));
+            Ok(())
+        }
+        fn delete_passwords(
+            &self,
+            identity: &Identity,
+            desktop: Option<&str>,
+        ) -> Result<(), SecretsError> {
+            self.passwords
+                .lock()
+                .unwrap()
+                .retain(|(i, d)| i != identity || desktop.is_some_and(|k| k != d));
             Ok(())
         }
     }
@@ -777,6 +1014,153 @@ mod tests {
         let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
         assert!(matches!(outcome, Restore::SignInAgain(_)), "{outcome:?}");
         assert_eq!(store.tokens(), ["rt-old"]);
+    }
+
+    #[test]
+    fn a_restore_queued_before_sign_out_does_nothing_after_it() {
+        let me = identity("00000000-0000-0000-0000-0000000000f1");
+        let store = FakeStore::with(&me, "rt-old");
+        // Scheduled, then the sign-out completes before it runs.
+        let started = sign_out_count(&account_id(&me));
+        delete_in(&env(1, &store), &me).unwrap();
+        assert_eq!(store.tokens(), Vec::<String>::new());
+        // Port 1: any network attempt would end as Retry, not SignInAgain.
+        let outcome = restore_at(&http(1), &env(1, &store), &stored(&me, "rt-old"), started);
+        assert!(matches!(outcome, Restore::SignInAgain(_)), "{outcome:?}");
+        assert_eq!(
+            store.tokens(),
+            Vec::<String>::new(),
+            "the sign-in came back"
+        );
+    }
+
+    #[test]
+    fn a_renewal_queued_before_sign_out_saves_nothing_after_it() {
+        let me = identity("00000000-0000-0000-0000-0000000000f2");
+        let store = FakeStore::with(&me, "rt-old");
+        let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
+        let started = sign_out_count(&account_id(&me));
+        delete_in(&env(1, &store), &me).unwrap();
+        // A server that would hand out a rotated token, if asked.
+        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        for force in [false, true] {
+            let result = renew_at(
+                &http(port),
+                &env(port, &store),
+                account.clone(),
+                force,
+                started,
+            );
+            assert!(
+                matches!(result, Err(RenewError::SignInAgain(_))),
+                "{result:?}"
+            );
+        }
+        assert_eq!(
+            store.tokens(),
+            Vec::<String>::new(),
+            "a rotated token was saved"
+        );
+        assert!(newest(&account).is_none(), "its tokens are still known");
+    }
+
+    #[test]
+    fn a_password_save_queued_before_sign_out_or_forget_writes_nothing() {
+        let me = identity("00000000-0000-0000-0000-0000000000f3");
+        let id = account_id(&me);
+        let pw = Secret::new("hunter2".into());
+        let store = FakeStore::default();
+        let e = env(1, &store);
+        // Normal: saved.
+        let ticket = password_ticket(&id, "desk-1");
+        assert_eq!(
+            save_password_in(&e, &me, "desk-1", "D", &pw, ticket),
+            Ok(true)
+        );
+        // Saved first, deleted by the sign-out after it: gone.
+        delete_in(&e, &me).unwrap();
+        assert_eq!(*store.passwords.lock().unwrap(), []);
+        // Scheduled before the sign-out, run after it: nothing written.
+        let other = identity("00000000-0000-0000-0000-0000000000f4");
+        let other_id = account_id(&other);
+        let ticket = password_ticket(&other_id, "desk-1");
+        delete_in(&e, &other).unwrap();
+        assert_eq!(
+            save_password_in(&e, &other, "desk-1", "D", &pw, ticket),
+            Ok(false)
+        );
+        assert_eq!(*store.passwords.lock().unwrap(), []);
+        // Scheduled before Forget, run after it: nothing written, and
+        // another desktop's password is untouched.
+        let third = identity("00000000-0000-0000-0000-0000000000f5");
+        let third_id = account_id(&third);
+        let keep = password_ticket(&third_id, "desk-2");
+        assert_eq!(
+            save_password_in(&e, &third, "desk-2", "D", &pw, keep),
+            Ok(true)
+        );
+        let ticket = password_ticket(&third_id, "desk-1");
+        let forget = note_forget(&third_id, "desk-1");
+        forget_password_in(&e, &third, "desk-1", forget).unwrap();
+        assert_eq!(
+            save_password_in(&e, &third, "desk-1", "D", &pw, ticket),
+            Ok(false)
+        );
+        assert_eq!(
+            *store.passwords.lock().unwrap(),
+            [(third, "desk-2".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_late_forget_keeps_a_password_saved_after_it() {
+        let me = identity("00000000-0000-0000-0000-0000000000f7");
+        let id = account_id(&me);
+        let pw = Secret::new("hunter2".into());
+        let store = FakeStore::default();
+        let e = env(1, &store);
+        // Forget asked for (its deletion is held up), then the desktop is
+        // connected again with "remember", and that save runs first.
+        let forget = note_forget(&id, "desk");
+        let ticket = password_ticket(&id, "desk");
+        assert_eq!(
+            save_password_in(&e, &me, "desk", "D", &pw, ticket),
+            Ok(true)
+        );
+        forget_password_in(&e, &me, "desk", forget).unwrap();
+        assert_eq!(
+            *store.passwords.lock().unwrap(),
+            [(me.clone(), "desk".to_owned())]
+        );
+        // A Forget asked for after that save does delete it.
+        let forget = note_forget(&id, "desk");
+        forget_password_in(&e, &me, "desk", forget).unwrap();
+        assert_eq!(*store.passwords.lock().unwrap(), []);
+    }
+
+    #[test]
+    fn a_cache_save_queued_before_sign_out_writes_nothing() {
+        let id = account_id(&identity("00000000-0000-0000-0000-0000000000f6"));
+        let root = std::env::temp_dir().join(format!("deskfeed-cache-race-{}", std::process::id()));
+        let store = crate::cache::Store::at(root.clone());
+        let list = vec![crate::cache::CachedWorkspace {
+            name: "Workspace".into(),
+            resources: Vec::new(),
+        }];
+        // Normal: saved.
+        save_cache(&store, &id, &list, sign_out_count(&id)).unwrap();
+        assert!(store.load(&id, Duration::from_hours(1)).is_some());
+        // Scheduled, then the sign-out (its counter and the removal), then
+        // the save runs: nothing comes back.
+        let started = sign_out_count(&id);
+        note_sign_out(&id);
+        store.remove(&id).unwrap();
+        save_cache(&store, &id, &list, started).unwrap();
+        assert!(
+            store.load(&id, Duration::from_hours(1)).is_none(),
+            "the offline list came back"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
