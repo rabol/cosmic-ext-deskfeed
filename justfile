@@ -66,6 +66,13 @@ test *args:
     cargo test --locked --workspace {{args}}
 
 # Run the application for testing purposes
+# Coverage-guided fuzzing of a parser (feed, rdpfile) for some seconds
+# (ADR 0023 addendum). Developer-only: needs rustup's nightly toolchain and
+# cargo-fuzz (CONTRIBUTING.md). New inputs go to fuzz/target/corpus-<target>.
+fuzz target="feed" seconds="300":
+    mkdir -p fuzz/target/corpus-{{target}}
+    cargo +nightly fuzz run {{target}} fuzz/target/corpus-{{target}} fuzz/corpus/{{target}} -- -max_total_time={{seconds}} -rss_limit_mb=2048
+
 run *args:
     env RUST_BACKTRACE=full cargo run --release --locked {{args}}
 

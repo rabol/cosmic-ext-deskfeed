@@ -16,3 +16,9 @@ debian/*
 *.rdp
 *.log
 research/out/
+# The fuzzer's synthetic samples are fine (fuzz/corpus); its output isn't
+!fuzz/corpus/**/*.rdp
+fuzz/target/
+fuzz/artifacts/
+fuzz/coverage/
+fuzz/Cargo.lock

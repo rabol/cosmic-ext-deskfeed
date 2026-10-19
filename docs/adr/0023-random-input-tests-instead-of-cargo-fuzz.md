@@ -1,6 +1,6 @@
 # 0023. Random-input tests on stable Rust instead of cargo-fuzz
 
-- Status: Accepted (changes spec §13 item 10)
+- Status: Accepted (changes spec §13 item 10; cargo-fuzz added as an optional extra, see the addendum)
 - Date: 2026-10-19
 
 ## Context
@@ -25,3 +25,13 @@ Spec §13 item 10 asked to fuzz the feed XML, connection-file and callback parse
 - Weaker than coverage-guided fuzzing: the inputs don't steer toward code not yet reached. The parsers are small and bounded, and the samples start from real formats, which covers most of what matters.
 - First deep run: 200 000 rounds per parser, plus 100 000 with two other seeds, 1.4 million inputs in all. No panic and nothing slow. The only failure was a rule written too strictly: the feed parser also accepts `http` addresses, which the HTTP policy refuses later. That rule was corrected.
 - Not covered: the sign-in helper's own parsing (`signin/`, a separate crate), which reads FreeRDP's requests and the web view's navigations. That would need a copy of the engine there.
+
+## Addendum (2026-10-19): cargo-fuzz as an optional extra
+
+Once it was clear that nightly is needed only on the machine that runs the fuzzer, and never for the app, the owner asked to try cargo-fuzz too. It is kept as an optional developer check next to the required random-input tests; the spec still requires only the stable tests.
+
+- `fuzz/` is its own package and workspace (`libfuzzer-sys` plus the parsers' own crates), so the app's build, dependencies and `Cargo.lock` don't see it. It compiles the app's real `feed.rs`, `endpoint.rs` and `rdpfile.rs` (`#[path]`), so it tests what ships. Targets: `feed` (discovery and workspace feeds; only web addresses come out) and `rdpfile` (an accepted file gives FreeRDP printable `key:type:value` lines only). Starting samples are in `fuzz/corpus/`.
+- `just fuzz <target> <seconds>` runs one target. Setup in CONTRIBUTING.md.
+- First run, 5 minutes per target (nightly 2026-10-18, cargo-fuzz 0.13.2): `feed` 3.7 million inputs, 3 442 code edges found and still rising slowly; `rdpfile` 9.5 million inputs, 683 edges, flat after the first minute. No crash and no failed check.
+- Other parsers (the sign-in callback, tokens, FreeRDP's output) depend on more of the app and stay with the random-input tests.
+

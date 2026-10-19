@@ -1,0 +1,36 @@
+# Coverage-guided fuzzing of Deskfeed's parsers with cargo-fuzz (ADR 0023
+# addendum). Developer-only: needs a nightly compiler and cargo-fuzz; never
+# part of the app or its package. Its own workspace, so the app's build and
+# Cargo.lock don't see it.
+
+[package]
+name = "cosmic-ext-deskfeed-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# The parsers' own dependencies, as in the app's Cargo.toml.
+roxmltree = "0.20"
+url = "2.5"
+
+[[bin]]
+name = "feed"
+path = "fuzz_targets/feed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "rdpfile"
+path = "fuzz_targets/rdpfile.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]

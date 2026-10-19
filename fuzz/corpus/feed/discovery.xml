@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Discovery xmlns="http://schemas.microsoft.com/ts/2014/03/tswfdiscovery"><TenantFeedURLs>
+<TenantFeedURL FeedURL="https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery/tenants/t1/webfeed?x=1" TenantId="t1" WorkspaceName="Main" TenantDisplayName="Example Ltd" ConsentStatus="Accepted"/>
+</TenantFeedURLs></Discovery>

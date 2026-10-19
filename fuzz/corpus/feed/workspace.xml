@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ResourceCollection xmlns="http://schemas.microsoft.com/ts/2007/05/tswf" PubDate="2026-10-17T00:00:00Z" SchemaVersion="2.1">
+  <Publisher LastUpdated="2026-10-17T00:00:00Z" Name="Example Workspace" ID="pub-1" Description="" SupportsReconnect="false">
+    <Resources><Resource ID="r1" Alias="a" Title="Standard Desktop" LastUpdated="x" Type="Desktop" ShowByDefault="true">
+  <Icons>
+    <Icon32 Dimensions="32x32" FileType="Png" FileURL="https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery/tenants/t1/pngs/r1.png?v=1"/>
+    <IconRaw FileType="Ico" FileURL="https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery/tenants/t1/icons/r1.ico?v=1"/>
+  </Icons>
+  <HostingTerminalServers><HostingTerminalServer>
+    <ResourceFile FileExtension=".rdp" URL="https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery/tenants/t1/rdps/r1.rdp?v=1"/>
+    <TerminalServerRef Ref="ts"/>
+  </HostingTerminalServer></HostingTerminalServers>
+</Resource><Resource ID="r2" Alias="b" Title="Notepad" LastUpdated="x" Type="RemoteApp" ShowByDefault="true">
+  <HostingTerminalServers><HostingTerminalServer>
+    <ResourceFile FileExtension=".rdp" URL="https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery/tenants/t1/rdps/r2.rdp?v=1"/>
+    <TerminalServerRef Ref="ts"/>
+  </HostingTerminalServer></HostingTerminalServers>
+</Resource></Resources>
+    <TerminalServers><TerminalServer ID="ts" Name="host" LastUpdated="x"/></TerminalServers>
+  </Publisher>
+</ResourceCollection>
