@@ -322,6 +322,8 @@ pub enum Message {
     CacheLoaded(String, u64, Option<crate::cache::Cached>),
     /// From the tray (background operation).
     Tray(crate::tray::TrayEvent),
+    /// Deskfeed was started again, with the launcher's activation token.
+    StartedAgain(Option<String>),
     /// App settings → Background.
     AppBackground(bool),
     /// Quit dialog: close the window, keep the desktops.

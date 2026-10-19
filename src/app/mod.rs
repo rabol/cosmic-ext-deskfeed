@@ -418,15 +418,6 @@ impl cosmic::Application for AppModel {
         Some(Message::QuitRequested)
     }
 
-    /// Started again while running (single instance): show the window,
-    /// also when it was closed for the background.
-    fn dbus_activation(
-        &mut self,
-        _msg: cosmic::dbus_activation::Message,
-    ) -> Task<cosmic::Action<Self::Message>> {
-        self.show_window()
-    }
-
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
         if self.quit == Quit::Asking {
             return Some(self.quit_dialog());
@@ -533,6 +524,8 @@ impl cosmic::Application for AppModel {
             // Closing from the desktop (window menu, keyboard shortcut,
             // dock); the window's own close button goes to `on_app_exit`.
             cosmic::iced::window::close_requests().map(|_| Message::QuitRequested),
+            // Started again: show the window (`single.rs`).
+            Subscription::run(crate::single::activations).map(Message::StartedAgain),
             if self.config.background {
                 Subscription::run(tray_events).map(Message::Tray)
             } else {
@@ -612,6 +605,10 @@ impl AppModel {
     pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::Tray(event) => return self.tray_event(event),
+            Message::StartedAgain(token) => {
+                crate::app_log!("started again: showing the window");
+                return self.tray_event(crate::tray::TrayEvent::Show(token));
+            }
             Message::SearchInput(text) => self.search = text,
             Message::OpenDiagnostics => {
                 self.context_page = ContextPage::Diagnostics;

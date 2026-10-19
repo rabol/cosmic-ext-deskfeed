@@ -14,6 +14,7 @@ mod secrets;
 mod service;
 mod sessions;
 mod settings;
+mod single;
 #[cfg(test)]
 mod test_util;
 mod tray;
@@ -37,6 +38,10 @@ fn main() -> cosmic::iced::Result {
         )
         .exit_on_close(false);
 
-    // Starts the application's event loop with `()` as the application's flags.
+    // One Deskfeed per user: a second start asks the running one to show
+    // its window (also when it runs in the background, ADR 0017) and ends.
+    if let single::Start::HandedOver = single::start(app::APP_ID) {
+        return Ok(());
+    }
     cosmic::app::run::<app::AppModel>(settings, ())
 }

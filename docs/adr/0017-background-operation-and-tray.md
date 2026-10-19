@@ -1,6 +1,6 @@
 # 0017. Background operation with a StatusNotifierItem tray over zbus
 
-- Status: Accepted (pending the owner's check in the real app)
+- Status: Accepted (checked on the live COSMIC session on 2026-10-19: tray item registered, menu, close to background, reopen from the tray, second start reopens the first, tray Quit, setting off; with a connected desktop still to check)
 - Date: 2026-10-18
 
 ## Context
@@ -23,6 +23,7 @@ libcosmic closes the app when its main window closes, unless the `multi-window` 
   - with desktops open, the quit dialog adds a third choice, "Keep running in the background".
 - The tray's Quit really quits. With desktops open, it shows the window and asks first, as usual.
 - A click on the tray icon, or starting Deskfeed again (single instance, D-Bus activation), opens the window again or focuses it. COSMIC's activation token is passed on so the window takes focus.
+- Single instance is done by Deskfeed (`src/single.rs`), not by libcosmic's `single-instance` feature. libcosmic serves at the app ID with only `.` replaced (`/io/github/rabol/cosmic-ext-deskfeed`), but `-` isn't allowed in a D-Bus object path, so the app exited at start, and a second start ran a second copy. Deskfeed claims its app ID as a bus name and serves `org.freedesktop.Application` at `/io/github/rabol/cosmic_ext_deskfeed` (that interface's rule: `-` becomes `_`). A second start calls `Activate` with its activation token and ends.
 - The item registers again when the panel restarts (`NameOwnerChanged` for the watcher).
 - Desktop titles in the menu stay on the local session bus, as window titles do.
 

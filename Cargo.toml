@@ -54,8 +54,8 @@ rev = "e1f2cd2e52226aa50d59bb2cd6d43ffe290106ed"
 features = [
     # About widget for the app
     "about",
-    # On app startup, focuses an existing instance if the app is already open
-    "single-instance",
+    # Not "single-instance": its D-Bus path breaks on the "-" in the app ID
+    # and the app exits at start; src/single.rs does it instead.
     # GPU-accelerated rendering
     "wgpu",
     # xdg portal dialogs on Linux
