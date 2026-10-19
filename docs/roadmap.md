@@ -66,9 +66,9 @@ Still open:
 - **FreeRDP bug found on the way**: HTTP proxy authentication drops the last character of the password (ADR 0008 addendum). Report upstream (owner's call, it's public).
 - The review's remaining uncertainty U6 (OIDC key scope). Done: the test-gap list (HTTP edge cases, the helper's random-input tests); U1 (the desktop sign-in gets the account as a hint and refuses another account, ADR 0026; pinning the tenant waits for a real-tenant test; manual test 3e); U3 (tray disappearance, ADR 0017 addendum); U4 (redaction: IPv6 addresses and `user@DOMAIN` are now caught, tested with realistic lines and random input). Not caught by patterns, by nature: single-word host names such as `sessionhost-7`; the Diagnostics report still replaces the account, workspace and desktop names Deskfeed knows, and the log stays on this computer unless the user saves a report.
 
-## Deferred (decided: later)
+## Not in v1 (closed)
 
-- **F10, administrator registration / system-browser sign-in.** The owner decided (2026-10-19) to take this up later. It needs a tenant where an admin can register an app to test.
+- **F10, administrator registration / system-browser sign-in** (spec §4, optional). Closed for v1 by the owner (2026-10-19); may come in a later version. It needs a tenant where an admin can register an app to test.
 
 ## Known deviation from the spec
 
