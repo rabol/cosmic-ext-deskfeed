@@ -1,7 +1,8 @@
 # Checks on every push to main and every pull request (spec §11).
 #
-# Runs in an Arch Linux container: the sign-in helper needs GTK >= 4.18 and
-# WebKitGTK >= 2.52 (signin/Cargo.toml), newer than Ubuntu's packages.
+# Runs in an Arch Linux container, the distribution the app is packaged for
+# (packaging/aur). The sign-in helper needs GTK >= 4.10 and WebKitGTK >= 2.42
+# (signin/Cargo.toml, ADR 0007 addendum).
 # Third-party actions are pinned to a commit; the job can only read the
 # repository.
 

@@ -28,7 +28,7 @@ Native packages only; there is no Flatpak ([ADR 0010](./docs/adr/0010-native-onl
 |---|---|---|---|
 | COSMIC desktop (cosmic-comp with window management v4) | Epoch 1 | The app itself; "Open on a new workspace" | `cosmic-session` |
 | FreeRDP with the X11 client (`xfreerdp3`), built with `WITH_AAD=ON` | 3.32.2 | Connecting to desktops, Entra sign-in to desktops (runs on COSMIC's XWayland) | `freerdp` |
-| WebKitGTK 6 and GTK 4 | 2.52 | The Microsoft sign-in window | `webkitgtk-6.0` |
+| WebKitGTK 6 and GTK 4 | WebKitGTK 2.42, GTK 4.10 | The Microsoft sign-in window. Keep WebKitGTK current: it shows Microsoft's pages | `webkitgtk-6.0`, `gtk4` |
 | A Secret Service (oo7, GNOME Keyring, …) | — | Staying signed in (optional) | `oo7` or `gnome-keyring` |
 
 To build: Rust 1.93 or newer (the minimum libcosmic declares; developed and tested with Rust 1.99) and [`just`](https://github.com/casey/just). Building the sign-in helper needs the GTK 4 and WebKitGTK 6 development files (on Arch Linux they come with the packages above).
