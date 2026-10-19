@@ -7,7 +7,8 @@
 //!   any connection is made.
 //! - Redirects are never followed; a 3xx response is an error, so a bearer
 //!   token can never travel to another origin.
-//! - Timeouts and (decompressed) body sizes are bounded.
+//! - Timeouts and body sizes are bounded; the size counts the body after
+//!   decompression (`finish`).
 //! - TLS uses rustls with the system trust store; there is no switch to
 //!   turn verification off.
 //! - Proxies come from the standard environment variables.
@@ -129,6 +130,16 @@ pub struct Http {
 
 impl Http {
     pub fn new(policy: EndpointPolicy) -> Self {
+        Self::with_timeouts(policy, CONNECT_TIMEOUT, TOTAL_TIMEOUT)
+    }
+
+    /// Tests: shorter limits than the app's (a minute is too long to wait).
+    #[cfg(test)]
+    fn quick(policy: EndpointPolicy, total: Duration) -> Self {
+        Self::with_timeouts(policy, total, total)
+    }
+
+    fn with_timeouts(policy: EndpointPolicy, connect: Duration, total: Duration) -> Self {
         let tls = TlsConfig::builder()
             .provider(TlsProvider::Rustls)
             .root_certs(RootCerts::PlatformVerifier)
@@ -140,8 +151,8 @@ impl Http {
             .max_redirects(0)
             .max_redirects_will_error(false)
             .http_status_as_error(false)
-            .timeout_connect(Some(CONNECT_TIMEOUT))
-            .timeout_global(Some(TOTAL_TIMEOUT))
+            .timeout_connect(Some(connect))
+            .timeout_global(Some(total))
             .user_agent(concat!("cosmic-ext-deskfeed/", env!("CARGO_PKG_VERSION")))
             .build();
         Self {
@@ -227,11 +238,20 @@ fn finish(mut resp: ureq::http::Response<ureq::Body>, role: Role) -> Result<Resp
     if (300..400).contains(&status) {
         return Err(HttpError::Redirected { status });
     }
-    let body = resp
-        .body_mut()
-        .with_config()
-        .limit(role.max_body())
-        .read_to_vec()?;
+    // The limit counts what we get after decompression. ureq's own `limit`
+    // sits below its gzip decoder (ureq 3.4.2 `body/mod.rs`, `BodyReader`),
+    // so it only counts the compressed bytes: a small compressed answer
+    // could expand without bound (found by `compressed_answers_count_expanded`).
+    let max = role.max_body();
+    let mut body = Vec::new();
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(resp.body_mut().with_config().limit(max).reader(), max + 1),
+        &mut body,
+    )
+    .map_err(ureq::Error::from)?;
+    if body.len() as u64 > max {
+        return Err(HttpError::TooLarge);
+    }
     if status >= 400 {
         return Err(HttpError::Status { status, body });
     }
@@ -392,6 +412,162 @@ mod tests {
         assert!(
             matches!(err, HttpError::Endpoint(EndpointError::NotHttps)),
             "{err:?}"
+        );
+    }
+
+    /// One connection, handled by `act` after the request head was read:
+    /// for servers that misbehave in ways `Server` can't.
+    fn one_connection(act: impl FnOnce(std::net::TcpStream) + Send + 'static) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                    break;
+                }
+            }
+            act(stream);
+        });
+        port
+    }
+
+    fn local(port: u16, path: &str) -> Url {
+        Url::parse(&format!("http://127.0.0.1:{port}{path}")).unwrap()
+    }
+
+    /// A small compressed answer that expands past the role's limit (a
+    /// "gzip bomb"): the limit counts the expanded bytes (review test gap 5).
+    #[test]
+    fn compressed_answers_count_expanded() {
+        let bomb: &[u8] = include_bytes!("testdata/zeros-1mib.gz");
+        let answer = move |mut s: std::net::TcpStream| {
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                bomb.len()
+            );
+            s.write_all(head.as_bytes()).unwrap();
+            s.write_all(bomb).unwrap();
+        };
+        // 1 MiB expanded, over a connection file's 256 KiB.
+        let port = one_connection(answer);
+        let http = Http::new(EndpointPolicy::local_test(port));
+        let url = local(port, "/api/arm/feeddiscovery/tenants/t1/rdps/x.rdp");
+        let err = http
+            .get(&url, Role::ConnectionFile, Some(&token()))
+            .unwrap_err();
+        assert!(matches!(err, HttpError::TooLarge), "{err:?}");
+        // Under a feed's 4 MiB it expands: so it was decompressed, and the
+        // limit above was on the expanded size.
+        let port = one_connection(answer);
+        let http = Http::new(EndpointPolicy::local_test(port));
+        let url = local(port, "/api/arm/feeddiscovery/tenants/t1/webfeed");
+        let body = http.get(&url, Role::Feed, Some(&token())).unwrap().body;
+        assert_eq!(body.len(), 1024 * 1024);
+    }
+
+    /// A server that never answers, and one that trickles: the time limit
+    /// ends both (review test gap 5).
+    #[test]
+    fn slow_servers_time_out() {
+        let limit = Duration::from_secs(1);
+        let silent = one_connection(|_s| thread::sleep(Duration::from_secs(5)));
+        let trickle = one_connection(|mut s| {
+            let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n");
+            for _ in 0..20 {
+                if s.write_all(b"x").is_err() {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+        });
+        for port in [silent, trickle] {
+            let http = Http::quick(EndpointPolicy::local_test(port), limit);
+            let started = std::time::Instant::now();
+            let err = http
+                .get(
+                    &local(port, "/api/arm/feeddiscovery"),
+                    Role::FeedDiscovery,
+                    Some(&token()),
+                )
+                .unwrap_err();
+            assert!(matches!(err, HttpError::Timeout), "{err:?}");
+            assert!(started.elapsed() < Duration::from_secs(3));
+        }
+    }
+
+    /// An answer cut off before its announced length is an error, never a
+    /// short body taken as complete (review test gap 5).
+    #[test]
+    fn a_cut_off_answer_is_an_error() {
+        let port = one_connection(|mut s| {
+            let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nonly ten b");
+        });
+        let http = Http::quick(EndpointPolicy::local_test(port), Duration::from_secs(2));
+        let result = http.get(
+            &local(port, "/api/arm/feeddiscovery"),
+            Role::FeedDiscovery,
+            Some(&token()),
+        );
+        assert!(result.is_err(), "{result:?}");
+    }
+
+    /// No kind of request follows a redirect, and its target is never
+    /// contacted (review test gap 5; `redirect_is_not_followed…` covers the
+    /// feed with a token).
+    #[test]
+    fn no_role_follows_redirects() {
+        let other = Server::start(vec![reply("200 OK", "", "never")]);
+        let gets = [
+            (Role::FeedDiscovery, "/api/arm/feeddiscovery", true),
+            (
+                Role::Feed,
+                "/api/arm/feeddiscovery/tenants/t1/webfeed",
+                true,
+            ),
+            (
+                Role::ConnectionFile,
+                "/api/arm/feeddiscovery/tenants/t1/rdps/x.rdp",
+                true,
+            ),
+            (
+                Role::Icon,
+                "/api/arm/feeddiscovery/tenants/t1/pngs/x.png",
+                true,
+            ),
+            (Role::SigningKeys, "/common/discovery/v2.0/keys", false),
+        ];
+        let location = format!("Location: {}\r\n", other.url("/stolen"));
+        for (role, path, with_token) in gets {
+            let server = Server::start(vec![reply("302 Found", &location, "")]);
+            let http = Http::new(EndpointPolicy::local_test(server.port));
+            let token = token();
+            let err = http
+                .get(&server.url(path), role, with_token.then_some(&token))
+                .unwrap_err();
+            assert!(
+                matches!(err, HttpError::Redirected { status: 302 }),
+                "{role:?}: {err:?}"
+            );
+        }
+        let server = Server::start(vec![reply("307 Temporary Redirect", &location, "")]);
+        let http = Http::new(EndpointPolicy::local_test(server.port));
+        let err = http
+            .post_form(
+                &server.url("/organizations/oauth2/v2.0/token"),
+                Role::Token,
+                &[("grant_type", "refresh_token")],
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, HttpError::Redirected { status: 307 }),
+            "{err:?}"
+        );
+        assert!(
+            other.requests().is_empty(),
+            "a redirect target was contacted"
         );
     }
 
