@@ -22,7 +22,7 @@ Out of scope: vulnerabilities in FreeRDP, WebKitGTK, GTK, libcosmic, the Secret 
 
 ## What the app is designed to guarantee
 
-- Refresh tokens only in the desktop keyring (Secret Service); access tokens only in memory; Windows passwords never stored.
+- Refresh tokens only in the desktop keyring (Secret Service); access tokens only in memory; Windows passwords only when the user opts in ("Remember this password"), only in the keyring, per account and desktop, removed on sign-out.
 - Passwords and tokens never on a command line, in the environment, or in logs; FreeRDP gets them through a private pipe.
 - Tokens are only sent over HTTPS to the reviewed Microsoft endpoints (`src/service/endpoint.rs`).
 - The sign-in window allows HTTPS only, no pop-ups, no downloads, and returns only the sign-in result.

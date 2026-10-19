@@ -14,8 +14,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
 use url::Url;
 
-/// How long a sign-in attempt waits for the callback.
-pub const DEFAULT_LIFETIME: Duration = Duration::from_mins(10);
+/// Time beyond the sign-in window's own limit (`Attempt::for_window`).
+const WINDOW_SLACK: Duration = Duration::from_mins(1);
 
 /// Upper bound for a callback URL. Real ones are a few kilobytes.
 const MAX_CALLBACK_LEN: usize = 16 * 1024;
@@ -114,8 +114,12 @@ impl std::fmt::Debug for Attempt {
 }
 
 impl Attempt {
-    pub fn new(config: ClientConfig) -> Result<Self, getrandom::Error> {
-        Self::with_lifetime(config, DEFAULT_LIFETIME)
+    /// An attempt for a sign-in window that may stay open for `window`
+    /// (the "Time allowed for signing in" setting): it lives as long, plus
+    /// a minute for starting the window and handing back its answer, so a
+    /// sign-in finished in time is never refused as expired.
+    pub fn for_window(config: ClientConfig, window: Duration) -> Result<Self, getrandom::Error> {
+        Self::with_lifetime(config, window + WINDOW_SLACK)
     }
 
     pub fn with_lifetime(
@@ -281,7 +285,11 @@ mod tests {
     use super::*;
 
     fn attempt() -> Attempt {
-        Attempt::new(ClientConfig::public_remote_desktop()).unwrap()
+        Attempt::for_window(
+            ClientConfig::public_remote_desktop(),
+            Duration::from_mins(5),
+        )
+        .unwrap()
     }
 
     fn param(url: &Url, name: &str) -> String {
@@ -482,6 +490,30 @@ mod tests {
         let mut a = attempt();
         let cb = callback(&a, "error=access_denied&state=forged");
         assert_eq!(a.complete(&cb).unwrap_err(), CallbackError::StateMismatch);
+    }
+
+    #[test]
+    fn an_attempt_lasts_as_long_as_its_sign_in_window() {
+        let min = Duration::from_mins;
+        for window in [min(2), min(10), min(11), min(15)] {
+            // Finished just before the window's own limit, and at it.
+            for at in [window.saturating_sub(Duration::from_secs(1)), window] {
+                let mut a =
+                    Attempt::for_window(ClientConfig::public_remote_desktop(), window).unwrap();
+                let cb = callback(&a, &format!("code=abc&state={}", a.state));
+                assert!(
+                    a.complete_at(&cb, a.started + at).is_ok(),
+                    "{window:?} at {at:?}"
+                );
+            }
+            // Well after it: expired.
+            let mut a = Attempt::for_window(ClientConfig::public_remote_desktop(), window).unwrap();
+            let cb = callback(&a, &format!("code=abc&state={}", a.state));
+            assert_eq!(
+                a.complete_at(&cb, a.started + window + min(2)).unwrap_err(),
+                CallbackError::Expired
+            );
+        }
     }
 
     #[test]

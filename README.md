@@ -70,7 +70,7 @@ If something doesn't work, **View → Dependencies** shows what's missing, and *
 
 ## Privacy and security
 
-- Refresh tokens are stored only in your desktop keyring; access tokens stay in memory. Windows passwords are never stored.
+- Refresh tokens are stored only in your desktop keyring; access tokens stay in memory. A Windows password is stored only if you tick "Remember this password", and then only in the keyring, for that account and desktop; signing out removes it.
 - Passwords and tokens reach FreeRDP through a private pipe, never through the command line or environment.
 - Your account's tokens are only sent to the Microsoft addresses the app was built for (`login.microsoftonline.com`, `*.wvd.microsoft.com`), always over HTTPS.
 - The Microsoft sign-in window is a separate, locked-down program: HTTPS only, no pop-ups or downloads, and it only hands back the sign-in result.

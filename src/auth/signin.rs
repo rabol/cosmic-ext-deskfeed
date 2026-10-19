@@ -175,8 +175,10 @@ pub fn sign_in(
     time: Duration,
     cancel: &Cancel,
 ) -> Result<SignedIn, SignInError> {
-    let mut attempt =
-        Attempt::new(config.clone()).map_err(|_| SignInError::HelperFailed("random".into()))?;
+    // As long as the window may stay open (review F11: a fixed 10 minutes
+    // refused sign-ins finished in minutes 11–15).
+    let mut attempt = Attempt::for_window(config.clone(), time)
+        .map_err(|_| SignInError::HelperFailed("random".into()))?;
     let reply = run_helper(
         helper,
         profile,
