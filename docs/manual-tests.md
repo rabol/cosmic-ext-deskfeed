@@ -9,7 +9,7 @@ Install the current build first (`just install`, or the package).
 ### Sign-in and accounts
 
 1. **Sign in again after reinstalling.** The saved sign-in had expired under the tenant's sign-in time limit. Reinstall, open Deskfeed, select Sign in on the account. *Expected:* one Microsoft sign-in page, then the desktop list.
-2. **Sleep for over an hour** (commit `0b957ce`). Sign in, let the computer sleep for more than an hour, wake it, select Connect. *Expected:* the desktop connects, or the account shows a Sign in button. Never a raw error.
+2. **Sleep for over an hour** (commit `0b957ce`). Sign in, let the computer sleep for more than an hour, wake it, select Connect. *Expected:* the desktop connects, or the account shows a Sign in button. Never a raw error. Also, within 5 minutes of waking, the list's "Updated …" time changes to the time after waking, even after a short sleep (the log says "woke from sleep: refreshing desktop lists").
 
 3a. **Sign out with a desktop open.** Connect a desktop, then select Sign out on its account. *Expected:* a question "Sign out of …?" with "Disconnect and sign out" and Cancel. Cancel keeps everything; the other button disconnects and signs out. Without anything connected, Sign out happens at once as before.
 

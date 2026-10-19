@@ -164,6 +164,23 @@ pub(super) fn moved_to<'a>(
         .map(|(key, _)| key)
 }
 
+/// How long after a list load the next one is due: the account's interval,
+/// moved by up to a tenth either way (spec §7: "with jitter"), so accounts
+/// and computers don't all ask at the same moment. `random` is any number,
+/// drawn once per load.
+pub(super) fn refresh_wait(every: std::time::Duration, random: u32) -> std::time::Duration {
+    let spread = every / 5;
+    let offset = spread.mul_f64(f64::from(random) / f64::from(u32::MAX));
+    every - every / 10 + offset
+}
+
+/// The computer slept between two checks: the wall clock moved on more
+/// than the monotonic clock, which stops while suspended (Linux
+/// `CLOCK_MONOTONIC`). A minute of slack keeps clock adjustments out.
+pub(super) fn slept(monotonic: std::time::Duration, wall: std::time::Duration) -> bool {
+    wall > monotonic + std::time::Duration::from_secs(60)
+}
+
 /// How long to wait before reconnect attempt `attempt` (1-based): 5 s,
 /// doubling, at most a minute.
 pub(super) fn reconnect_delay(attempt: u32) -> std::time::Duration {
@@ -409,6 +426,25 @@ mod tests {
             assert_eq!(moved_to(&end, true, 5, others), None, "{end:?}");
         }
         assert_eq!(moved_to(&SessionEnd::Replaced, true, 5, []), None);
+    }
+
+    #[test]
+    fn refreshes_spread_around_the_interval() {
+        let hour = std::time::Duration::from_secs(3600);
+        assert_eq!(refresh_wait(hour, 0).as_secs(), 3240);
+        assert_eq!(refresh_wait(hour, u32::MAX).as_secs(), 3960);
+        let middle = refresh_wait(hour, u32::MAX / 2).as_secs();
+        assert!((3599..=3601).contains(&middle), "{middle}");
+    }
+
+    #[test]
+    fn notices_sleep_between_checks() {
+        let s = std::time::Duration::from_secs;
+        assert!(!slept(s(300), s(300)));
+        assert!(!slept(s(300), s(330)));
+        assert!(slept(s(10), s(2000)));
+        // The wall clock set back: not sleep.
+        assert!(!slept(s(300), s(0)));
     }
 
     #[test]

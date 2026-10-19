@@ -109,6 +109,8 @@ pub struct AppModel {
     sign_out_asking: Option<String>,
     /// What the last sign-out couldn't remove.
     cleanup_retry: Option<CleanupRetry>,
+    /// The last list check (monotonic and wall clock), to notice sleep.
+    last_check: Option<(Instant, SystemTime)>,
     /// Desktops being reconnected after a lost connection.
     reconnects: HashMap<String, Reconnect>,
     /// The search field's text; filters the desktop list.
@@ -243,6 +245,7 @@ impl cosmic::Application for AppModel {
             moved_to: HashMap::new(),
             sign_out_asking: None,
             cleanup_retry: None,
+            last_check: None,
             reconnects: HashMap::new(),
             search: String::new(),
             tray: None,

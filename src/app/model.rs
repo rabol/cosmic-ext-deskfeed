@@ -24,6 +24,8 @@ pub(super) struct Account {
     /// When the desktop list was last requested (wall clock, so the time
     /// spent suspended counts).
     pub(super) last_load: Option<SystemTime>,
+    /// Drawn at each load; spreads the next refresh (`decide::refresh_wait`).
+    pub(super) jitter: u32,
     /// When the desktop list last loaded successfully.
     pub(super) last_refreshed: Option<SystemTime>,
     /// The offline list and when it was saved; shown, read-only, until a

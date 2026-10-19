@@ -46,7 +46,22 @@ impl AppModel {
                 }
             }
             Message::Refresh(id) => return self.load_resources(&id),
-            Message::RefreshDue => return self.refresh_due(),
+            Message::RefreshDue => {
+                // The check timer stops while the computer sleeps; the
+                // wall clock doesn't (spec §7: refresh after resume).
+                let now = (Instant::now(), SystemTime::now());
+                let slept = self.last_check.replace(now).is_some_and(|(mono, wall)| {
+                    let wall = now.1.duration_since(wall).unwrap_or_default();
+                    decide::slept(now.0 - mono, wall)
+                });
+                if slept {
+                    crate::app_log!("woke from sleep: refreshing desktop lists");
+                    for account in &mut self.accounts {
+                        account.last_load = None;
+                    }
+                }
+                return self.refresh_due();
+            }
             Message::Discovered(id, epoch, generation, result) => {
                 return self.discovered(&id, epoch, generation, result);
             }
@@ -132,6 +147,7 @@ impl AppModel {
                 generation: 0,
                 sign_in: 0,
                 last_load: None,
+                jitter: 0,
                 last_refreshed: None,
                 cached: None,
                 epoch,
@@ -444,6 +460,7 @@ impl AppModel {
                 generation,
                 sign_in: generation,
                 last_load: None,
+                jitter: 0,
                 last_refreshed: None,
                 cached: None,
                 epoch,
@@ -497,6 +514,7 @@ impl AppModel {
         *loading = true;
         account.generation = generation;
         account.last_load = Some(SystemTime::now());
+        account.jitter = getrandom::u32().unwrap_or(u32::MAX / 2);
         let signed_in = signed_in.clone();
         let epoch = account.epoch;
         let http = self.http.clone();
@@ -539,8 +557,11 @@ impl AppModel {
             .accounts
             .iter()
             .filter(|a| {
-                let every = Duration::from_secs(
-                    u64::from(self.account_settings(Some(&a.id)).refresh_mins) * 60,
+                let every = decide::refresh_wait(
+                    Duration::from_secs(
+                        u64::from(self.account_settings(Some(&a.id)).refresh_mins) * 60,
+                    ),
+                    a.jitter,
                 );
                 matches!(a.state, AccountState::Ready { loading: false, .. })
                     && a.last_load
