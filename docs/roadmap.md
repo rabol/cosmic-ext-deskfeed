@@ -37,7 +37,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
 - Tag `v0.1.0`, then fill in the AUR package checksum (review F20).
 - CI dependency/security checks (review F21): needs the owner's decision on adding `cargo-deny`, CI only.
 - AppStream screenshots.
-- Minimum GTK 4 and WebKitGTK versions as package constraints.
+- ~~Minimum GTK 4 and WebKitGTK versions as package constraints.~~ Done (2026-10-19, ADR 0007 addendum): GTK 4.10 and WebKitGTK 2.42, found by building with lower features; the helper is built for those, and the AUR packages require them.
 
 ## Known deviation from the spec
 

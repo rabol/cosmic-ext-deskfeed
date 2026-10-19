@@ -15,12 +15,12 @@ depends=(
   'freerdp>=2:3.32.2'
   'glib2'
   'glibc'
-  'gtk4'
+  'gtk4>=1:4.10'
   'libgcc'
   'libsoup3'
   'libxkbcommon'
   'wayland'
-  'webkitgtk-6.0'
+  'webkitgtk-6.0>=2.42'
   'xdg-utils'
 )
 makedepends=('cargo' 'git' 'just')

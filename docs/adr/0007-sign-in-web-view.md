@@ -39,3 +39,10 @@ Options considered:
 - One large system dependency, isolated in one small process.
 - Owner action for native builds: `sudo pacman -S webkitgtk-6.0`.
 - If Microsoft's public client ID stops working, the administrator-registration mode (system browser + loopback) still avoids the web view for that mode.
+
+## Addendum (2026-10-19): minimum GTK and WebKitGTK versions
+
+- The build features were the versions on the owner's system (`v4_18`, `v2_52`), not what the helper needs. Built with lower features to find out: GTK `v4_10` builds and `v4_8` doesn't; WebKitGTK `v2_42` builds and plain 2.40 doesn't (two APIs missing).
+- The helper is now built with `gtk4` `v4_10` and `webkit6` `v2_42`. That only changes which APIs the code may use, and the code compiles unchanged. The packages require `gtk4>=1:4.10` and `webkitgtk-6.0>=2.42` (`packaging/aur/`).
+- These are minimums for the helper to work. The sign-in window shows Microsoft's pages, so distributions should keep WebKitGTK current with security updates. The minimum isn't a recommendation.
+

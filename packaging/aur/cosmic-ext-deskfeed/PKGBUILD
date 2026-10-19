@@ -17,12 +17,12 @@ depends=(
   'freerdp>=2:3.32.2'   # connects; needs the X11 client (xfreerdp3) and WITH_AAD
   'glib2'
   'glibc'
-  'gtk4'                # sign-in window
+  'gtk4>=1:4.10'        # sign-in window (GTK 4.10 APIs)
   'libgcc'
   'libsoup3'            # sign-in window
   'libxkbcommon'
   'wayland'
-  'webkitgtk-6.0'       # sign-in window
+  'webkitgtk-6.0>=2.42' # sign-in window (WebKitGTK 2.42 APIs)
   'xdg-utils'           # opens links and the log folder
 )
 makedepends=('cargo' 'git' 'just')
