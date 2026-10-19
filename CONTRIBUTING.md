@@ -23,6 +23,7 @@ cargo fmt --all
 ```
 
 - Keep tests meaningful: test behaviour and failure cases, not the implementation. Decisions belong in small pure functions with tests (see `src/app/decide.rs`).
+- A parser of untrusted input (network data, files, FreeRDP's output) gets a random-input test with `test_util::random_inputs` and real samples (ADR 0023). For a deeper run: `DESKFEED_RANDOM_ROUNDS=200000 cargo test --release random`.
 - Tests must not need a Microsoft account. Tests that touch the real keyring or desktop are `#[ignore]`d and run on request.
 - Behaviour that depends on FreeRDP or Microsoft: cite the source (file and line, or documentation) in a comment rather than guessing.
 - User-facing text goes into `i18n/en/cosmic_ext_deskfeed.ftl`. Write plainly; say what happened and what to do.

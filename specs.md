@@ -219,7 +219,7 @@ Required automated coverage:
 7. Diagnostic redaction and sign-out cleanup, including unavailable keyring deletion.
 8. The sign-in web view refuses disallowed navigations, pop-ups, and downloads, and returns only code, state, and error fields. The FreeRDP sign-in helper handles the protocol correctly, including cancellation, timeout, and a closed app.
 9. Password-login hosts: the password never appears in arguments, environment, or logs; a logon failure produces a visible retry; the remembered password is removed on sign-out.
-10. Fuzz the feed XML, connection-file, and callback parsers (`cargo-fuzz`).
+10. Test the feed XML, connection-file, and callback parsers with random and mangled inputs, as part of `cargo test` on the stable compiler (no nightly-only tools; changed 2026-10-19, ADR 0023).
 
 Manual release matrix on COSMIC Wayland:
 

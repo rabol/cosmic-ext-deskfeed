@@ -43,7 +43,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
 
 Done the same day: the administrator's device policy (ADR 0021), the sign-out question, child programs ending with the app (ADR 0022), Try again for sign-out and keyring saving, refresh after sleep with jitter, technical details moved to the log, device-compliance message. Still open:
 
-- **Fuzzing** (spec §13 item 10): the feed XML, connection file and sign-in callback parsers with `cargo-fuzz`. Needs the owner's decision: `cargo-fuzz` is a new tool and needs a nightly compiler (CI and local only, not in the app).
+- ~~**Fuzzing**~~ Done as random-input tests on stable Rust (2026-10-19, [ADR 0023](adr/0023-random-input-tests-instead-of-cargo-fuzz.md)); the spec item was changed with the owner, since `cargo-fuzz` needs a nightly compiler. Not yet covered: the sign-in helper's own parsing.
 - **"Client version not supported"** (spec §7): a specific error when the service rejects the client version. What the service sends in that case isn't known yet; needs evidence (a real rejection, or Microsoft's documentation) before guessing.
 
 ## Known deviation from the spec

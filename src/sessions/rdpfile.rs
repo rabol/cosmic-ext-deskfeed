@@ -558,4 +558,43 @@ mod tests {
         let f = ConnectionFile::parse(&bytes).unwrap();
         println!("kept {} properties, dropped {}", f.props.len(), f.dropped);
     }
+
+    #[test]
+    fn random_connection_files_never_break_the_parser() {
+        let app = format!(
+            "full address:s:h\r\n{GW}remoteapplicationmode:i:1\r\n\
+             remoteapplicationprogram:s:||notepad\r\nremoteapplicationcmdline:s:/x\r\n\
+             redirectclipboard:i:1\r\naudiocapturemode:i:1\r\n"
+        );
+        let mut utf16 = vec![0xFF, 0xFE];
+        utf16.extend(SAMPLE.encode_utf16().flat_map(u16::to_le_bytes));
+        let defaults: Vec<&str> = DEVICE_DEFAULTS
+            .iter()
+            .filter_map(|l| l.split(':').next())
+            .collect();
+        crate::test_util::random_inputs(
+            "rdpfile",
+            &[SAMPLE.as_bytes(), app.as_bytes(), &utf16],
+            |input| {
+                let Ok(f) = ConnectionFile::parse(input) else {
+                    return;
+                };
+                // What reaches FreeRDP: only reviewed properties, one per
+                // line, no control characters, and an AVD gateway.
+                let text = f.to_freerdp_text();
+                for line in text.split_terminator("\r\n") {
+                    assert!(!line.chars().any(char::is_control), "{line:?}");
+                    let key = line.split(':').next().unwrap_or_default();
+                    assert!(
+                        ALLOWED.contains(&key) || defaults.contains(&key),
+                        "{line:?}"
+                    );
+                }
+                assert!(matches!(
+                    f.props.get("gatewayhostname"),
+                    Some(Value::Str(g)) if is_avd_gateway(g)
+                ));
+            },
+        );
+    }
 }

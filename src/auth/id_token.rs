@@ -399,4 +399,14 @@ mod tests {
         let keys = fetch_keys(&http).unwrap();
         assert!(keys.iter().any(|k| k.kty == "RSA" && !k.n.is_empty()));
     }
+
+    #[test]
+    fn random_id_tokens_never_validate() {
+        crate::test_util::random_inputs("id token", &[JWT.as_bytes()], |input| {
+            let token = String::from_utf8_lossy(input);
+            let result = validate(&token, &keys(), CLIENT, "test-nonce", NOW);
+            // Only the signed token itself is valid.
+            assert!(result.is_err() || token == JWT, "{token}");
+        });
+    }
 }

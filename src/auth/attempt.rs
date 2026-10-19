@@ -499,4 +499,36 @@ mod tests {
         );
         assert_eq!(a.complete(&cb).unwrap_err(), CallbackError::NotPending);
     }
+
+    #[test]
+    fn random_callbacks_never_break_the_check() {
+        let a = attempt();
+        let good = callback(&a, &format!("code=abc&state={}&session_state=x", a.state));
+        let error = callback(
+            &a,
+            &format!(
+                "error=access_denied&error_description=AADSTS53003&state={}",
+                a.state
+            ),
+        );
+        crate::test_util::random_inputs(
+            "callback",
+            &[good.as_bytes(), error.as_bytes()],
+            |input| {
+                let mut a = attempt();
+                // The sample's state, swapped for this attempt's: a
+                // mutation that keeps it can still succeed.
+                let input = String::from_utf8_lossy(input).replace(
+                    &good[good.find("state=").unwrap_or(0) + 6..][..a.state.len()],
+                    &a.state,
+                );
+                if let Ok(code) = a.complete(&input) {
+                    assert!(!code.code.is_empty());
+                    assert!(input.contains(&a.state));
+                }
+                // Used up, whatever happened.
+                assert!(a.complete(&input).is_err());
+            },
+        );
+    }
 }

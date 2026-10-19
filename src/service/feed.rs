@@ -576,4 +576,33 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn random_feeds_never_break_the_parsers() {
+        let disc = discovery(&format!(
+            r#"<TenantFeedURL FeedURL="{BASE}/webfeed?x=1" TenantId="t1" WorkspaceName="Main"/>"#
+        ));
+        let one = feed(&desktop("r1", "Standard Desktop"));
+        let two = feed(&format!("{}{}", desktop("r1", "One"), desktop("r2", "Two")));
+        crate::test_util::random_inputs(
+            "feed",
+            &[disc.as_bytes(), one.as_bytes(), two.as_bytes()],
+            |input| {
+                let text = String::from_utf8_lossy(input);
+                // Only web addresses; the shared HTTP policy then allows
+                // nothing but HTTPS to Microsoft's hosts (`endpoint.rs`).
+                let web = |url: &Url| matches!(url.scheme(), "https" | "http");
+                if let Ok(feeds) = parse_discovery(&text) {
+                    assert!(feeds.iter().all(|f| web(&f.feed_url)));
+                }
+                if let Ok(ws) = parse_feed(&text) {
+                    for r in ws.resources {
+                        for url in r.connection_file.iter().chain(&r.icon_png) {
+                            assert!(web(url), "{url}");
+                        }
+                    }
+                }
+            },
+        );
+    }
 }

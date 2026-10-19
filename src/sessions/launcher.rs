@@ -2062,4 +2062,43 @@ sleep 300
         );
         fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn random_freerdp_output_never_breaks_the_reader() {
+        let fp = "aa:".repeat(31) + "aa";
+        let output = format!(
+            "[1:2] [DEBUG][{STATE_LOGGER}] - [x]: CONNECTION_STATE_NEGO --> CONNECTION_STATE_AAD\n\
+             Certificate details for host:3389 (RDP-Server):\n\
+             \tCommon Name: host\n\tSubject: CN = host\n\tIssuer: CN = host\n\
+             \tValid from: Oct 1\n\tValid to: Oct 2\n\tThumbprint: {fp}\n\
+             [WARN][x] - The fingerprint for the host key sent by the remote host is {fp}\n\
+             [ERROR][x] - certificate not trusted, aborting.\n\
+             [ERROR][x] - RAIL exec error: execResult=RAIL_EXEC_E_NOT_IN_ALLOWLIST [0x3]\n\
+             [INFO][x] - ERRINFO_DISCONNECTED_BY_OTHER_CONNECTION (0x5):Another user\n\
+             [DEBUG][{STATE_LOGGER}] - [x]: X --> {ACTIVE_MARKER}\n"
+        );
+        crate::test_util::random_inputs("freerdp output", &[output.as_bytes()], |input| {
+            let mut log = Log::default();
+            for line in String::from_utf8_lossy(input).lines() {
+                let _ = log.push(line);
+            }
+            // Bounded, and what reaches the user is one printable line.
+            assert!(log.lines.len() <= MAX_LOG_LINES);
+            assert!(log.lines.iter().all(|l| l.chars().count() <= 300));
+            if let Some(c) = log.refused_certificate() {
+                for field in [
+                    &c.host,
+                    &c.common_name,
+                    &c.subject,
+                    &c.issuer,
+                    &c.valid_from,
+                    &c.valid_to,
+                    &c.fingerprint,
+                ] {
+                    assert!(field.chars().count() <= 256, "{field:?}");
+                    assert!(!field.chars().any(char::is_control), "{field:?}");
+                }
+            }
+        });
+    }
 }

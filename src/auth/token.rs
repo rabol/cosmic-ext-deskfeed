@@ -391,4 +391,18 @@ mod tests {
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/token"
         );
     }
+
+    #[test]
+    fn random_token_errors_never_break_the_parser() {
+        let samples: [&[u8]; 3] = [
+            br#"{"error":"invalid_grant","error_description":"AADSTS70043: expired.\r\nTrace ID: x","error_codes":[70043]}"#,
+            br#"{"error":"interaction_required","error_codes":[50076],"suberror":"basic_action"}"#,
+            br#"{"error":"temporarily_unavailable"}"#,
+        ];
+        crate::test_util::random_inputs("token error", &samples, |input| {
+            for status in [400, 401, 500, 503] {
+                let _ = classify_error(status, input);
+            }
+        });
+    }
 }
