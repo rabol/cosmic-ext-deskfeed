@@ -64,7 +64,9 @@ impl AppModel {
             TrayEvent::Ready(handle) => {
                 self.tray = Some(handle);
                 self.tray_unavailable = None;
-                self.update_tray()
+                // Sent by `update` right after this.
+                self.tray_menu = None;
+                Task::none()
             }
             TrayEvent::Unavailable(why) => {
                 self.tray = None;
@@ -82,9 +84,13 @@ impl AppModel {
                     None => show,
                 }
             }
-            TrayEvent::ShowDesktop(key) => {
-                cosmic::Application::update(self, Message::ShowSession(key))
+            TrayEvent::Connect(key) => {
+                // A password, a certificate or a failure opens the window
+                // (`window_needed`).
+                self.tray_connects.insert(key.clone());
+                self.route(Message::Connect(key))
             }
+            TrayEvent::ShowDesktop(key) => self.route(Message::ShowSession(key)),
             TrayEvent::Quit => {
                 // Asked in the window when desktops are open.
                 self.quit_from_tray = true;
@@ -93,29 +99,162 @@ impl AppModel {
                 } else {
                     self.show_window()
                 };
-                Task::batch([
-                    show,
-                    cosmic::Application::update(self, Message::QuitRequested),
-                ])
+                Task::batch([show, self.route(Message::QuitRequested)])
             }
         }
     }
 
-    /// Lists the connected desktops in the tray's menu.
-    pub(super) fn update_tray(&self) -> Task<cosmic::Action<Message>> {
+    /// With the window closed: opens it when something needs the user (the
+    /// quit question, a password, a certificate, a desktop connected from
+    /// the tray that failed).
+    pub(super) fn window_needed(&mut self) -> Task<cosmic::Action<Message>> {
+        if self.core.main_window_id().is_some() {
+            self.tray_connects.clear();
+            return Task::none();
+        }
+        let failed = self
+            .tray_connects
+            .iter()
+            .any(|k| matches!(self.connections.get(k), Some(Connection::Failed(_))));
+        let needs_sign_in = self.tray_connects.iter().any(|k| {
+            self.account_of_resource(k).is_none()
+                && self
+                    .accounts
+                    .iter()
+                    .any(|a| matches!(a.state, AccountState::NeedsSignIn { .. }))
+        });
+        // Settled ones don't need watching any more.
+        self.tray_connects.retain(|k| {
+            matches!(
+                self.connections.get(k),
+                Some(
+                    Connection::Preparing
+                        | Connection::AwaitingUser
+                        | Connection::Connecting
+                        | Connection::Authenticating
+                )
+            )
+        });
+        if self.quit == Quit::Asking
+            || self.dialog.is_some()
+            || self.certificate_dialog.is_some()
+            || failed
+            || needs_sign_in
+        {
+            self.tray_connects.clear();
+            return self.show_window();
+        }
+        Task::none()
+    }
+
+    /// The tray's menu: how many desktops are connected, Show, every
+    /// desktop (per account when there are several), Quit.
+    fn tray_items(&self) -> Vec<crate::tray::TrayItem> {
+        use crate::tray::{TrayAction, TrayItem};
+        let action = |label: String, action: TrayAction| TrayItem::Action {
+            label,
+            action,
+            checked: false,
+            enabled: true,
+        };
+        let mut items = Vec::new();
+        let connected = self
+            .connections
+            .values()
+            .filter(|c| matches!(c, Connection::Connected))
+            .count();
+        if connected > 0 {
+            let count = u32::try_from(connected).unwrap_or(u32::MAX);
+            items.push(TrayItem::Note(fl!("tray-connected", count = count)));
+        }
+        items.push(action(fl!("tray-show"), TrayAction::Show));
+        let ready: Vec<&Account> = self
+            .accounts
+            .iter()
+            .filter(|a| matches!(a.state, AccountState::Ready { .. }))
+            .collect();
+        let several = ready.len() > 1;
+        let mut groups = Vec::new();
+        for account in ready {
+            let AccountState::Ready { workspaces, .. } = &account.state else {
+                continue;
+            };
+            let mut desktops: Vec<&ResourceView> = workspaces
+                .iter()
+                .flat_map(|w| &w.resources)
+                .filter(|r| r.kind == ResourceKind::Desktop)
+                .collect();
+            // Favorites first, then by title.
+            desktops.sort_by_key(|r| (!self.config.favorites.contains(&r.key), r.title.clone()));
+            desktops.dedup_by(|a, b| a.key == b.key);
+            let lines: Vec<TrayItem> = desktops.into_iter().map(|r| self.tray_desktop(r)).collect();
+            if lines.is_empty() {
+                continue;
+            }
+            if several {
+                groups.push(TrayItem::Submenu {
+                    label: account.label(),
+                    items: lines,
+                });
+            } else {
+                groups.extend(lines);
+            }
+        }
+        if !groups.is_empty() {
+            items.push(TrayItem::Separator);
+            items.extend(groups);
+        }
+        items.push(TrayItem::Separator);
+        items.push(action(fl!("tray-quit"), TrayAction::Quit));
+        items
+    }
+
+    /// One desktop in the tray: Show when connected (checked), Connect when
+    /// not, its state while busy.
+    fn tray_desktop(&self, r: &ResourceView) -> crate::tray::TrayItem {
+        use crate::tray::{TrayAction, TrayItem};
+        let busy = |status: String| TrayItem::Action {
+            label: format!("{} · {status}", r.title),
+            action: TrayAction::ShowDesktop(r.key.clone()),
+            checked: false,
+            enabled: false,
+        };
+        match self.connections.get(&r.key) {
+            Some(Connection::Connected) => TrayItem::Action {
+                label: r.title.clone(),
+                action: TrayAction::ShowDesktop(r.key.clone()),
+                checked: true,
+                enabled: true,
+            },
+            None | Some(Connection::Failed(_)) => TrayItem::Action {
+                label: fl!("tray-connect", title = r.title.clone()),
+                action: TrayAction::Connect(r.key.clone()),
+                checked: false,
+                enabled: true,
+            },
+            Some(Connection::Preparing | Connection::Connecting) => busy(fl!("status-connecting")),
+            Some(Connection::AwaitingUser) => busy(fl!("status-awaiting-user")),
+            Some(Connection::Authenticating) => busy(fl!("status-authenticating")),
+            Some(Connection::Disconnecting) => busy(fl!("status-disconnecting")),
+            Some(Connection::Reconnecting { attempt, of }) => {
+                let (attempt, of) = (*attempt, *of);
+                busy(fl!("status-reconnecting", attempt = attempt, of = of))
+            }
+        }
+    }
+
+    /// Sends the tray its menu when it changed.
+    pub(super) fn update_tray(&mut self) -> Task<cosmic::Action<Message>> {
         let Some(handle) = self.tray.clone() else {
+            self.tray_menu = None;
             return Task::none();
         };
-        let desktops: Vec<(String, String)> = self
-            .connections
-            .iter()
-            .filter(|(_, c)| matches!(c, Connection::Connected))
-            .filter_map(|(key, _)| {
-                let title = self.account_of_resource(key)?.resource(key)?.title.clone();
-                Some((key.clone(), title))
-            })
-            .collect();
-        Task::future(async move { handle.set_desktops(desktops).await }).discard()
+        let items = self.tray_items();
+        if self.tray_menu.as_ref() == Some(&items) {
+            return Task::none();
+        }
+        self.tray_menu = Some(items.clone());
+        Task::future(async move { handle.set_menu(items).await }).discard()
     }
 
     /// Watches the sessions started with "Keep the screen on in full

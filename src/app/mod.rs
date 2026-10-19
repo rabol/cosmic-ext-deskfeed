@@ -60,7 +60,6 @@ fn tray_events() -> impl cosmic::iced::futures::Stream<Item = crate::tray::TrayE
         title: fl!("app-title"),
         show: fl!("tray-show"),
         quit: fl!("tray-quit"),
-        show_desktop: fl!("tray-show-desktop", title = "{title}"),
     })
 }
 
@@ -112,6 +111,10 @@ pub struct AppModel {
     tray_unavailable: Option<String>,
     /// The tray's Quit: really quit, not close to the background.
     quit_from_tray: bool,
+    /// The menu the tray shows now (sent again only when it changes).
+    tray_menu: Option<Vec<crate::tray::TrayItem>>,
+    /// Desktops connected from the tray: their failure opens the window.
+    tray_connects: HashSet<String>,
     /// "Start when you log in" (its autostart entry is there).
     autostart: bool,
     /// The diagnostics report while its page is open (`None`: building).
@@ -234,6 +237,8 @@ impl cosmic::Application for AppModel {
             tray: None,
             tray_unavailable: None,
             quit_from_tray: false,
+            tray_menu: None,
+            tray_connects: HashSet::new(),
             autostart: crate::autostart::enabled(),
             diagnostics: None,
             diagnostics_status: None,
@@ -549,6 +554,18 @@ impl cosmic::Application for AppModel {
     }
 
     fn update(&mut self, message: Self::Message) -> Task<cosmic::Action<Self::Message>> {
+        let task = self.route(message);
+        // With the window closed (background operation): open it when
+        // something needs the user, and keep the tray's menu current.
+        let window = self.window_needed();
+        let tray = self.update_tray();
+        Task::batch([task, window, tray])
+    }
+}
+
+impl AppModel {
+    /// Hands each message to the part of the app it belongs to.
+    fn route(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::SavedLoaded(..)
             | Message::Restored(..)
@@ -613,9 +630,7 @@ impl cosmic::Application for AppModel {
             other => self.app_message(other),
         }
     }
-}
 
-impl AppModel {
     /// App-wide messages: dependencies, the context drawer, links, notices, the log. Routed here by `update`.
     pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {

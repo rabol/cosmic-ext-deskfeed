@@ -6,8 +6,12 @@
 //!
 //! COSMIC's status area (cosmic-applets `cosmic-applet-status-area`) calls
 //! `Activate` on a click, after `ProvideXdgActivationToken`, and shows the
-//! menu otherwise. Clicking opens Deskfeed; the menu has "Show Deskfeed",
-//! one "Show" entry per connected desktop, and "Quit".
+//! menu otherwise. It draws labels, separators, disabled items, a check
+//! mark (`toggle-state` 1) and one level of submenus, and sends a fresh
+//! activation token before each menu click. It shows no tooltip or title,
+//! so the menu is where sessions show (a count, check marks).
+//!
+//! The app builds the menu ([`TrayItem`]); this module serves it.
 //!
 //! The item exists only while a StatusNotifierWatcher with a host answers;
 //! otherwise the app is told the tray is unavailable, so it never runs
@@ -25,14 +29,41 @@ const MENU_PATH: &str = "/MenuBar";
 const WATCHER: &str = "org.kde.StatusNotifierWatcher";
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 
-/// Menu item IDs; desktops follow from `FIRST_DESKTOP`.
-const SHOW: i32 = 1;
-const QUIT: i32 = 2;
-const SEPARATOR_1: i32 = 3;
-const SEPARATOR_2: i32 = 4;
-const FIRST_DESKTOP: i32 = 100;
-/// More aren't listed (each is a menu line).
-const MAX_DESKTOPS: usize = 20;
+/// Menu item IDs are the position in the flattened menu, from 1 (0 is
+/// the root). More items than this aren't served.
+const MAX_ITEMS: usize = 200;
+
+/// One menu line, built by the app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayItem {
+    /// A line that does something.
+    Action {
+        label: String,
+        action: TrayAction,
+        /// Shown with a check mark (a connected desktop).
+        checked: bool,
+        enabled: bool,
+    },
+    /// A line that only informs (disabled).
+    Note(String),
+    Separator,
+    /// One level of submenu (an account's desktops).
+    Submenu {
+        label: String,
+        items: Vec<TrayItem>,
+    },
+}
+
+/// What a menu line asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TrayAction {
+    Show,
+    Quit,
+    /// Bring this desktop (resource key) to the front.
+    ShowDesktop(String),
+    /// Connect this desktop (resource key).
+    Connect(String),
+}
 
 /// What the tray reports to the app.
 #[derive(Debug, Clone)]
@@ -45,6 +76,8 @@ pub enum TrayEvent {
     Show(Option<String>),
     /// Bring this desktop (resource key) to the front.
     ShowDesktop(String),
+    /// Connect this desktop (resource key).
+    Connect(String),
     Quit,
 }
 
@@ -62,16 +95,15 @@ impl std::fmt::Debug for Handle {
 }
 
 impl Handle {
-    /// The connected desktops: (resource key, title). Titles stay on this
+    /// Replaces the menu (when it changed). Desktop titles stay on this
     /// computer's session bus, like the window titles.
-    pub async fn set_desktops(&self, desktops: Vec<(String, String)>) {
+    pub async fn set_menu(&self, items: Vec<TrayItem>) {
         let revision = {
             let Ok(mut m) = self.menu.lock() else { return };
-            let desktops: Vec<_> = desktops.into_iter().take(MAX_DESKTOPS).collect();
-            if m.desktops == desktops {
+            if m.items == items {
                 return;
             }
-            m.desktops = desktops;
+            m.items = items;
             m.revision += 1;
             m.revision
         };
@@ -84,11 +116,7 @@ impl Handle {
 #[derive(Default)]
 struct MenuState {
     revision: u32,
-    desktops: Vec<(String, String)>,
-    /// Labels in the user's language.
-    show_label: String,
-    quit_label: String,
-    show_desktop_label: String,
+    items: Vec<TrayItem>,
 }
 
 struct Item {
@@ -163,6 +191,8 @@ impl Item {
 struct Menu {
     state: Arc<Mutex<MenuState>>,
     events: mpsc::UnboundedSender<TrayEvent>,
+    /// COSMIC's activation token for the next click, shared with the item.
+    token: Arc<Mutex<Option<String>>>,
 }
 
 type Props = HashMap<String, OwnedValue>;
@@ -176,13 +206,89 @@ fn props(pairs: &[(&str, Value<'_>)]) -> Props {
         .collect()
 }
 
-fn entry(id: i32, props: Props) -> Structure<'static> {
+fn entry(id: i32, props: Props, children: Vec<Value<'static>>) -> Structure<'static> {
     StructureBuilder::new()
         .add_field(id)
         .add_field(props)
-        .add_field(Vec::<Value<'static>>::new())
+        .add_field(children)
         .build()
         .expect("non-empty structure")
+}
+
+/// The menu as dbusmenu entries, numbered in order from `next`.
+fn entries(items: &[TrayItem], next: &mut i32) -> Vec<Value<'static>> {
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        if usize::try_from(*next).unwrap_or(usize::MAX) > MAX_ITEMS {
+            break;
+        }
+        let id = *next;
+        *next += 1;
+        let text = |s: &str| Value::from(s.to_owned());
+        let structure = match item {
+            TrayItem::Action {
+                label,
+                checked,
+                enabled,
+                ..
+            } => {
+                let mut p = vec![("label", text(label)), ("enabled", Value::from(*enabled))];
+                if *checked {
+                    p.push(("toggle-type", Value::from("checkmark")));
+                    p.push(("toggle-state", Value::from(1i32)));
+                }
+                entry(id, props(&p), Vec::new())
+            }
+            TrayItem::Note(label) => entry(
+                id,
+                props(&[("label", text(label)), ("enabled", Value::from(false))]),
+                Vec::new(),
+            ),
+            TrayItem::Separator => {
+                entry(id, props(&[("type", Value::from("separator"))]), Vec::new())
+            }
+            TrayItem::Submenu { label, items } => {
+                let children = entries(items, next);
+                entry(
+                    id,
+                    props(&[
+                        ("label", text(label)),
+                        ("children-display", Value::from("submenu")),
+                    ]),
+                    children,
+                )
+            }
+        };
+        out.push(Value::from(structure));
+    }
+    out
+}
+
+/// The action of the line numbered `id`, counted as [`entries`] does.
+fn action_of(items: &[TrayItem], id: i32) -> Option<TrayAction> {
+    fn walk(items: &[TrayItem], id: i32, next: &mut i32) -> Option<TrayAction> {
+        for item in items {
+            let this = *next;
+            *next += 1;
+            match item {
+                TrayItem::Action {
+                    action, enabled, ..
+                } if this == id => return enabled.then(|| action.clone()),
+                TrayItem::Submenu { items, .. } => {
+                    if this == id {
+                        return None;
+                    }
+                    if let Some(a) = walk(items, id, next) {
+                        return Some(a);
+                    }
+                }
+                _ if this == id => return None,
+                _ => {}
+            }
+        }
+        None
+    }
+    walk(items, id, &mut 1)
 }
 
 impl Menu {
@@ -191,22 +297,9 @@ impl Menu {
         let Ok(m) = self.state.lock() else {
             return (0, Props::new(), Vec::new());
         };
-        let label = |s: &str| Value::from(s.to_owned());
-        let separator = |id| entry(id, props(&[("type", Value::from("separator"))]));
-        let mut children = vec![entry(SHOW, props(&[("label", label(&m.show_label))]))];
-        if !m.desktops.is_empty() {
-            children.push(separator(SEPARATOR_1));
-            for (i, (_, title)) in m.desktops.iter().enumerate() {
-                let text = m.show_desktop_label.replace("{title}", title);
-                let id = FIRST_DESKTOP + i32::try_from(i).unwrap_or(0);
-                children.push(entry(id, props(&[("label", label(&text))])));
-            }
-        }
-        children.push(separator(SEPARATOR_2));
-        children.push(entry(QUIT, props(&[("label", label(&m.quit_label))])));
-        let children = children
+        let children = entries(&m.items, &mut 1)
             .into_iter()
-            .filter_map(|c| OwnedValue::try_from(Value::from(c)).ok())
+            .filter_map(|c| OwnedValue::try_from(c).ok())
             .collect();
         (
             0,
@@ -216,20 +309,18 @@ impl Menu {
     }
 
     fn clicked(&self, id: i32) {
-        let event = match id {
-            SHOW => Some(TrayEvent::Show(None)),
-            QUIT => Some(TrayEvent::Quit),
-            id if id >= FIRST_DESKTOP => self.state.lock().ok().and_then(|m| {
-                let i = usize::try_from(id - FIRST_DESKTOP).ok()?;
-                m.desktops
-                    .get(i)
-                    .map(|(key, _)| TrayEvent::ShowDesktop(key.clone()))
-            }),
-            _ => None,
+        let action = self.state.lock().ok().and_then(|m| action_of(&m.items, id));
+        let event = match action {
+            Some(TrayAction::Show) => {
+                let token = self.token.lock().ok().and_then(|mut t| t.take());
+                TrayEvent::Show(token)
+            }
+            Some(TrayAction::Quit) => TrayEvent::Quit,
+            Some(TrayAction::ShowDesktop(key)) => TrayEvent::ShowDesktop(key),
+            Some(TrayAction::Connect(key)) => TrayEvent::Connect(key),
+            None => return,
         };
-        if let Some(e) = event {
-            let _ = self.events.unbounded_send(e);
-        }
+        let _ = self.events.unbounded_send(event);
     }
 }
 
@@ -306,13 +397,11 @@ impl Menu {
     ) -> zbus::Result<()>;
 }
 
-/// The labels the tray shows, in the user's language.
+/// The labels the tray shows before the app sends its menu.
 pub struct Labels {
     pub title: String,
     pub show: String,
     pub quit: String,
-    /// With `{title}` for the desktop's title.
-    pub show_desktop: String,
 }
 
 /// The tray as a stream of events, for an iced subscription. Ends with
@@ -343,11 +432,24 @@ pub fn run(labels: Labels) -> impl cosmic::iced::futures::Stream<Item = TrayEven
 async fn serve(labels: Labels, events: mpsc::UnboundedSender<TrayEvent>) -> Result<Handle, String> {
     let err = |e: zbus::Error| e.to_string();
     let menu = Arc::new(Mutex::new(MenuState {
-        show_label: labels.show,
-        quit_label: labels.quit,
-        show_desktop_label: labels.show_desktop,
-        ..MenuState::default()
+        revision: 0,
+        items: vec![
+            TrayItem::Action {
+                label: labels.show,
+                action: TrayAction::Show,
+                checked: false,
+                enabled: true,
+            },
+            TrayItem::Separator,
+            TrayItem::Action {
+                label: labels.quit,
+                action: TrayAction::Quit,
+                checked: false,
+                enabled: true,
+            },
+        ],
     }));
+    let token: Arc<Mutex<Option<String>>> = Arc::default();
     let name = format!("org.kde.StatusNotifierItem-{}-1", std::process::id());
     let conn = zbus::connection::Builder::session()
         .map_err(err)?
@@ -357,7 +459,7 @@ async fn serve(labels: Labels, events: mpsc::UnboundedSender<TrayEvent>) -> Resu
             ITEM_PATH,
             Item {
                 events: events.clone(),
-                token: Arc::default(),
+                token: token.clone(),
                 title: labels.title,
             },
         )
@@ -367,6 +469,7 @@ async fn serve(labels: Labels, events: mpsc::UnboundedSender<TrayEvent>) -> Resu
             Menu {
                 state: menu.clone(),
                 events,
+                token,
             },
         )
         .map_err(err)?
@@ -418,42 +521,79 @@ async fn serve(labels: Labels, events: mpsc::UnboundedSender<TrayEvent>) -> Resu
 mod tests {
     use super::*;
 
-    fn menu(desktops: &[(&str, &str)]) -> Menu {
-        let (events, _rx) = mpsc::unbounded();
-        Menu {
-            state: Arc::new(Mutex::new(MenuState {
-                desktops: desktops
-                    .iter()
-                    .map(|(k, t)| ((*k).to_owned(), (*t).to_owned()))
-                    .collect(),
-                show_label: "Show Deskfeed".into(),
-                quit_label: "Quit".into(),
-                show_desktop_label: "Show {title}".into(),
-                ..MenuState::default()
-            })),
-            events,
+    fn action(label: &str, action: TrayAction) -> TrayItem {
+        TrayItem::Action {
+            label: label.into(),
+            action,
+            checked: false,
+            enabled: true,
         }
     }
 
+    fn sample() -> Vec<TrayItem> {
+        vec![
+            TrayItem::Note("1 desktop connected".into()),
+            action("Show Deskfeed", TrayAction::Show),
+            TrayItem::Separator,
+            TrayItem::Submenu {
+                label: "a@example.com".into(),
+                items: vec![
+                    action("Win 11", TrayAction::ShowDesktop("k1".into())),
+                    TrayItem::Action {
+                        label: "Dev · Connecting".into(),
+                        action: TrayAction::Connect("k2".into()),
+                        checked: false,
+                        enabled: false,
+                    },
+                ],
+            },
+            action("Lab", TrayAction::Connect("k3".into())),
+            TrayItem::Separator,
+            action("Quit", TrayAction::Quit),
+        ]
+    }
+
     #[test]
-    fn layout_lists_show_desktops_and_quit() {
-        let (_, _, children) = menu(&[]).layout();
-        // Show, separator, Quit.
-        assert_eq!(children.len(), 3);
-        let (_, _, children) = menu(&[("k1", "Win 11"), ("k2", "Dev")]).layout();
-        // Show, separator, two desktops, separator, Quit.
-        assert_eq!(children.len(), 6);
+    fn ids_follow_the_flattened_order() {
+        let items = sample();
+        // 1 note, 2 show, 3 separator, 4 submenu, 5 Win 11, 6 Dev,
+        // 7 Lab, 8 separator, 9 Quit.
+        assert_eq!(action_of(&items, 2), Some(TrayAction::Show));
+        assert_eq!(action_of(&items, 4), None);
+        assert_eq!(
+            action_of(&items, 5),
+            Some(TrayAction::ShowDesktop("k1".into()))
+        );
+        assert_eq!(action_of(&items, 6), None, "disabled");
+        assert_eq!(action_of(&items, 7), Some(TrayAction::Connect("k3".into())));
+        assert_eq!(action_of(&items, 9), Some(TrayAction::Quit));
+        assert_eq!(action_of(&items, 1), None, "a note");
+        assert_eq!(action_of(&items, 42), None);
+        // The served entries count the same way.
+        let top = entries(&items, &mut 1);
+        assert_eq!(top.len(), 7);
     }
 
     #[test]
     fn clicks_map_to_events() {
         let (events, mut rx) = mpsc::unbounded();
-        let mut m = menu(&[("k1", "Win 11")]);
-        m.events = events;
-        m.clicked(FIRST_DESKTOP);
-        m.clicked(QUIT);
-        m.clicked(FIRST_DESKTOP + 5); // gone meanwhile: nothing
+        let token: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(Some("tok".into())));
+        let m = Menu {
+            state: Arc::new(Mutex::new(MenuState {
+                revision: 0,
+                items: sample(),
+            })),
+            events,
+            token,
+        };
+        m.clicked(2);
+        m.clicked(5);
+        m.clicked(7);
+        m.clicked(6); // disabled: nothing
+        m.clicked(9);
+        assert!(matches!(rx.try_recv(), Ok(TrayEvent::Show(Some(t))) if t == "tok"));
         assert!(matches!(rx.try_recv(), Ok(TrayEvent::ShowDesktop(k)) if k == "k1"));
+        assert!(matches!(rx.try_recv(), Ok(TrayEvent::Connect(k)) if k == "k3"));
         assert!(matches!(rx.try_recv(), Ok(TrayEvent::Quit)));
         assert!(rx.try_recv().is_err());
     }

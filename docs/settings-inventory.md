@@ -59,7 +59,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | FreeRDP ≥ 3.32.2; binaries `xfreerdp3`, `xfreerdp` | `deps.rs`, `sessions/launcher.rs` | The tested backend (ADR 0004) |
 | FreeRDP stop grace 5 s; 60 kept log lines; 4 096-char output lines | `sessions/launcher.rs` | Internal process handling |
 | Dependency check: 5 s per command, 256 KiB output | `deps.rs` | Internal |
-| Tray menu: at most 20 desktops listed | `tray.rs` `MAX_DESKTOPS` | Each is a menu line; the window lists all |
+| Tray menu: at most 200 lines | `tray.rs` `MAX_ITEMS` | Bound on what is served; the window lists all |
 | Keep-screen-on check every 1 s | `workspace.rs` `WATCH_POLL` | Internal timing; a blank or lock comes after minutes |
 | Workspace move: poll 200 ms, wait 3 s for a new workspace | `workspace.rs` | Internal timing |
 | Refresh check every 5 min (and after resume) | `app/mod.rs` `REFRESH_CHECK` | Internal; the refresh interval is a setting |

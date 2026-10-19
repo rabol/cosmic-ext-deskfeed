@@ -196,7 +196,11 @@ setting-autostart = Start when you log in
 setting-autostart-desc = With "Keep running in the background" on, Deskfeed starts with only its icon in the panel; otherwise its window opens.
 tray-show = Show Deskfeed
 tray-quit = Quit
-tray-show-desktop = Show { $title }
+tray-connect = Connect { $title }
+tray-connected = { $count ->
+    [one] 1 desktop connected
+   *[other] { $count } desktops connected
+}
 quit-to-background = Keep running in the background
 setting-log-size = Log file size
 setting-log-size-desc = When the log reaches this size it starts again; the previous log is kept as app.log.1. View → Open log folder shows both.

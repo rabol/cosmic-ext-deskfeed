@@ -39,3 +39,15 @@ libcosmic closes the app when its main window closes, unless the `multi-window` 
 - `--background` starts without a window (libcosmic `no_main_window`). The window still opens when background operation is off, when no tray answers, or when a dependency is missing, so Deskfeed is never hidden without a way back.
 - Checked on the live session: with background on, `--background` showed only the tray icon, and a tray click opened the window. With it off, the window opened.
 
+## Addendum (2026-10-19): desktops and sessions in the tray menu
+
+- COSMIC's status area (cosmic-applets `cosmic-applet-status-area`, `components/status_menu.rs`) draws menu labels, separators, disabled items, a check mark for `toggle-state` 1 and one level of submenus. It sends a fresh activation token before each menu click. It shows no tooltip, title or attention state, so sessions show in the menu.
+- The app builds the menu; `tray.rs` only serves it. From the top:
+  - "N desktops connected" (only when there are any);
+  - Show Deskfeed;
+  - every desktop of each signed-in account (favorites first, then by title; in a submenu per account when there are several). A connected desktop has a check mark and brings it to the front; one that isn't offers "Connect …"; a busy one shows its state, disabled;
+  - Quit.
+- The menu is rebuilt after every message and sent only when it changed.
+- Connect from the tray works with the window closed. The window opens when the user is needed: a password or certificate question, the quit question, a sign-in, or a failed connection.
+- Show from the menu now passes COSMIC's activation token, like a click on the icon.
+

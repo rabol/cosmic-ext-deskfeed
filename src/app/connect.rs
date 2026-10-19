@@ -121,9 +121,7 @@ impl AppModel {
                 if self.account(&id).is_some_and(|a| a.epoch == epoch)
                     && self.running.get(&key).is_some_and(|r| r.attempt == attempt)
                 {
-                    let task = self.session_event(&key, event);
-                    // The tray's menu lists the connected desktops.
-                    return Task::batch([task, self.update_tray()]);
+                    return self.session_event(&key, event);
                 }
             }
             Message::Disconnect(key) => {
