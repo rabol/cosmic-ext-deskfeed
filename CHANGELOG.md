@@ -7,6 +7,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 ### Added
 
 - RemoteApps (preview): apps from the feed connect and open as ordinary windows, grouped under Deskfeed in the dock, on every monitor. Settings that only fit a desktop (full screen, keyboard, workspace, keep the screen on) are left out for apps. When Windows won't start an app, the row says why. Checked against a Windows host, not yet with an AVD RemoteApp (ADR 0020).
+- The password dialog has an editable Windows user name, filled in from the account; the name typed for a desktop is remembered for it (review F09).
 - Signing out can no longer be undone by work that was already under way: a token renewal, a remembered password or the offline list saved just after sign-out stays deleted. Forget password works the same way against a save on its way (review F01, F05).
 - Two desktops asking for a password at once each get their dialog, one after the other; before, one could stay stuck "waiting for your password". A desktop that is preparing or waiting for its password can be cancelled from its row.
 - A proxy's user name and password no longer go into the environment of FreeRDP or the sign-in window (ADR 0008 addendum). A proxy that needs a password can't be used for desktop connections because of a FreeRDP bug; the row now says so.

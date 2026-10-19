@@ -476,6 +476,18 @@ impl cosmic::Application for AppModel {
         controls = controls.push(widget::text::body(fl!("password-for", account = account)));
         if d.logon != LOGON_ENTRA {
             controls = controls.push(
+                widget::column::with_capacity(2)
+                    .push(widget::text::caption(fl!("windows-user-name")))
+                    .push(
+                        widget::text_input(
+                            fl!("windows-user-name-placeholder"),
+                            d.username.as_str(),
+                        )
+                        .on_input(Message::WindowsUserInput),
+                    )
+                    .spacing(space.space_xxs),
+            );
+            controls = controls.push(
                 widget::secure_input(
                     fl!("windows-password"),
                     d.password.as_str(),
@@ -641,6 +653,7 @@ impl AppModel {
             Message::Connect(..)
             | Message::ConnectionFileReady(..)
             | Message::PasswordInput(..)
+            | Message::WindowsUserInput(..)
             | Message::TogglePasswordVisible
             | Message::LogonSelected(..)
             | Message::CustomDomainInput(..)

@@ -17,6 +17,10 @@ pub struct Config {
     /// of account, tenant, workspace and resource ID (spec §7: titles are never
     /// identity). No credentials are stored here.
     pub logon_settings: BTreeMap<String, LogonSetting>,
+    /// The Windows user name typed for a desktop's password logon, when it
+    /// differs from the account's (spec §8: editable; review F09). Resource
+    /// keys, as above. Not a credential.
+    pub windows_usernames: BTreeMap<String, String>,
     /// Session host certificates the user approved, per desktop (resource
     /// keys; sha256 fingerprints), ADR 0016.
     pub certificate_pins: BTreeMap<String, String>,

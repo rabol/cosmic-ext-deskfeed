@@ -31,6 +31,9 @@ quit-body = { $count ->
    *[other] { $count } desktops or apps are connected. Quitting disconnects them.
 }
 quit-disconnect = Disconnect and quit
+windows-user-name = Windows user name
+windows-user-name-placeholder = name@example.com or DOMAIN\name
+error-bad-windows-user = Check the Windows user name: use name, name@domain or DOMAIN\name.
 sign-out-title = Sign out of { $account }?
 sign-out-body = { $count ->
     [one] A desktop or app of this account is connected. Signing out disconnects it.
