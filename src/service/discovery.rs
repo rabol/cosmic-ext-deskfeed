@@ -19,6 +19,9 @@ pub enum FetchError {
     Http(HttpError),
     Feed(FeedError),
     NotUtf8,
+    /// No longer wanted (its account signed out): stopped before the next
+    /// request.
+    Cancelled,
 }
 
 impl std::fmt::Display for FetchError {
@@ -27,6 +30,7 @@ impl std::fmt::Display for FetchError {
             Self::Http(e) => e.fmt(f),
             Self::Feed(e) => e.fmt(f),
             Self::NotUtf8 => f.write_str("feed is not UTF-8"),
+            Self::Cancelled => f.write_str("cancelled"),
         }
     }
 }
@@ -46,18 +50,33 @@ fn fetch_text(
 }
 
 /// Discovery and all tenant feeds. `Err` only when discovery itself fails.
-pub fn discover(http: &Http, token: &BearerToken) -> Result<Vec<WorkspaceFeed>, FetchError> {
+/// The account's workspaces. `wanted` is asked before every request; once
+/// it says no (the account signed out), no more requests are made (review
+/// F08).
+pub fn discover(
+    http: &Http,
+    token: &BearerToken,
+    wanted: &dyn Fn() -> bool,
+) -> Result<Vec<WorkspaceFeed>, FetchError> {
+    let still = || {
+        if wanted() {
+            Ok(())
+        } else {
+            Err(FetchError::Cancelled)
+        }
+    };
+    still()?;
     let url = http.policy().feed_discovery_url();
     let text = fetch_text(http, &url, Role::FeedDiscovery, token)?;
     let tenants = feed::parse_discovery(&text).map_err(FetchError::Feed)?;
-    Ok(tenants
-        .into_iter()
-        .map(|tenant| {
-            let result = fetch_text(http, &tenant.feed_url, Role::Feed, token)
-                .and_then(|t| feed::parse_feed(&t).map_err(FetchError::Feed));
-            WorkspaceFeed { tenant, result }
-        })
-        .collect())
+    let mut feeds = Vec::with_capacity(tenants.len());
+    for tenant in tenants {
+        still()?;
+        let result = fetch_text(http, &tenant.feed_url, Role::Feed, token)
+            .and_then(|t| feed::parse_feed(&t).map_err(FetchError::Feed));
+        feeds.push(WorkspaceFeed { tenant, result });
+    }
+    Ok(feeds)
 }
 
 #[cfg(test)]
@@ -102,6 +121,30 @@ mod tests {
     }
 
     #[test]
+    fn stops_requesting_once_no_longer_wanted() {
+        let (listener, port) = bind();
+        let base = format!("http://127.0.0.1:{port}/api/arm/feeddiscovery/tenants");
+        let discovery = format!(
+            r#"<TenantFeedURLs xmlns="http://schemas.microsoft.com/ts/2014/03/tswfdiscovery">
+                 <TenantFeedURL FeedURL="{base}/t1/webfeed" TenantId="t1"/>
+               </TenantFeedURLs>"#
+        );
+        let routes = HashMap::from([("/api/arm/feeddiscovery".to_owned(), (200, discovery))]);
+        // Answers only the discovery request: a feed request after it
+        // would fail to connect, not end as Cancelled.
+        serve(listener, routes, 1);
+        let http = Http::new(EndpointPolicy::local_test(port));
+        let asked = std::cell::Cell::new(0);
+        let wanted = || {
+            asked.set(asked.get() + 1);
+            asked.get() == 1
+        };
+        let result = discover(&http, &BearerToken::new("t".into()), &wanted);
+        assert!(matches!(result, Err(FetchError::Cancelled)), "{result:?}");
+        assert_eq!(asked.get(), 2);
+    }
+
+    #[test]
     fn partial_failure_keeps_good_feeds() {
         let (listener, port) = bind();
         let base = format!("http://127.0.0.1:{port}/api/arm/feeddiscovery/tenants");
@@ -130,7 +173,7 @@ mod tests {
         ]);
         serve(listener, routes, 3);
         let http = Http::new(EndpointPolicy::local_test(port));
-        let feeds = discover(&http, &BearerToken::new("t".into())).unwrap();
+        let feeds = discover(&http, &BearerToken::new("t".into()), &|| true).unwrap();
         assert_eq!(feeds.len(), 2);
         assert_eq!(feeds[0].result.as_ref().unwrap().resources[0].title, "Desk");
         assert!(matches!(
@@ -149,7 +192,7 @@ mod tests {
             1,
         );
         let http = Http::new(EndpointPolicy::local_test(port));
-        let err = discover(&http, &BearerToken::new("t".into())).unwrap_err();
+        let err = discover(&http, &BearerToken::new("t".into()), &|| true).unwrap_err();
         assert!(matches!(
             err,
             FetchError::Http(HttpError::Status { status: 401, .. })
@@ -171,7 +214,7 @@ mod tests {
             1,
         );
         let http = Http::new(EndpointPolicy::local_test(port));
-        let feeds = discover(&http, &BearerToken::new("t".into())).unwrap();
+        let feeds = discover(&http, &BearerToken::new("t".into()), &|| true).unwrap();
         assert!(matches!(
             feeds[0].result,
             Err(FetchError::Http(HttpError::Endpoint(_)))

@@ -549,18 +549,22 @@ impl AppModel {
         let id = id.to_owned();
         // Read now: a sign-out before this runs stops it (review F01).
         let started = accounts::sign_out_count(&id);
+        let owner = id.clone();
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
+                // No more requests once the account signed out (review F08).
+                let wanted = || accounts::sign_out_count(&owner) == started;
                 // An expired access token would only get "session expired".
                 let signed_in = accounts::renew_if_needed(&http, signed_in, started)?;
                 let (feeds, signed_in) =
-                    match discovery::discover(&http, &signed_in.tokens.access_token) {
+                    match discovery::discover(&http, &signed_in.tokens.access_token, &wanted) {
                         // Refused although it looked valid: renew once and retry.
                         Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
                             crate::app_log!("desktop list: access token refused; renewing");
                             let renewed = accounts::renew_now(&http, signed_in, started)?;
-                            let feeds = discovery::discover(&http, &renewed.tokens.access_token)
-                                .map_err(refused_or_shown)?;
+                            let feeds =
+                                discovery::discover(&http, &renewed.tokens.access_token, &wanted)
+                                    .map_err(refused_or_shown)?;
                             (feeds, renewed)
                         }
                         other => (
@@ -683,11 +687,18 @@ impl AppModel {
         }
         let http = self.http.clone();
         let id = id.to_owned();
+        let started = accounts::sign_out_count(&id);
+        let owner = id.clone();
         cosmic::task::future(async move {
             let icons = tokio::task::spawn_blocking(move || {
                 let mut icons = Vec::new();
                 let mut refused = 0;
                 for url in missing {
+                    // No more requests once the account signed out
+                    // (review F08).
+                    if accounts::sign_out_count(&owner) != started {
+                        break;
+                    }
                     let fetched = http
                         .get(&url, Role::Icon, Some(&signed_in.tokens.access_token))
                         .ok()
