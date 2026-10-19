@@ -11,6 +11,8 @@ Install the current build first (`just install`, or the package).
 1. **Sign in again after reinstalling.** The saved sign-in had expired under the tenant's sign-in time limit. Reinstall, open Deskfeed, select Sign in on the account. *Expected:* one Microsoft sign-in page, then the desktop list.
 2. **Sleep for over an hour** (commit `0b957ce`). Sign in, let the computer sleep for more than an hour, wake it, select Connect. *Expected:* the desktop connects, or the account shows a Sign in button. Never a raw error.
 
+3a. **Sign out with a desktop open.** Connect a desktop, then select Sign out on its account. *Expected:* a question "Sign out of …?" with "Disconnect and sign out" and Cancel. Cancel keeps everything; the other button disconnects and signs out. Without anything connected, Sign out happens at once as before.
+
 ### Background and tray (ADR 0017)
 
 3. **Connect from the tray with the window closed.** Turn on Settings → Background, close the window, use the tray menu's "Connect …". *Expected:* the desktop connects without the window opening. A password question or a failure opens the window. The connected desktop has a check mark, and the top of the menu says "1 connected".

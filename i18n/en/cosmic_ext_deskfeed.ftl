@@ -31,6 +31,12 @@ quit-body = { $count ->
    *[other] { $count } desktops or apps are connected. Quitting disconnects them.
 }
 quit-disconnect = Disconnect and quit
+sign-out-title = Sign out of { $account }?
+sign-out-body = { $count ->
+    [one] A desktop or app of this account is connected. Signing out disconnects it.
+   *[other] { $count } desktops or apps of this account are connected. Signing out disconnects them.
+}
+sign-out-disconnect = Disconnect and sign out
 refresh = Refresh
 connect = Connect
 unofficial-notice = Deskfeed is an unofficial community app that works with Azure Virtual Desktop and Windows 365. It is not a Microsoft product. For compatibility it signs in with Microsoft's public Remote Desktop client identity.

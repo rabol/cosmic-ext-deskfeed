@@ -52,12 +52,18 @@ impl AppModel {
             }
             Message::IconsLoaded(id, epoch, icons) => self.icons_loaded(&id, epoch, icons),
             Message::CacheLoaded(id, epoch, cached) => self.cache_loaded(&id, epoch, cached),
-            Message::SignOut(id) => return self.sign_out(&id),
+            Message::SignOut(id) => return self.ask_sign_out(&id),
             Message::SignOutSelected => {
                 if let Some(Page::Account(id)) = self.selected_page() {
+                    return self.ask_sign_out(&id);
+                }
+            }
+            Message::SignOutConfirm => {
+                if let Some(id) = self.sign_out_asking.take() {
                     return self.sign_out(&id);
                 }
             }
+            Message::SignOutCancel => self.sign_out_asking = None,
             Message::SignOutFinished(result) => {
                 if let Err(e) = result {
                     self.notice = Some(e);
@@ -695,6 +701,38 @@ impl AppModel {
             account.generation = generation;
             account.state = AccountState::NeedsSignIn { error: Some(error) };
         }
+    }
+
+    /// The account's open connections: running or starting.
+    fn open_sessions(&self, id: &str) -> usize {
+        self.running.values().filter(|r| r.account == id).count()
+            + self.launching.values().filter(|l| l.account == id).count()
+    }
+
+    /// Sign-out asks first while the account has desktops or apps open
+    /// (spec §6: disconnect and sign out, or cancel).
+    fn ask_sign_out(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+        if self.open_sessions(id) == 0 {
+            return self.sign_out(id);
+        }
+        self.sign_out_asking = Some(id.to_owned());
+        Task::none()
+    }
+
+    pub(super) fn sign_out_dialog(&self, id: &str) -> Element<'_, Message> {
+        let label = self.account(id).map(Account::label).unwrap_or_default();
+        let open = u32::try_from(self.open_sessions(id)).unwrap_or(u32::MAX);
+        widget::dialog()
+            .title(fl!("sign-out-title", account = label))
+            .body(fl!("sign-out-body", count = open))
+            .primary_action(
+                widget::button::destructive(fl!("sign-out-disconnect"))
+                    .on_press(Message::SignOutConfirm),
+            )
+            .secondary_action(
+                widget::button::standard(fl!("cancel")).on_press(Message::SignOutCancel),
+            )
+            .into()
     }
 
     /// Signs one account out: ends its sessions, removes it from the list,

@@ -104,6 +104,9 @@ pub struct AppModel {
     /// RemoteApps whose connection another app's connection took over,
     /// with their windows (ADR 0020): app key → the other app's key.
     moved_to: HashMap<String, String>,
+    /// The account whose sign-out waits for an answer: it has desktops or
+    /// apps open (spec §6).
+    sign_out_asking: Option<String>,
     /// Desktops being reconnected after a lost connection.
     reconnects: HashMap<String, Reconnect>,
     /// The search field's text; filters the desktop list.
@@ -236,6 +239,7 @@ impl cosmic::Application for AppModel {
             timed_out: HashSet::new(),
             session_notes: HashMap::new(),
             moved_to: HashMap::new(),
+            sign_out_asking: None,
             reconnects: HashMap::new(),
             search: String::new(),
             tray: None,
@@ -443,6 +447,9 @@ impl cosmic::Application for AppModel {
         if self.quit == Quit::Asking {
             return Some(self.quit_dialog());
         }
+        if let Some(id) = &self.sign_out_asking {
+            return Some(self.sign_out_dialog(id));
+        }
         if let Some(d) = &self.certificate_dialog {
             return Some(connect::certificate_dialog(d));
         }
@@ -596,6 +603,8 @@ impl AppModel {
             | Message::CacheLoaded(..)
             | Message::SignOut(..)
             | Message::SignOutSelected
+            | Message::SignOutConfirm
+            | Message::SignOutCancel
             | Message::SignOutFinished(..)
             | Message::SignOutFilesRemoved(..) => self.account_message(message),
             Message::Connect(..)

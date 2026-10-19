@@ -265,6 +265,9 @@ pub enum Message {
     IconsLoaded(String, u64, Vec<(Url, Vec<u8>)>),
     SignOut(String),
     SignOutSelected,
+    /// The sign-out question: disconnect its sessions and sign out.
+    SignOutConfirm,
+    SignOutCancel,
     /// The keyring item of a signed-out account is gone (or not).
     SignOutFinished(Result<(), String>),
     /// Account ID: its sign-in window and sessions have ended and its

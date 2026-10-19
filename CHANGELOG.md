@@ -7,6 +7,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 ### Added
 
 - RemoteApps (preview): apps from the feed connect and open as ordinary windows, grouped under Deskfeed in the dock, on every monitor. Settings that only fit a desktop (full screen, keyboard, workspace, keep the screen on) are left out for apps. When Windows won't start an app, the row says why. Checked against a Windows host, not yet with an AVD RemoteApp (ADR 0020).
+- Signing out of an account with desktops or apps connected asks first, offering "Disconnect and sign out" or Cancel.
 - The administrator's clipboard, microphone and sound policy from the connection file now wins over your settings, as the camera policy already did. The desktop's row says what was turned off and why (ADR 0021).
 - When a second app from the same place takes over the first app's session, the first app's row says its windows are now in the second app's connection.
 - When another connection takes over a session (the desktop opened somewhere else, or a second app from the same host pool), the row says so, and Deskfeed doesn't reconnect and take it back.
