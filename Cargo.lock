@@ -958,6 +958,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "cosmic-ext-deskfeed-lines",
+ "cosmic-ext-deskfeed-testkit",
  "dirs",
  "getrandom 0.3.4",
  "i18n-embed",
@@ -989,12 +990,17 @@ name = "cosmic-ext-deskfeed-signin"
 version = "0.1.0"
 dependencies = [
  "cosmic-ext-deskfeed-lines",
+ "cosmic-ext-deskfeed-testkit",
  "gtk4",
  "serde",
  "serde_json",
  "url",
  "webkit6",
 ]
+
+[[package]]
+name = "cosmic-ext-deskfeed-testkit"
+version = "0.1.0"
 
 [[package]]
 name = "cosmic-freedesktop-icons"

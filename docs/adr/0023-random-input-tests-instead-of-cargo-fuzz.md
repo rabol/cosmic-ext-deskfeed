@@ -24,7 +24,7 @@ Spec §13 item 10 asked to fuzz the feed XML, connection-file and callback parse
 
 - Weaker than coverage-guided fuzzing: the inputs don't steer toward code not yet reached. The parsers are small and bounded, and the samples start from real formats, which covers most of what matters.
 - First deep run: 200 000 rounds per parser, plus 100 000 with two other seeds, 1.4 million inputs in all. No panic and nothing slow. The only failure was a rule written too strictly: the feed parser also accepts `http` addresses, which the HTTP policy refuses later. That rule was corrected.
-- Not covered: the sign-in helper's own parsing (`signin/`, a separate crate), which reads FreeRDP's requests and the web view's navigations. That would need a copy of the engine there.
+- Not covered at first: the sign-in helper's own parsing (`signin/`, a separate crate). Covered since 2026-10-19. The engine moved to a small test-only workspace crate (`testkit/`, standard library only, a dev-dependency of both) instead of being copied. The helper's tests cover the app's request line, every URL the web view navigates to (only a bounded redirect returns a code; errors pass on only short plain codes; anything allowed is HTTPS as the URL standard reads it), FreeRDP's protocol lines and command line, and the proxy file. A deep run of 100 000 rounds each found nothing.
 
 ## Addendum (2026-10-19): cargo-fuzz as an optional extra
 

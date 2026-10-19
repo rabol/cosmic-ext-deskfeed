@@ -475,4 +475,40 @@ mod tests {
     fn responses_are_single_lines() {
         assert!(!result(1, &json!({"a": "b\nc"})).contains('\n'));
     }
+
+    /// FreeRDP's helper protocol lines and its command line, with random and
+    /// mangled input (ADR 0023).
+    #[test]
+    fn random_freerdp_messages_never_break_the_reader() {
+        let hello = r#"{"jsonrpc":"2.0","id":1,"method":"hello"}"#;
+        let nav = json!({"jsonrpc":"2.0","id":2,"method":"navigate","params":{"title":"Sign in","url":AUTH,"redirect_uri":BROKER,"timeout_ms":5000}}).to_string();
+        testkit::random_inputs(
+            "freerdp messages",
+            &[hello.as_bytes(), nav.as_bytes()],
+            |input| {
+                let line = String::from_utf8_lossy(input);
+                if let Incoming::Navigate {
+                    url, timeout_ms, ..
+                } = parse_incoming(&line)
+                {
+                    // Only Microsoft's sign-in page, and a bounded wait.
+                    assert!(crate::protocol::valid_start_url(&url).is_some(), "{url}");
+                    assert!(timeout_ms <= MAX_TIMEOUT_MS);
+                }
+            },
+        );
+        testkit::random_inputs(
+            "helper arguments",
+            &[b"--cmdInFd=P1a --cmdOutFd=P1b"],
+            |input| {
+                let text = String::from_utf8_lossy(input);
+                let args: Vec<String> = text.split(' ').map(str::to_owned).collect();
+                for name in ["--cmdInFd", "--cmdOutFd"] {
+                    if let Some(fd) = fd_arg(&args, name) {
+                        assert!(fd >= 0);
+                    }
+                }
+            },
+        );
+    }
 }

@@ -583,4 +583,72 @@ mod tests {
             Navigation::Finished(Reply::Ok { .. })
         ));
     }
+
+    /// The app's request line, every URL the web view navigates to, and
+    /// FreeRDP's redirect target, with random and mangled input (ADR 0023,
+    /// review U2).
+    #[test]
+    fn random_requests_and_navigations_never_break_the_rules() {
+        let request = req(AUTH);
+        let callback = "https://login.microsoftonline.com/common/oauth2/nativeclient?code=abc&state=s&session_state=x";
+        let error = "https://login.microsoftonline.com/common/oauth2/nativeclient?error=access_denied&error_codes=53003&state=s";
+        let broker =
+            "ms-appx-web://Microsoft.AAD.BrokerPlugin/a85cf173-4192-42f8-81fa-777a763e6e2c";
+        testkit::random_inputs(
+            "helper protocol",
+            &[
+                request.as_bytes(),
+                callback.as_bytes(),
+                error.as_bytes(),
+                broker.as_bytes(),
+            ],
+            |input| {
+                let text = String::from_utf8_lossy(input);
+                // A request is accepted only for Microsoft's sign-in page.
+                if let Ok(r) = parse_request(&text) {
+                    assert_eq!(r.url.scheme(), "https");
+                    assert_eq!(r.url.host_str(), Some("login.microsoftonline.com"));
+                }
+                let targets = [
+                    Some(RedirectTarget::NativeClient),
+                    RedirectTarget::from_freerdp(&text),
+                    RedirectTarget::from_freerdp(broker),
+                ];
+                for target in targets.iter().flatten() {
+                    match decide_for(&text, target) {
+                        // Only a bounded redirect carries a code back, and
+                        // only a non-empty one.
+                        Navigation::Finished(Reply::Ok { code, state }) => {
+                            assert!(text.len() <= MAX_REDIRECT_LEN);
+                            assert_ne!(code, "");
+                            let _ = state;
+                        }
+                        // Errors pass on only short, plain codes.
+                        Navigation::Finished(Reply::Error {
+                            error, error_codes, ..
+                        }) => {
+                            for s in std::iter::once(&error).chain(error_codes.iter()) {
+                                assert!(s.chars().count() <= 64);
+                                assert!(
+                                    s.chars().all(
+                                        |c| c.is_ascii_alphanumeric() || matches!(c, '_' | ',')
+                                    )
+                                );
+                            }
+                        }
+                        // Anything else the web view may load is HTTPS, as the URL
+                        // standard reads it (it drops tabs and line breaks,
+                        // so `https\r://…` is HTTPS too).
+                        Navigation::Allow => {
+                            assert!(
+                                Url::parse(&text).is_ok_and(|u| u.scheme() == "https"),
+                                "{text:?}"
+                            );
+                        }
+                        Navigation::Finished(_) | Navigation::Block => {}
+                    }
+                }
+            },
+        );
+    }
 }

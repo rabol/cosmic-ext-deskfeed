@@ -20,3 +20,7 @@ webkit6 = { version = "0.6", features = ["v2_42"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2.5"
+
+[dev-dependencies]
+# Random-input testing (ADR 0023); tests only.
+testkit = { package = "cosmic-ext-deskfeed-testkit", path = "../testkit" }

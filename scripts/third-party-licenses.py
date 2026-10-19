@@ -16,7 +16,7 @@ import sys
 from datetime import date
 
 TARGET = "x86_64-unknown-linux-gnu"
-OWN = {"cosmic-ext-deskfeed", "cosmic-ext-deskfeed-signin", "cosmic-ext-deskfeed-lines"}
+OWN = {"cosmic-ext-deskfeed", "cosmic-ext-deskfeed-signin", "cosmic-ext-deskfeed-lines", "cosmic-ext-deskfeed-testkit"}
 
 # Git crates without a license field, checked against the license file in
 # their source repository (2026-10-17).

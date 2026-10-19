@@ -1,0 +1,15 @@
+[package]
+name = "cosmic-ext-deskfeed-testkit"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+authors = ["Steen Rabol <cosmic-ext-avd@rabol.dev>"]
+license = "MIT"
+description = "Test helpers shared by Deskfeed and its sign-in helper (random-input testing)"
+repository = "https://github.com/rabol/cosmic-ext-deskfeed"
+publish = false
+
+# Standard library only; used as a dev-dependency.
+[lib]
+name = "testkit"
+path = "src/lib.rs"
