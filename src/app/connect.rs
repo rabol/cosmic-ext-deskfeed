@@ -484,6 +484,14 @@ impl AppModel {
             return Task::none();
         };
         let mut settings = self.effective_settings(account, key);
+        // A RemoteApp's windows are ordinary windows (ADR 0020): no full
+        // screen to keep awake, no single window to move to a workspace.
+        let remote_app = connection.remote_app();
+        if remote_app {
+            settings.keep_awake = false;
+            settings.new_workspace = false;
+            settings.system_shortcuts = false;
+        }
         // The administrator's camera policy wins over the user's setting
         // (spec §Settings: respect server policy, show effective behaviour).
         self.session_notes.remove(key);

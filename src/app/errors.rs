@@ -4,6 +4,7 @@
 
 #[allow(clippy::wildcard_imports)] // see app/mod.rs
 use super::*;
+use crate::sessions::launcher::AppRefusal;
 
 pub(super) fn describe_sign_in_error(e: SignInError) -> SignInFailure {
     let text = match e {
@@ -61,6 +62,13 @@ pub(super) fn describe_session_end(end: &SessionEnd) -> String {
         SessionEnd::Crashed => fl!("error-freerdp-crashed"),
         SessionEnd::Failed { code } => fl!("error-session-failed", code = code.to_string()),
         SessionEnd::LogonFailed => fl!("error-sign-in-rejected"),
+        SessionEnd::Replaced => fl!("error-session-replaced"),
+        SessionEnd::AppRefused(why) => match why {
+            AppRefusal::NotAllowed => fl!("error-app-not-allowed"),
+            AppRefusal::NotFound => fl!("error-app-not-found"),
+            AppRefusal::SessionLocked => fl!("error-app-session-locked"),
+            AppRefusal::Other => fl!("error-app-refused"),
+        },
         SessionEnd::Closed | SessionEnd::Cancelled => String::new(),
     }
 }

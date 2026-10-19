@@ -67,7 +67,9 @@ pub(super) fn end_outcome(
     if matches!(end, SessionEnd::Closed | SessionEnd::Cancelled) {
         return EndOutcome::Clear;
     }
-    if was_connected {
+    // Not about how the user logged on: the session was taken over, or
+    // Windows wouldn't start the app (that comes after logon).
+    if was_connected || matches!(end, SessionEnd::Replaced | SessionEnd::AppRefused(_)) {
         return EndOutcome::Failed;
     }
     match tried {
@@ -118,6 +120,10 @@ pub(super) fn reconnects(
         | SessionEnd::TlsFailed
         | SessionEnd::Failed { .. }
         | SessionEnd::Crashed => reconnecting,
+        // Taken over by another connection: reconnecting would take it
+        // back, and the two would take turns (ADR 0020). A refused app
+        // stays refused.
+        SessionEnd::Replaced | SessionEnd::AppRefused(_) => false,
         SessionEnd::Closed
         | SessionEnd::Cancelled
         | SessionEnd::CertificateNotTrusted(_)
@@ -350,6 +356,30 @@ mod tests {
         ] {
             assert!(
                 !reconnects(&end, true, true, Some(&ENTRA), false),
+                "{end:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_taken_over_or_refused_session_stays_ended() {
+        use crate::sessions::launcher::AppRefusal;
+        let entra = Some(&LogonSetting::EntraSignIn);
+        for end in [
+            SessionEnd::Replaced,
+            SessionEnd::AppRefused(AppRefusal::NotFound),
+        ] {
+            for (was_connected, reconnecting) in [(true, false), (false, true), (true, true)] {
+                assert!(
+                    !reconnects(&end, was_connected, reconnecting, entra, true),
+                    "{end:?}"
+                );
+            }
+            // An error on the row; never "Entra sign-in failed", since it
+            // came after logon.
+            assert_eq!(
+                end_outcome(&end, false, None, entra, 0),
+                EndOutcome::Failed,
                 "{end:?}"
             );
         }

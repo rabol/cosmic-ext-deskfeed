@@ -12,7 +12,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 |---|---|---|---|---|
 | Time to wait for the desktop | 120 s (10–600, steps of 10) | A, Ac, C | `settings.rs` `DEFAULTS` | Done |
 | Full screen | off | A, Ac, C | `settings.rs` | Done |
-| Use all monitors | off | A, Ac, C | `settings.rs` | Done |
+| Use all monitors | off | A, Ac, C | `settings.rs` | Done. RemoteApps always use every monitor (`/multimon`), so their windows can go anywhere (ADR 0020) |
 | Open on a new workspace | off | A, Ac, C | `settings.rs` | Done |
 | Sound | on | A, Ac, C | `settings.rs` | Done |
 | Microphone | off | A, Ac, C | `settings.rs` | Done |

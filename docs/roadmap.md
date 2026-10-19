@@ -27,7 +27,7 @@ Working rules for this list: research the docs, source and APIs first; test loca
 ## Parity work the spec allows later (§3)
 
 - **Camera redirection**: done apart from the real-session test ([ADR 0013](adr/0013-camera-redirection.md)). Camera setting, off by default, gated by the feed's `camerastoredirect`; checked against the local test server. Still open: a real AVD session with a camera, unplug/replug (§13), and a dependency-check item for FreeRDP builds without the camera channel. FreeRDP 3.32.2 can't pick specific cameras or notice ones plugged in later.
-- **RemoteApps**: listed, not connectable (`app/views.rs`). FreeRDP's RemoteApp support is in the X11 client, which Deskfeed now uses (§9).
+- **RemoteApps**: connectable as a preview (2026-10-19, [ADR 0020](adr/0020-remoteapps.md)), checked against a Windows 11 Pro host with RemoteApp allowed: app windows on COSMIC, a second app taking over the session, refused and missing apps. Still open: a RemoteApp from an AVD feed (the owner's tenant has none), then drop "preview".
 - ~~Optional background operation~~ Done (2026-10-18, ADR 0017): tray icon with Show, connected desktops and Quit. Start when you log in, in the background (2026-10-19). Tray menu with every desktop (Connect or Show, per account) and a connected count with check marks as the session indicator (2026-10-19, ADR 0017 addenda).
 - Choosing specific monitors (beyond one or all).
 - Microsoft identity broker (`sso-mib`): not in the distro build (ADR 0004).

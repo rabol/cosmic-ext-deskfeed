@@ -182,7 +182,7 @@ impl AppModel {
             let mut desktops: Vec<&ResourceView> = workspaces
                 .iter()
                 .flat_map(|w| &w.resources)
-                .filter(|r| r.kind == ResourceKind::Desktop)
+                .filter(|r| r.kind != ResourceKind::Other)
                 .collect();
             // Favorites first, then by title.
             desktops.sort_by_key(|r| (!self.config.favorites.contains(&r.key), r.title.clone()));
@@ -222,7 +222,13 @@ impl AppModel {
         match self.connections.get(&r.key) {
             Some(Connection::Connected) => TrayItem::Action {
                 label: r.title.clone(),
-                action: TrayAction::ShowDesktop(r.key.clone()),
+                // An app's windows can't be told apart (ADR 0020): open
+                // Deskfeed instead.
+                action: if r.kind == ResourceKind::Desktop {
+                    TrayAction::ShowDesktop(r.key.clone())
+                } else {
+                    TrayAction::Show
+                },
                 checked: true,
                 enabled: true,
             },

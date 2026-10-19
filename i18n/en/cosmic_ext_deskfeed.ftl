@@ -27,8 +27,8 @@ cancel = Cancel
 close = Close
 quit-title = Quit Deskfeed?
 quit-body = { $count ->
-    [one] A desktop is open. Quitting disconnects it.
-   *[other] { $count } desktops are open. Quitting disconnects them.
+    [one] A desktop or app is connected. Quitting disconnects it.
+   *[other] { $count } desktops or apps are connected. Quitting disconnects them.
 }
 quit-disconnect = Disconnect and quit
 refresh = Refresh
@@ -41,7 +41,7 @@ no-desktops = No desktops or apps are assigned to this account.
 unnamed-workspace = Workspace
 workspace-failed = This workspace couldn't be loaded: { $detail }
 kind-desktop = Desktop
-kind-remoteapp = App (not supported yet)
+kind-remoteapp = App (preview)
 kind-other = Unknown resource type (not supported)
 
 # Errors
@@ -95,6 +95,11 @@ show-desktop = Show
 status-reconnecting = Connection lost. Reconnecting, attempt { $attempt } of { $of }…
 stop = Stop
 error-connection-lost = The connection was lost. Select Connect to connect again.
+error-session-replaced = Another connection took over this session, so this one ended. Select Connect to take it back.
+error-app-not-allowed = Windows wouldn't start this app: the session host doesn't allow it. Ask your administrator.
+error-app-not-found = Windows couldn't find this app on the session host. Ask your administrator.
+error-app-session-locked = Windows wouldn't start this app because your session there is locked. Select Connect to try again.
+error-app-refused = Windows wouldn't start this app.
 error-reconnect-gave-up = The connection was lost and reconnecting didn't work. Select Connect to try again.
 search-desktops = Search desktops
 no-search-results = No desktops match "{ $query }".
@@ -179,6 +184,7 @@ app-settings-hint = Defaults for every account and desktop. An account can overr
 account-settings-hint = Defaults for every desktop of this account. "App setting" uses View → Settings. A desktop can override them in its own settings.
 desktop-settings = Desktop settings
 desktop-settings-hint = Settings for this desktop only. "Account setting" uses the settings of { $account }.
+app-only-settings-hint = Settings for this app only. "Account setting" uses the settings of { $account }. An app's windows open like your other windows, on every monitor, so the full-screen and keyboard settings don't apply.
 desktop-gone = This desktop is no longer listed.
 settings-account = Sign-in and desktop list
 settings-connection = Connection
@@ -198,8 +204,8 @@ tray-show = Show Deskfeed
 tray-quit = Quit
 tray-connect = Connect { $title }
 tray-connected = { $count ->
-    [one] 1 desktop connected
-   *[other] { $count } desktops connected
+    [one] 1 connected
+   *[other] { $count } connected
 }
 quit-to-background = Keep running in the background
 setting-log-size = Log file size

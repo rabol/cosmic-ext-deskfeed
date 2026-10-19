@@ -49,6 +49,11 @@ const LOST_MARKERS: &[&str] = &[
     "client_auto_reconnect_ex]: Network disconnect!",
     "client_auto_reconnect_ex]: Disconnected by server hitting a bug",
 ];
+/// FreeRDP's log line when Windows refuses to start a RemoteApp.
+const APP_REFUSED_MARKER: &str = "RAIL exec error: execResult=";
+/// The server's reason when another connection took over the session
+/// (`libfreerdp/core/errinfo.c`, logged at INFO).
+const REPLACED_MARKER: &str = "ERRINFO_DISCONNECTED_BY_OTHER_CONNECTION";
 const MAX_LOG_LINES: usize = 60;
 const STATE_LOGGER: &str = "com.freerdp.core.rdp";
 /// Longest FreeRDP output line looked at; the rest of a line is skipped.
@@ -224,12 +229,47 @@ pub enum SessionEnd {
     Cancelled,
     /// A connected session lost its connection (network, sleep, server).
     ConnectionLost,
+    /// Another connection took over the Windows session (exit code 5,
+    /// `ERRINFO_DISCONNECTED_BY_OTHER_CONNECTION`): the desktop was opened
+    /// elsewhere, or another RemoteApp from the same host pool connected
+    /// (ADR 0020). Never reconnected: both would take turns.
+    Replaced,
+    /// Windows wouldn't start the RemoteApp (ADR 0020).
+    AppRefused(AppRefusal),
     /// FreeRDP couldn't verify the session host's certificate (ADR 0016).
     CertificateNotTrusted(CertificateInfo),
     Failed {
         code: i32,
     },
     Crashed,
+}
+
+/// Why Windows wouldn't start a RemoteApp: FreeRDP's
+/// `RAIL exec error: execResult=RAIL_EXEC_E_…` line (`client/X11/xf_rail.c`,
+/// MS-RDPERP 2.2.2.8.1). FreeRDP then cancels the connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppRefusal {
+    /// Not published, or not allowed on the host (`NOT_IN_ALLOWLIST`).
+    NotAllowed,
+    /// The program isn't on the host (`FILE_NOT_FOUND`).
+    NotFound,
+    /// The Windows session is locked (`SESSION_LOCKED`).
+    SessionLocked,
+    /// Anything else (`HOOK_NOT_LOADED`, `DECODE_FAILED`, `FAIL`, unknown).
+    Other,
+}
+
+impl AppRefusal {
+    fn from_log(line: &str) -> Option<Self> {
+        let (_, rest) = line.split_once(APP_REFUSED_MARKER)?;
+        let name = rest.split([' ', '[']).next().unwrap_or_default();
+        Some(match name {
+            "RAIL_EXEC_E_NOT_IN_ALLOWLIST" => Self::NotAllowed,
+            "RAIL_EXEC_E_FILE_NOT_FOUND" => Self::NotFound,
+            "RAIL_EXEC_E_SESSION_LOCKED" => Self::SessionLocked,
+            _ => Self::Other,
+        })
+    }
 }
 
 /// A session host certificate as FreeRDP described it. All text comes
@@ -381,7 +421,11 @@ fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchE
     // (default 9 s) for the session host to finish activation, including
     // the Entra exchange (`connection.c` `rdp_client_wait_for_activation`);
     // measured on the owner's host it took up to 49.8 s (settings.rs).
-    args.extend(spec.settings.freerdp_args());
+    args.extend(if spec.connection.remote_app() {
+        spec.settings.freerdp_app_args()
+    } else {
+        spec.settings.freerdp_args()
+    });
     let title = safe_title(&spec.window_title);
     if !title.is_empty() {
         args.push(format!("/title:{title}"));
@@ -409,6 +453,9 @@ pub fn classify_exit(
 ) -> SessionEnd {
     match code {
         None => SessionEnd::Crashed,
+        // `XF_EXIT_CONN_REPLACED`; the server's reason, so it wins over a
+        // lost connection.
+        Some(5) => SessionEnd::Replaced,
         _ if log_says_logon_failure => SessionEnd::LogonFailed,
         _ if connection_lost => SessionEnd::ConnectionLost,
         Some(0..=3 | 11 | 12) => SessionEnd::Closed,
@@ -800,9 +847,11 @@ fn supervise(
         }
         drop(dir); // removes the connection file
         let log = std::mem::take(&mut *log.lock().expect("not poisoned"));
-        let end = match log.refused_certificate() {
-            Some(cert) => SessionEnd::CertificateNotTrusted(cert),
-            None => classify_exit(status.code(), log.logon_failure, log.connected && log.lost),
+        let end = match (log.refused_certificate(), log.app_refused) {
+            (Some(cert), _) => SessionEnd::CertificateNotTrusted(cert),
+            (None, Some(why)) => SessionEnd::AppRefused(why),
+            _ if log.replaced && status.code().is_some() => SessionEnd::Replaced,
+            _ => classify_exit(status.code(), log.logon_failure, log.connected && log.lost),
         };
         ended.store(true, std::sync::atomic::Ordering::SeqCst);
         events(SessionEvent::Ended {
@@ -826,6 +875,10 @@ struct Log {
     logon_failure: bool,
     /// The connection was lost (`LOST_MARKERS`).
     lost: bool,
+    /// Another connection took over the session (`REPLACED_MARKER`).
+    replaced: bool,
+    /// Windows refused to start the RemoteApp (`APP_REFUSED_MARKER`).
+    app_refused: Option<AppRefusal>,
     /// The certificate FreeRDP is describing (`Certificate details for`).
     certificate: Option<CertificateInfo>,
     /// A complete description (it has a well-formed thumbprint).
@@ -931,6 +984,12 @@ impl Log {
         }
         if LOST_MARKERS.iter().any(|m| line.contains(m)) {
             self.lost = true;
+        }
+        if line.contains(REPLACED_MARKER) {
+            self.replaced = true;
+        }
+        if let Some(why) = AppRefusal::from_log(line) {
+            self.app_refused.get_or_insert(why);
         }
         self.read_certificate(line);
         if line.contains("[ERROR]") || line.contains("[WARN]") || is_state_change(line) {
@@ -1075,6 +1134,24 @@ mod tests {
     }
 
     #[test]
+    fn a_remote_app_file_gets_the_app_options() {
+        let mut s = spec(LogonSetting::EntraSignIn, None, false);
+        s.settings.fullscreen = true;
+        s.connection = ConnectionFile::parse(
+            b"full address:s:h\r\ngatewayhostname:s:rdgateway.wvd.microsoft.com\r\n\
+              remoteapplicationmode:i:1\r\nremoteapplicationprogram:s:||notepad\r\n",
+        )
+        .unwrap();
+        let a = args(&s);
+        assert!(!a.contains(&"+f".into()));
+        assert!(a.contains(&"/multimon".into()));
+        assert!(a.contains(&"-grab-keyboard".into()));
+        // The same settings for a desktop.
+        s.connection = spec(LogonSetting::EntraSignIn, None, false).connection;
+        assert!(args(&s).contains(&"+f".into()));
+    }
+
+    #[test]
     fn only_executable_files_count() {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("avd-exec-{}", std::process::id()));
@@ -1204,6 +1281,39 @@ mod tests {
             SessionEnd::Failed { code: 131 }
         );
         assert_eq!(classify_exit(None, false, false), SessionEnd::Crashed);
+        // Another connection took over: never a lost connection.
+        assert_eq!(classify_exit(Some(5), false, true), SessionEnd::Replaced);
+    }
+
+    #[test]
+    fn reads_a_refused_remote_app_and_a_replaced_session() {
+        // As `xf_rail.c` and `errinfo.c` in 3.32.2 print them.
+        let mut log = Log::default();
+        assert_eq!(log.app_refused, None);
+        log.push(
+            "[10:01:02:003] [1:2] [ERROR][com.freerdp.client.x11.rail] - [xf_rail_server_execute_result]: \
+             RAIL exec error: execResult=RAIL_EXEC_E_NOT_IN_ALLOWLIST [0x00000003] NtError=0x0",
+        );
+        assert_eq!(log.app_refused, Some(AppRefusal::NotAllowed));
+        for (name, why) in [
+            ("RAIL_EXEC_E_FILE_NOT_FOUND", AppRefusal::NotFound),
+            ("RAIL_EXEC_E_SESSION_LOCKED", AppRefusal::SessionLocked),
+            ("RAIL_EXEC_E_FAIL", AppRefusal::Other),
+            ("RAIL_EXEC_E_UNKNOWN", AppRefusal::Other),
+        ] {
+            assert_eq!(
+                AppRefusal::from_log(&format!("RAIL exec error: execResult={name} [0x1]")),
+                Some(why),
+                "{name}"
+            );
+        }
+        assert!(!log.replaced);
+        log.push(
+            "[10:01:02:003] [1:2] [INFO][com.freerdp.core] - [rdp_print_errinfo]: \
+             ERRINFO_DISCONNECTED_BY_OTHER_CONNECTION (0x00000005):Another user connected to the server, \
+             forcing the disconnection of the current connection.",
+        );
+        assert!(log.replaced);
     }
 
     /// As xfreerdp3 3.32.2 printed it for the local test server's
@@ -1511,6 +1621,118 @@ sleep 300
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// `launch_with`'s steps for a test host without the Azure gateway:
+    /// Deskfeed's own arguments minus `/gateway:`, changed by `adjust`.
+    fn start_without_gateway(
+        s: &LaunchSpec,
+        dir: &Path,
+        adjust: impl FnOnce(Vec<String>) -> Vec<String>,
+    ) -> (Session, std::sync::mpsc::Receiver<SessionEvent>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let freerdp = find_freerdp().expect("xfreerdp3 installed");
+        let rundir = RuntimeDir::create(&dir.join("run")).unwrap();
+        let rdp_path = write_connection_file(&rundir, &s.connection).unwrap();
+        let args = build_args(s, &rdp_path)
+            .unwrap()
+            .into_iter()
+            .filter(|a| !a.starts_with("/gateway:"))
+            .collect();
+        let args = adjust(args);
+        let (read_end, write_end) = pipe().unwrap();
+        let (terminal, output) = output_terminal().unwrap();
+        let child = spawn_freerdp(&freerdp, &s.profile, &read_end, output).unwrap();
+        drop(read_end);
+        send_args(write_end, &args).unwrap();
+        let session = supervise(
+            child,
+            terminal,
+            rundir,
+            Arc::new(move |e| {
+                let _ = tx.send(e);
+            }),
+        )
+        .unwrap();
+        (session, rx)
+    }
+
+    /// A RemoteApp from a Windows host with RemoteApp allowed (ADR 0020):
+    /// `DESKFEED_TEST_RAIL_HOST`, `_USER`, `_PASSWORD`, `_PROGRAM` (a path
+    /// or `||alias`), optional `_SECS` (default 15). `_EXPECT=missing`
+    /// expects Windows to refuse a program that isn't there. Checks the
+    /// launcher's events; the window shows on the running session.
+    #[test]
+    #[ignore = "needs a Windows host with RemoteApp allowed"]
+    fn windows_host_remote_app() {
+        let var = |name: &str| std::env::var(format!("DESKFEED_TEST_RAIL_{name}"));
+        let host = var("HOST").expect("DESKFEED_TEST_RAIL_HOST");
+        let secs: u64 = var("SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(15);
+        let dir = std::env::temp_dir().join(format!("avd-rail-{}", std::process::id()));
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let s = LaunchSpec {
+            connection: ConnectionFile::local_test_app(
+                &host,
+                &var("PROGRAM").expect("DESKFEED_TEST_RAIL_PROGRAM"),
+            ),
+            username: Some(var("USER").expect("DESKFEED_TEST_RAIL_USER")),
+            password: Some(Secret::new(
+                var("PASSWORD").expect("DESKFEED_TEST_RAIL_PASSWORD"),
+            )),
+            logon: LogonSetting::Automatic,
+            helper: PathBuf::from("/nonexistent/helper"),
+            profile: dir.join("profile"),
+            gateway_token: None,
+            pinned_certificate: None,
+            settings: crate::settings::Effective {
+                // Set for a desktop; an app must not get them.
+                fullscreen: true,
+                system_shortcuts: true,
+                scale: crate::display::resolve_percent(0),
+                ..crate::settings::DEFAULTS
+            },
+            window_title: "Deskfeed RemoteApp test".into(),
+            app_id: "io.github.rabol.DeskfeedTest".into(),
+        };
+        // A test host's self-signed certificate.
+        let (session, rx) = start_without_gateway(&s, &dir, |mut args| {
+            assert!(args.contains(&"/multimon".to_owned()), "{args:?}");
+            assert!(!args.contains(&"+f".to_owned()), "{args:?}");
+            args.push("/cert:ignore".to_owned());
+            args
+        });
+        let mut events = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(40);
+        let ended = loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            match rx.recv_timeout(left) {
+                Ok(SessionEvent::Ended { end, log }) => break Some((end, log)),
+                Ok(e) => {
+                    println!("event: {e:?}");
+                    let connected = e == SessionEvent::Connected;
+                    events.push(e);
+                    if connected && var("EXPECT").is_err() {
+                        break None;
+                    }
+                }
+                Err(_) => panic!("nothing happened in time: {events:?}"),
+            }
+        };
+        if var("EXPECT").is_ok_and(|v| v == "missing") {
+            let (end, log) = ended.expect("an end");
+            println!("ended: {end:?}");
+            for line in &log {
+                println!("  {line}");
+            }
+            assert_eq!(end, SessionEnd::AppRefused(AppRefusal::NotFound));
+        } else {
+            assert!(ended.is_none(), "{ended:?}");
+            std::thread::sleep(Duration::from_secs(secs));
+            stop_all(&[session], STOP_GRACE);
+            let rest: Vec<_> = rx.try_iter().collect();
+            println!("after stopping: {rest:?}");
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     /// Real `xfreerdp3` through Deskfeed's own launch path, against the
     /// local test server (`research/rdp-test-server/README.md`):
     /// `DESKFEED_TEST_SERVER=<its socket> cargo test --release
@@ -1556,45 +1778,23 @@ sleep 300
                 .unwrap_or_else(|_| "Deskfeed local test \u{2013} t\u{e9}st".into()),
             app_id: "io.github.rabol.DeskfeedTest".into(),
         };
-        let (tx, rx) = std::sync::mpsc::channel();
-        let freerdp = find_freerdp().expect("xfreerdp3 installed");
-        // `launch_with`'s steps, with the two arguments the test server
-        // can't take: no Azure gateway, TLS instead of NLA.
-        let rundir = RuntimeDir::create(&dir.join("run")).unwrap();
-        let rdp_path = write_connection_file(&rundir, &s.connection).unwrap();
-        let args: Vec<String> = build_args(&s, &rdp_path)
-            .unwrap()
-            .into_iter()
-            .filter(|a| !a.starts_with("/gateway:"))
-            .map(|a| {
-                if a == "/sec:nla" {
-                    "/sec:tls".to_owned()
-                } else {
-                    a
-                }
-            })
-            // Without a pin the test server's self-signed certificate is
-            // ignored, unless `DESKFEED_TEST_CHECK_CERT=1`.
-            .chain(
-                (s.pinned_certificate.is_none()
-                    && std::env::var("DESKFEED_TEST_CHECK_CERT").is_err())
-                .then(|| "/cert:ignore".to_owned()),
-            )
-            .collect();
-        let (read_end, write_end) = pipe().unwrap();
-        let (terminal, output) = output_terminal().unwrap();
-        let child = spawn_freerdp(&freerdp, &s.profile, &read_end, output).unwrap();
-        drop(read_end);
-        send_args(write_end, &args).unwrap();
-        let session = supervise(
-            child,
-            terminal,
-            rundir,
-            Arc::new(move |e| {
-                let _ = tx.send(e);
-            }),
-        )
-        .unwrap();
+        // The two arguments the test server can't take: TLS instead of
+        // NLA; and without a pin its self-signed certificate is ignored,
+        // unless `DESKFEED_TEST_CHECK_CERT=1`.
+        let ignore_cert =
+            s.pinned_certificate.is_none() && std::env::var("DESKFEED_TEST_CHECK_CERT").is_err();
+        let (session, rx) = start_without_gateway(&s, &dir, |args| {
+            args.into_iter()
+                .map(|a| {
+                    if a == "/sec:nla" {
+                        "/sec:tls".to_owned()
+                    } else {
+                        a
+                    }
+                })
+                .chain(ignore_cert.then(|| "/cert:ignore".to_owned()))
+                .collect()
+        });
         if std::env::var("DESKFEED_TEST_CHECK_CERT").is_ok() {
             // Expect the refusal, ended by the launcher at once.
             let SessionEvent::Ended { end, log } =
@@ -1647,6 +1847,8 @@ sleep 300
             "gatewaycredentialssource:i:0",
             "gatewaybrokeringtype:i:1",
             "remoteapplicationmode:i:0",
+            "remoteapplicationexpandcmdline:i:0",
+            "remoteapplicationexpandworkingdir:i:0",
             "enablerdsaadauth:i:0",
             "enablecredsspsupport:i:1",
             "promptcredentialonce:i:1",
@@ -1674,6 +1876,9 @@ sleep 300
             "resourceprovider:s:x",
             "remotedesktopname:s:x",
             "kdcproxyname:s:x",
+            "remoteapplicationprogram:s:||x",
+            "remoteapplicationname:s:x",
+            "remoteapplicationcmdline:s:/x \"y z\"",
         ];
         let mut text = ints
             .iter()

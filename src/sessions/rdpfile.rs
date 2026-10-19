@@ -48,9 +48,16 @@ const ALLOWED: &[&str] = &[
     "wvd endpoint pool",
     "workspace id",
     "resourceprovider",
+    // RemoteApps (ADR 0020): which program, with the arguments and
+    // environment expansion the administrator published. Not
+    // `remoteapplicationfile` or `remoteapplicationicon`, which name files
+    // on this computer.
     "remoteapplicationmode",
     "remoteapplicationprogram",
     "remoteapplicationname",
+    "remoteapplicationcmdline",
+    "remoteapplicationexpandcmdline",
+    "remoteapplicationexpandworkingdir",
     "remotedesktopname",
     "enablerdsaadauth",
     "enablecredsspsupport",
@@ -197,6 +204,25 @@ impl ConnectionFile {
             dropped: 0,
             cameras: CameraPolicy::All,
         }
+    }
+
+    /// The file opens a RemoteApp, not a desktop (`remoteapplicationmode:i:1`).
+    /// FreeRDP then shows the app's own windows (ADR 0020).
+    pub fn remote_app(&self) -> bool {
+        matches!(self.props.get("remoteapplicationmode"), Some(Value::Int(v)) if *v != 0)
+    }
+
+    /// Tests only: `local_test` opening a RemoteApp (`||alias` or a path).
+    #[cfg(test)]
+    pub fn local_test_app(address: &str, program: &str) -> Self {
+        let mut file = Self::local_test(address);
+        file.props
+            .insert("remoteapplicationmode".to_owned(), Value::Int(1));
+        file.props.insert(
+            "remoteapplicationprogram".to_owned(),
+            Value::Str(program.to_owned()),
+        );
+        file
     }
 
     /// Serialized for FreeRDP: kept properties, then device defaults.
@@ -400,6 +426,47 @@ mod tests {
         .unwrap();
         assert!(!f.to_freerdp_text().contains("authentication level"));
         assert_eq!(f.dropped, 1);
+    }
+
+    #[test]
+    fn keeps_a_remote_apps_program_but_not_local_files() {
+        let f = ConnectionFile::parse(
+            format!(
+                "full address:s:h\r\n{GW}remoteapplicationmode:i:1\r\n\
+                 remoteapplicationprogram:s:||notepad\r\n\
+                 remoteapplicationname:s:Notepad\r\n\
+                 remoteapplicationcmdline:s:/A \"%USERPROFILE%\"\r\n\
+                 remoteapplicationexpandcmdline:i:1\r\n\
+                 remoteapplicationfile:s:/home/anna/secret.txt\r\n\
+                 remoteapplicationicon:s:/home/anna/icon.ico\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(f.remote_app());
+        let text = f.to_freerdp_text();
+        for kept in [
+            "remoteapplicationmode:i:1",
+            "remoteapplicationprogram:s:||notepad",
+            "remoteapplicationname:s:Notepad",
+            "remoteapplicationcmdline:s:/A \"%USERPROFILE%\"",
+            "remoteapplicationexpandcmdline:i:1",
+        ] {
+            assert!(text.contains(kept), "{kept}");
+        }
+        assert!(!text.contains("remoteapplicationfile"));
+        assert!(!text.contains("remoteapplicationicon"));
+        assert_eq!(f.dropped, 2);
+    }
+
+    #[test]
+    fn a_desktop_is_not_a_remote_app() {
+        let file = |extra: &str| {
+            ConnectionFile::parse(format!("full address:s:h\r\n{GW}{extra}").as_bytes()).unwrap()
+        };
+        assert!(!file("").remote_app());
+        assert!(!file("remoteapplicationmode:i:0\r\n").remote_app());
+        assert!(!file("remoteapplicationmode:s:1\r\n").remote_app());
     }
 
     /// The owner's saved connection file, if present: prints only counts.

@@ -398,9 +398,23 @@ impl Effective {
         }
     }
 
-    /// FreeRDP arguments for these settings. "Open on a new workspace" is
-    /// done by the app, not FreeRDP.
+    /// FreeRDP arguments for these settings, for a desktop. "Open on a new
+    /// workspace" is done by the app, not FreeRDP.
     pub fn freerdp_args(&self) -> Vec<String> {
+        self.args(false)
+    }
+
+    /// For a RemoteApp (ADR 0020): its windows are ordinary windows, so
+    /// the full-screen, keyboard-grab and full-screen-key settings don't
+    /// apply, and the remote screen covers every monitor so its windows can
+    /// go anywhere (FreeRDP sizes it to one monitor otherwise,
+    /// `client/X11/xf_monitor.c`).
+    pub fn freerdp_app_args(&self) -> Vec<String> {
+        self.args(true)
+    }
+
+    fn args(&self, remote_app: bool) -> Vec<String> {
+        let fullscreen = self.fullscreen && !remote_app;
         let mut args = vec![format!("/timeout:{}", self.timeout_secs * 1000)];
         // The desktop scale Windows uses (MS-RDPBCGR desktopScaleFactor,
         // 100–500 %). `scale` is resolved before launch; 0 left over means
@@ -410,12 +424,12 @@ impl Effective {
         // (WinPR `cmdline.c`, COMMAND_LINE_VALUE_FLAG). So windowed means
         // leaving it out; `rdpfile.rs` drops `screen mode id` so the feed
         // can't switch it on either.
-        if self.fullscreen {
+        if fullscreen {
             args.push("+f".to_owned());
         }
-        // `/multimon` only takes effect in full screen.
+        // `/multimon` only takes effect in full screen, or for a RemoteApp.
         args.push(
-            if self.fullscreen && self.all_monitors {
+            if remote_app || (fullscreen && self.all_monitors) {
                 "/multimon"
             } else {
                 "-multimon"
@@ -442,7 +456,7 @@ impl Effective {
         // XWayland passes the grab to COSMIC, and COSMIC then sends its own
         // shortcuts to the window (ADR 0018). Right Ctrl releases it.
         args.push(
-            if self.system_shortcuts {
+            if self.system_shortcuts && !remote_app {
                 "+grab-keyboard"
             } else {
                 "-grab-keyboard"
@@ -453,7 +467,7 @@ impl Effective {
         // `fullscreen_toggle`). Ctrl+Alt+M (minimize) and Ctrl+Alt+D
         // (disconnect) have no switch in 3.32.2.
         args.push(
-            if self.fullscreen_key {
+            if self.fullscreen_key && !remote_app {
                 "+toggle-fullscreen"
             } else {
                 "-toggle-fullscreen"
@@ -605,6 +619,27 @@ mod tests {
         e.fullscreen = true;
         let a = e.freerdp_args();
         assert!(a.contains(&"+f".into()) && a.contains(&"/multimon".into()));
+    }
+
+    #[test]
+    fn a_remote_app_gets_ordinary_windows_on_every_monitor() {
+        let mut e = DEFAULTS;
+        e.fullscreen = true;
+        e.all_monitors = false;
+        e.system_shortcuts = true;
+        e.fullscreen_key = true;
+        e.sound = true;
+        let a = e.freerdp_app_args();
+        assert!(!a.contains(&"+f".into()));
+        assert!(a.contains(&"/multimon".into()) && !a.contains(&"-multimon".into()));
+        assert!(a.contains(&"-grab-keyboard".into()));
+        assert!(a.contains(&"-toggle-fullscreen".into()));
+        // Devices and the rest still follow the settings.
+        assert!(a.contains(&"/sound".into()));
+        assert!(a.iter().any(|x| x.starts_with("/timeout:")));
+        // A desktop with the same settings is unchanged.
+        let d = e.freerdp_args();
+        assert!(d.contains(&"+f".into()) && d.contains(&"+grab-keyboard".into()));
     }
 
     #[test]

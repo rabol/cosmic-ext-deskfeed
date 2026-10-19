@@ -265,7 +265,7 @@ impl AppModel {
             );
         settings_column(
             fl!("app-settings-hint"),
-            true,
+            Page::WithAccount,
             number,
             toggle,
             choice,
@@ -300,7 +300,7 @@ impl AppModel {
         let id_choice = id.to_owned();
         rows.view(
             fl!("account-settings-hint"),
-            true,
+            Page::WithAccount,
             move |t, i| Message::AccountToggle(id_toggle.clone(), t, i),
             move |n, v| Message::AccountNumber(id_number.clone(), n, v),
             move |c, i| Message::AccountChoice(id_choice.clone(), c, i),
@@ -359,10 +359,20 @@ impl AppModel {
             any = true;
         }
         let pin = any.then(|| security.into());
+        let (page, hint) = match account.resource(key).map(|r| r.kind) {
+            Some(ResourceKind::RemoteApp) => (
+                Page::RemoteApp,
+                fl!("app-only-settings-hint", account = account.label()),
+            ),
+            _ => (
+                Page::Desktop,
+                fl!("desktop-settings-hint", account = account.label()),
+            ),
+        };
         rows.view_with(
             pin,
-            fl!("desktop-settings-hint", account = account.label()),
-            false,
+            hint,
+            page,
             move |t, i| Message::DesktopToggle(key_toggle.clone(), t, i),
             move |n, v| Message::DesktopNumber(key_number.clone(), n, v),
             move |c, i| Message::DesktopChoice(key_choice.clone(), c, i),
@@ -390,12 +400,12 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
     fn view(
         self,
         hint: String,
-        account_level: bool,
+        page: Page,
         on_toggle: impl Fn(Toggle, usize) -> Message + Clone + Send + Sync + 'static,
         on_number: impl Fn(Number, Option<u32>) -> Message + Clone + 'static,
         on_choice: impl Fn(Choice, usize) -> Message + Clone + Send + Sync + 'static,
     ) -> Element<'a, Message> {
-        self.view_with(None, hint, account_level, on_toggle, on_number, on_choice)
+        self.view_with(None, hint, page, on_toggle, on_number, on_choice)
     }
 
     /// With `last` at the end of the page.
@@ -403,7 +413,7 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
         self,
         last: Option<Element<'a, Message>>,
         hint: String,
-        account_level: bool,
+        page: Page,
         on_toggle: impl Fn(Toggle, usize) -> Message + Clone + Send + Sync + 'static,
         on_number: impl Fn(Number, Option<u32>) -> Message + Clone + 'static,
         on_choice: impl Fn(Choice, usize) -> Message + Clone + Send + Sync + 'static,
@@ -471,22 +481,32 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
                 }))
                 .into()
         };
-        settings_column(hint, account_level, number, toggle, choice, last)
+        settings_column(hint, page, number, toggle, choice, last)
     }
+}
+
+/// Which settings a page shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Page {
+    /// App and account pages: with the account section.
+    WithAccount,
+    Desktop,
+    /// A RemoteApp: without what only a desktop's window has (ADR 0020).
+    RemoteApp,
 }
 
 /// A settings page: hint, the account section (app and account pages),
 /// the connection, display and device sections, then `last`.
 fn settings_column<'a>(
     hint: String,
-    account_level: bool,
+    page: Page,
     number: impl Fn(Number) -> Element<'a, Message>,
     toggle: impl Fn(Toggle) -> Element<'a, Message>,
     choice: impl Fn(Choice) -> Element<'a, Message>,
     last: Option<Element<'a, Message>>,
 ) -> Element<'a, Message> {
     let mut column = vec![widget::text::body(hint).into()];
-    if account_level {
+    if page == Page::WithAccount {
         column.push(
             widget::settings::section()
                 .title(fl!("settings-account"))
@@ -503,15 +523,26 @@ fn settings_column<'a>(
         .add(number(Number::ReconnectAttempts));
     let display = widget::settings::section()
         .title(fl!("settings-display"))
-        .add(choice(Choice::Scale))
-        .add(toggle(Toggle::Fullscreen))
-        .add(toggle(Toggle::AllMonitors))
-        .add(toggle(Toggle::NewWorkspace))
-        .add(toggle(Toggle::KeepAwake));
-    let keyboard = widget::settings::section()
-        .title(fl!("settings-keyboard"))
-        .add(toggle(Toggle::SystemShortcuts))
-        .add(toggle(Toggle::FullscreenKey));
+        .add(choice(Choice::Scale));
+    // An app's windows are ordinary windows on every monitor; full
+    // screen, workspaces and the keyboard grab belong to a desktop's
+    // window (`Effective::freerdp_app_args`).
+    let desktop = page != Page::RemoteApp;
+    let display = if desktop {
+        display
+            .add(toggle(Toggle::Fullscreen))
+            .add(toggle(Toggle::AllMonitors))
+            .add(toggle(Toggle::NewWorkspace))
+            .add(toggle(Toggle::KeepAwake))
+    } else {
+        display
+    };
+    let keyboard = desktop.then(|| {
+        widget::settings::section()
+            .title(fl!("settings-keyboard"))
+            .add(toggle(Toggle::SystemShortcuts))
+            .add(toggle(Toggle::FullscreenKey))
+    });
     let devices = widget::settings::section()
         .title(fl!("settings-devices"))
         .add(toggle(Toggle::Sound))
@@ -519,12 +550,9 @@ fn settings_column<'a>(
         .add(toggle(Toggle::Camera))
         .add(choice(Choice::Clipboard))
         .add(toggle(Toggle::ClipboardFiles));
-    column.extend([
-        connection.into(),
-        display.into(),
-        keyboard.into(),
-        devices.into(),
-    ]);
+    column.extend([connection.into(), display.into()]);
+    column.extend(keyboard.map(Into::into));
+    column.push(devices.into());
     column.extend(last);
     widget::settings::view_column(column).into()
 }

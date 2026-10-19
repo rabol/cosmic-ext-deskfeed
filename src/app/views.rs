@@ -231,7 +231,7 @@ impl AppModel {
             None => {
                 let mut b = widget::button::suggested(fl!("connect"));
                 // An offline entry never connects (spec §7).
-                if live && r.kind == ResourceKind::Desktop {
+                if live && r.kind != ResourceKind::Other {
                     b = b.on_press(Message::Connect(r.key.clone()));
                 }
                 (None, b.into())
@@ -269,10 +269,13 @@ impl AppModel {
                     },
                 ),
                 widget::row::with_capacity(2)
-                    .push(
+                    // Show finds the desktop's window by its title; an
+                    // app's windows have the titles Windows gives them
+                    // (ADR 0020).
+                    .push_maybe((r.kind == ResourceKind::Desktop).then(|| {
                         widget::button::suggested(fl!("show-desktop"))
-                            .on_press(Message::ShowSession(r.key.clone())),
-                    )
+                            .on_press(Message::ShowSession(r.key.clone()))
+                    }))
                     .push(
                         widget::button::destructive(fl!("disconnect"))
                             .on_press(Message::Disconnect(r.key.clone())),

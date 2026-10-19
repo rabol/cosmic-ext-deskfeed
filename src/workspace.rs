@@ -604,8 +604,8 @@ mod tests {
         queue.roundtrip(&mut state).unwrap();
     }
 
-    /// Prints how many windows `WATCH_APP_ID` has, every half second for
-    /// `WATCH_SECS` seconds.
+    /// Prints `WATCH_APP_ID`'s windows (title and state) whenever they
+    /// change, for `WATCH_SECS` seconds.
     #[test]
     #[ignore = "watches the running COSMIC session's windows"]
     fn watch_windows() {
@@ -632,17 +632,25 @@ mod tests {
             can_activate: false,
         };
         let start = Instant::now();
-        let mut last = usize::MAX;
+        let mut last = None;
         while start.elapsed() < Duration::from_secs(secs) {
             queue.roundtrip(&mut state).unwrap();
-            let n = state
+            let windows: Vec<String> = state
                 .info
                 .toplevels()
                 .filter(|t| t.app_id == app_id)
-                .count();
-            if n != last {
-                println!("{:>5.1}s: {n} window(s)", start.elapsed().as_secs_f32());
-                last = n;
+                .map(|t| format!("{:?} {:?}", t.title, t.state))
+                .collect();
+            if last.as_ref() != Some(&windows) {
+                println!(
+                    "{:>5.1}s: {} window(s)",
+                    start.elapsed().as_secs_f32(),
+                    windows.len()
+                );
+                for w in &windows {
+                    println!("        {w}");
+                }
+                last = Some(windows);
             }
             std::thread::sleep(Duration::from_millis(500));
         }
