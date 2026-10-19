@@ -5,7 +5,6 @@ mod app;
 mod auth;
 mod autostart;
 mod awake;
-mod bounded_lines;
 mod cache;
 mod config;
 mod deps;

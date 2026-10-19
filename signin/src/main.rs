@@ -12,8 +12,6 @@
 //!   `COSMIC_EXT_DESKFEED_SIGNIN_PROFILE`, which the app sets for FreeRDP, so the
 //!   account's sign-in cookies make these requests silent when possible.
 
-#[path = "../../src/bounded_lines.rs"]
-mod bounded_lines;
 mod freerdp;
 mod protocol;
 mod proxy;

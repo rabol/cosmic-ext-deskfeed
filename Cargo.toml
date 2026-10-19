@@ -10,9 +10,11 @@ description = "Your work desktops on COSMIC™, working with Azure Virtual Deskt
 repository = "https://github.com/rabol/cosmic-ext-deskfeed"
 
 [workspace]
-members = ["signin"]
+members = ["signin", "lines"]
 
 [dependencies]
+# Bounded line reading, shared with the sign-in helper (workspace crate).
+bounded_lines = { package = "cosmic-ext-deskfeed-lines", path = "lines" }
 # Already in the dependency tree through libcosmic (ADR 0003, ADR 0008).
 base64 = "0.22"
 dirs = "6"

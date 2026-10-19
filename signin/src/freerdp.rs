@@ -215,7 +215,7 @@ pub fn run(args: &[String]) -> ExitCode {
     // queue are bounded: the reader waits while the queue is full.
     let (queue_in, queue) = std::sync::mpsc::sync_channel::<Option<String>>(MAX_QUEUED);
     std::thread::spawn(move || {
-        for line in crate::bounded_lines::lines(BufReader::new(cmd_in), MAX_LINE) {
+        for line in bounded_lines::lines(BufReader::new(cmd_in), MAX_LINE) {
             // An oversized message can't be a valid request: dropped.
             if !line.too_long && queue_in.send(Some(line.text)).is_err() {
                 return;
@@ -330,7 +330,7 @@ fn handle(msg: &Incoming, view: &SignInView, send: &Arc<impl Fn(String) + 'stati
 /// Without a usable profile or display: answer every request with an error
 /// until FreeRDP gives up.
 fn serve_errors(cmd_in: File, send: &impl Fn(String)) {
-    for line in crate::bounded_lines::lines(BufReader::new(cmd_in), MAX_LINE) {
+    for line in bounded_lines::lines(BufReader::new(cmd_in), MAX_LINE) {
         if line.too_long {
             continue;
         }

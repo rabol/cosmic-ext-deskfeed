@@ -292,8 +292,8 @@ impl AppModel {
             own,
             labels: (&self.follow_app_on, &self.follow_app_off),
             reset_label: fl!("use-app-setting"),
-            follow_value: |value| fl!("follow-app-value", value = value),
-            follow_choice: |value| fl!("follow-app-choice", value = value),
+            follow_value: |value: String| fl!("follow-app-value", value = value),
+            follow_choice: |value: String| fl!("follow-app-choice", value = value),
         };
         let id_toggle = id.to_owned();
         let id_number = id.to_owned();
@@ -322,8 +322,8 @@ impl AppModel {
             own,
             labels: (&self.follow_account_on, &self.follow_account_off),
             reset_label: fl!("use-account-setting"),
-            follow_value: |value| fl!("follow-account-value", value = value),
-            follow_choice: |value| fl!("follow-account-choice", value = value),
+            follow_value: |value: String| fl!("follow-account-value", value = value),
+            follow_choice: |value: String| fl!("follow-account-choice", value = value),
         };
         let key_toggle = key.to_owned();
         let key_number = key.to_owned();

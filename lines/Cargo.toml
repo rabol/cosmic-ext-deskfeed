@@ -1,0 +1,15 @@
+[package]
+name = "cosmic-ext-deskfeed-lines"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+authors = ["Steen Rabol <cosmic-ext-avd@rabol.dev>"]
+license = "MIT"
+description = "Bounded line reading shared by Deskfeed and its sign-in helper"
+repository = "https://github.com/rabol/cosmic-ext-deskfeed"
+publish = false
+
+# Standard library only.
+[lib]
+name = "bounded_lines"
+path = "src/lib.rs"

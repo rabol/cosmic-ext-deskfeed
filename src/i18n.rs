@@ -44,7 +44,12 @@ macro_rules! fl {
         i18n_embed_fl::fl!($crate::i18n::LANGUAGE_LOADER, $message_id)
     }};
 
-    ($message_id:literal, $($args:expr),*) => {{
-        i18n_embed_fl::fl!($crate::i18n::LANGUAGE_LOADER, $message_id, $($args), *)
+    // The arguments (`name = value, …`) pass through as plain tokens. As
+    // `$args:expr` (the COSMIC template's form), rust-analyzer handed each
+    // `name = value` on as one assignment expression, so Zed and other
+    // editors showed false errors on every call with arguments ("expected
+    // HashMap, found ()"); the compiler was fine either way.
+    ($message_id:literal, $($args:tt)*) => {{
+        i18n_embed_fl::fl!($crate::i18n::LANGUAGE_LOADER, $message_id, $($args)*)
     }};
 }

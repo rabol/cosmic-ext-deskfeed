@@ -15,6 +15,8 @@ Don't put real credentials, tokens, cookies, tenant or workspace IDs, host names
 
 ## Working on the code
 
+Editors use rust-analyzer, which needs the Rust standard library's source. On Arch Linux it is a separate package: `sudo pacman -S rust-src`. Without it, the editor shows false errors (`{unknown}` types, `None`, `!` on `bool`) while `cargo build` is fine. To see exactly what an editor will report, run rust-analyzer's own check: `rust-analyzer diagnostics .`.
+
 ```sh
 just build-debug
 just test

@@ -11,6 +11,7 @@ repository = "https://github.com/rabol/cosmic-ext-deskfeed"
 publish = false
 
 [dependencies]
+bounded_lines = { package = "cosmic-ext-deskfeed-lines", path = "../lines" }
 # Only this helper links GTK and WebKit (ADR 0007). The features are the
 # oldest versions whose APIs the helper uses: GTK 4.10, WebKitGTK 2.42.
 # The packages require at least these (packaging/).

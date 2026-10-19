@@ -980,8 +980,8 @@ fn supervise(
                     }
                 };
                 // Bounded: FreeRDP's output is not trusted to be sane.
-                for line in crate::bounded_lines::lines(BufReader::new(stream), MAX_OUTPUT_LINE)
-                    .map(|l| l.text)
+                for line in
+                    bounded_lines::lines(BufReader::new(stream), MAX_OUTPUT_LINE).map(|l| l.text)
                 {
                     // Our sign-in helper's status lines (FreeRDP passes its
                     // stderr through); they hold no codes or tokens.

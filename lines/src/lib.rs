@@ -6,8 +6,10 @@
 //! the memory. This keeps at most `max` bytes of a line and skips the
 //! rest.
 //!
-//! Shared by the app and the sign-in helper (`#[path]` include), so it uses
-//! only the standard library.
+//! Shared by the app and the sign-in helper as a small workspace crate
+//! (`lines/`), with only the standard library. It used to be included into
+//! the helper with `#[path]`, which rust-analyzer can't follow into another
+//! package's folder.
 
 use std::io::BufRead;
 
