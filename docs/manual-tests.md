@@ -40,6 +40,11 @@ Install the current build first (`just install`, or the package).
    - *Expected:* Quit at the bottom, showing Ctrl+Q.
    - Quit, or Ctrl+Q, closes Deskfeed completely: no tray icon left.
 
+4c. **Settings pages after the settings rework** (the pages' controls and the real settings store; cleanup-todo §2–3). Before installing the new build, note a few settings you changed earlier.
+   - *Expected after installing:* those settings still show as before (the saved format is the same).
+   - App settings: switch Full screen, change Time to connect, and pick a Clipboard direction. Account settings: set Sound to off, then back to "Use app setting". Desktop settings: set Camera on.
+   - Restart Deskfeed. *Expected:* every change is still there, and Sound on the account follows the app again.
+
 4. **Start when you log in** (COSMIC's autostart). Turn on Settings → Background → Start when you log in. Log out and back in. *Expected:* only the tray icon appears, no window.
 
 ### Desktop sessions
