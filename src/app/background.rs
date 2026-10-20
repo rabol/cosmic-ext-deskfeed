@@ -6,6 +6,7 @@
 
 use super::*;
 use cosmic::iced::window;
+use desk::Desks;
 
 /// The main window as libcosmic opens it (`app::Settings` defaults with
 /// Deskfeed's size limits, `main.rs`).
@@ -147,102 +148,20 @@ impl AppModel {
         Task::none()
     }
 
-    /// The tray's menu: how many desktops are connected, Show, every
-    /// desktop (per account when there are several), Quit.
+    /// The tray's menu, from the signed-in accounts' lists (`tray_menu`).
     fn tray_items(&self) -> Vec<crate::tray::TrayItem> {
-        use crate::tray::{TrayAction, TrayItem};
-        let action = |label: String, action: TrayAction| TrayItem::Action {
-            label,
-            action,
-            checked: false,
-            enabled: true,
-        };
-        let mut items = Vec::new();
-        let connected = self.desks.connected_count();
-        if connected > 0 {
-            let count = u32::try_from(connected).unwrap_or(u32::MAX);
-            items.push(TrayItem::Note(fl!("tray-connected", count = count)));
-        }
-        items.push(action(fl!("tray-show"), TrayAction::Show));
-        let ready: Vec<&Account> = self
+        let ready: Vec<(String, Vec<&ResourceView>)> = self
             .accounts
             .iter()
-            .filter(|a| matches!(a.state, AccountState::Ready { .. }))
+            .filter_map(|account| {
+                let AccountState::Ready { workspaces, .. } = &account.state else {
+                    return None;
+                };
+                let resources = workspaces.iter().flat_map(|w| &w.resources).collect();
+                Some((account.label(), resources))
+            })
             .collect();
-        let several = ready.len() > 1;
-        let mut groups = Vec::new();
-        for account in ready {
-            let AccountState::Ready { workspaces, .. } = &account.state else {
-                continue;
-            };
-            let mut desktops: Vec<&ResourceView> = workspaces
-                .iter()
-                .flat_map(|w| &w.resources)
-                .filter(|r| r.kind != ResourceKind::Other)
-                .collect();
-            // Favorites first, then by title.
-            desktops.sort_by_key(|r| (!self.config.favorites.contains(&r.key), r.title.clone()));
-            desktops.dedup_by(|a, b| a.key == b.key);
-            let lines: Vec<TrayItem> = desktops.into_iter().map(|r| self.tray_desktop(r)).collect();
-            if lines.is_empty() {
-                continue;
-            }
-            if several {
-                groups.push(TrayItem::Submenu {
-                    label: account.label(),
-                    items: lines,
-                });
-            } else {
-                groups.extend(lines);
-            }
-        }
-        if !groups.is_empty() {
-            items.push(TrayItem::Separator);
-            items.extend(groups);
-        }
-        items.push(TrayItem::Separator);
-        items.push(action(fl!("tray-quit"), TrayAction::Quit));
-        items
-    }
-
-    /// One desktop in the tray: Show when connected (checked), Connect when
-    /// not, its state while busy.
-    fn tray_desktop(&self, r: &ResourceView) -> crate::tray::TrayItem {
-        use crate::tray::{TrayAction, TrayItem};
-        let busy = |status: String| TrayItem::Action {
-            label: format!("{} · {status}", r.title),
-            action: TrayAction::ShowDesktop(r.key.clone()),
-            checked: false,
-            enabled: false,
-        };
-        match self.desks.conn(&r.key) {
-            Some(Connection::Connected) => TrayItem::Action {
-                label: r.title.clone(),
-                // An app's windows can't be told apart (ADR 0020): open
-                // Deskfeed instead.
-                action: if r.kind == ResourceKind::Desktop {
-                    TrayAction::ShowDesktop(r.key.clone())
-                } else {
-                    TrayAction::Show
-                },
-                checked: true,
-                enabled: true,
-            },
-            None | Some(Connection::Failed(_)) => TrayItem::Action {
-                label: fl!("tray-connect", title = r.title.clone()),
-                action: TrayAction::Connect(r.key.clone()),
-                checked: false,
-                enabled: true,
-            },
-            Some(Connection::Preparing | Connection::Connecting) => busy(fl!("status-connecting")),
-            Some(Connection::AwaitingUser) => busy(fl!("status-awaiting-user")),
-            Some(Connection::Authenticating) => busy(fl!("status-authenticating")),
-            Some(Connection::Disconnecting) => busy(fl!("status-disconnecting")),
-            Some(Connection::Reconnecting { attempt, of }) => {
-                let (attempt, of) = (*attempt, *of);
-                busy(fl!("status-reconnecting", attempt = attempt, of = of))
-            }
-        }
+        tray_menu(&ready, &self.config.favorites, &self.desks)
     }
 
     /// Sends the tray its menu when it changed.
@@ -274,5 +193,253 @@ impl AppModel {
         }
         titles.sort();
         Subscription::run_with(titles, crate::awake::watch).map(Message::Awake)
+    }
+}
+
+/// The tray's menu: how many desktops are connected, Show, every desktop
+/// of the signed-in accounts (`(label, resources)`; a submenu per account
+/// when there are several), Quit.
+fn tray_menu(
+    accounts: &[(String, Vec<&ResourceView>)],
+    favorites: &std::collections::BTreeSet<String>,
+    desks: &Desks,
+) -> Vec<crate::tray::TrayItem> {
+    use crate::tray::{TrayAction, TrayItem};
+    let action = |label: String, action: TrayAction| TrayItem::Action {
+        label,
+        action,
+        checked: false,
+        enabled: true,
+    };
+    let mut items = Vec::new();
+    let connected = desks.connected_count();
+    if connected > 0 {
+        let count = u32::try_from(connected).unwrap_or(u32::MAX);
+        items.push(TrayItem::Note(fl!("tray-connected", count = count)));
+    }
+    items.push(action(fl!("tray-show"), TrayAction::Show));
+    let several = accounts.len() > 1;
+    let mut groups = Vec::new();
+    for (label, resources) in accounts {
+        let mut desktops: Vec<&ResourceView> = resources
+            .iter()
+            .copied()
+            .filter(|r| r.kind != ResourceKind::Other)
+            .collect();
+        // Favorites first, then by title.
+        desktops.sort_by_key(|r| (!favorites.contains(&r.key), r.title.clone()));
+        desktops.dedup_by(|a, b| a.key == b.key);
+        let lines: Vec<TrayItem> = desktops
+            .into_iter()
+            .map(|r| tray_desktop(r, desks))
+            .collect();
+        if lines.is_empty() {
+            continue;
+        }
+        if several {
+            groups.push(TrayItem::Submenu {
+                label: label.clone(),
+                items: lines,
+            });
+        } else {
+            groups.extend(lines);
+        }
+    }
+    if !groups.is_empty() {
+        items.push(TrayItem::Separator);
+        items.extend(groups);
+    }
+    items.push(TrayItem::Separator);
+    items.push(action(fl!("tray-quit"), TrayAction::Quit));
+    items
+}
+
+/// One desktop in the tray: Show when connected (checked), Connect when
+/// not, its state while busy.
+fn tray_desktop(r: &ResourceView, desks: &Desks) -> crate::tray::TrayItem {
+    use crate::tray::{TrayAction, TrayItem};
+    let busy = |status: String| TrayItem::Action {
+        label: format!("{} · {status}", r.title),
+        action: TrayAction::ShowDesktop(r.key.clone()),
+        checked: false,
+        enabled: false,
+    };
+    match desks.conn(&r.key) {
+        Some(Connection::Connected) => TrayItem::Action {
+            label: r.title.clone(),
+            // An app's windows can't be told apart (ADR 0020): open
+            // Deskfeed instead.
+            action: if r.kind == ResourceKind::Desktop {
+                TrayAction::ShowDesktop(r.key.clone())
+            } else {
+                TrayAction::Show
+            },
+            checked: true,
+            enabled: true,
+        },
+        None | Some(Connection::Failed(_)) => TrayItem::Action {
+            label: fl!("tray-connect", title = r.title.clone()),
+            action: TrayAction::Connect(r.key.clone()),
+            checked: false,
+            enabled: true,
+        },
+        Some(Connection::Preparing | Connection::Connecting) => busy(fl!("status-connecting")),
+        Some(Connection::AwaitingUser) => busy(fl!("status-awaiting-user")),
+        Some(Connection::Authenticating) => busy(fl!("status-authenticating")),
+        Some(Connection::Disconnecting) => busy(fl!("status-disconnecting")),
+        Some(Connection::Reconnecting { attempt, of }) => {
+            let (attempt, of) = (*attempt, *of);
+            busy(fl!("status-reconnecting", attempt = attempt, of = of))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tray::{TrayAction, TrayItem};
+
+    fn resource(key: &str, title: &str, kind: ResourceKind) -> ResourceView {
+        ResourceView {
+            key: key.into(),
+            legacy_key: String::new(),
+            title: title.into(),
+            kind,
+            connection_file: None,
+            icon: None,
+        }
+    }
+
+    /// The desktop lines: the part between the first and the last
+    /// separator (Show and the count above, Quit below), as (label, action,
+    /// checked, enabled).
+    fn lines(items: &[TrayItem]) -> Vec<(String, TrayAction, bool, bool)> {
+        let seps: Vec<usize> = items
+            .iter()
+            .enumerate()
+            .filter(|(_, i)| matches!(i, TrayItem::Separator))
+            .map(|(n, _)| n)
+            .collect();
+        let (Some(&first), Some(&last)) = (seps.first(), seps.last()) else {
+            return Vec::new();
+        };
+        items[first..last]
+            .iter()
+            .filter_map(|i| match i {
+                TrayItem::Action {
+                    label,
+                    action,
+                    checked,
+                    enabled,
+                } => Some((label.clone(), action.clone(), *checked, *enabled)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    // Expectations from ADR 0017 ("The app builds the menu") and ADR 0020
+    // (an app's windows can't be told apart), not from the code's output.
+
+    #[test]
+    fn nothing_connected_shows_no_count_and_offers_connect() {
+        let a = resource("a", "Alpha", ResourceKind::Desktop);
+        let b = resource("b", "Beta", ResourceKind::Desktop);
+        let other = resource("x", "Unknown kind", ResourceKind::Other);
+        let accounts = vec![("anna@example.com".to_owned(), vec![&b, &a, &other, &a])];
+        let favorites = std::collections::BTreeSet::from(["b".to_owned()]);
+        let items = tray_menu(&accounts, &favorites, &Desks::default());
+        // No count line; Show first, Quit last.
+        assert!(!items.iter().any(|i| matches!(i, TrayItem::Note(_))));
+        assert!(matches!(
+            &items[0],
+            TrayItem::Action {
+                action: TrayAction::Show,
+                ..
+            }
+        ));
+        assert!(matches!(
+            items.last(),
+            Some(TrayItem::Action {
+                action: TrayAction::Quit,
+                ..
+            })
+        ));
+        // One account: its desktops inline, favorite first, each once,
+        // unknown kinds left out, all offering Connect.
+        assert!(!items.iter().any(|i| matches!(i, TrayItem::Submenu { .. })));
+        let got = lines(&items);
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(got[0].1, TrayAction::Connect("b".into()));
+        assert_eq!(got[1].1, TrayAction::Connect("a".into()));
+        assert!(got[0].0.contains("Beta") && got[0].0.starts_with("Connect"));
+        assert!(
+            got.iter()
+                .all(|(_, _, checked, enabled)| !checked && *enabled)
+        );
+    }
+
+    #[test]
+    fn connected_busy_and_failed_desktops() {
+        let desk = resource("d", "Desk", ResourceKind::Desktop);
+        let app = resource("p", "Paint", ResourceKind::RemoteApp);
+        let busy = resource("r", "Retry", ResourceKind::Desktop);
+        let failed = resource("f", "Failed", ResourceKind::Desktop);
+        let mut desks = Desks::default();
+        desks.set_conn("d", Connection::Connected);
+        desks.set_conn("p", Connection::Connected);
+        desks.set_conn("r", Connection::Reconnecting { attempt: 2, of: 5 });
+        desks.set_conn("f", Connection::Failed("x".into()));
+        let accounts = vec![(
+            "anna@example.com".to_owned(),
+            vec![&desk, &app, &busy, &failed],
+        )];
+        let items = tray_menu(&accounts, &std::collections::BTreeSet::new(), &desks);
+        // "2 connected": a reconnecting desktop isn't connected.
+        let Some(TrayItem::Note(count)) = items.first() else {
+            panic!("{items:?}")
+        };
+        assert!(count.contains('2'), "{count}");
+        let got = lines(&items);
+        let find = |title: &str| got.iter().find(|l| l.0.contains(title)).unwrap().clone();
+        // Connected: checked, brings the desktop to the front.
+        assert_eq!(find("Desk").1, TrayAction::ShowDesktop("d".into()));
+        assert!(find("Desk").2 && find("Desk").3);
+        // A connected app opens Deskfeed instead (ADR 0020).
+        assert_eq!(find("Paint").1, TrayAction::Show);
+        assert!(find("Paint").2);
+        // Busy: its state, disabled, not checked.
+        let r = find("Retry");
+        assert!(!r.2 && !r.3, "{r:?}");
+        assert!(r.0.contains('2') && r.0.contains('5'), "{}", r.0);
+        // Failed: Connect again.
+        assert_eq!(find("Failed").1, TrayAction::Connect("f".into()));
+        assert!(find("Failed").3);
+    }
+
+    #[test]
+    fn several_accounts_get_a_submenu_each() {
+        let a = resource("a", "Alpha", ResourceKind::Desktop);
+        let b = resource("b", "Beta", ResourceKind::Desktop);
+        let accounts = vec![
+            ("anna@example.com".to_owned(), vec![&a]),
+            ("bob@example.com".to_owned(), vec![&b]),
+            // An account without desktops gets no empty submenu.
+            ("carl@example.com".to_owned(), vec![]),
+        ];
+        let items = tray_menu(
+            &accounts,
+            &std::collections::BTreeSet::new(),
+            &Desks::default(),
+        );
+        let subs: Vec<(&str, usize)> = items
+            .iter()
+            .filter_map(|i| match i {
+                TrayItem::Submenu { label, items } => Some((label.as_str(), items.len())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(subs, [("anna@example.com", 1), ("bob@example.com", 1)]);
+        // No desktop lines outside the submenus.
+        assert_eq!(lines(&items), []);
     }
 }
