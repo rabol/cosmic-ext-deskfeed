@@ -472,25 +472,24 @@ pub enum SettingsMessage {
     AppAutostart(bool),
     OpenAccountSettings(String),
     OpenDesktopSettings(String),
-    AppToggle(Toggle, bool),
-    AppNumber(Number, u32),
-    /// Index into `Choice::options`.
-    AppChoice(Choice, usize),
-    /// 0 follows the app's setting, then `Choice::options` from 1.
-    AccountChoice(String, Choice, usize),
-    /// 0 follows the account's setting, then `Choice::options` from 1.
-    DesktopChoice(String, Choice, usize),
+    /// A connection setting changed on the app's, an account's or a
+    /// desktop's page.
+    Edit(Level, settings::Edit),
     /// Log rotation size in MiB.
     AppLogSize(u32),
     /// Appearance: index into `THEMES`.
     AppTheme(usize),
-    /// Account override: 0 follows the app's setting, 1 on, 2 off.
-    AccountToggle(String, Toggle, usize),
-    AccountNumber(String, Number, Option<u32>),
-    /// Resource key, setting, dropdown choice (0: follow the account).
-    DesktopToggle(String, Toggle, usize),
-    /// `None`: follow the account.
-    DesktopNumber(String, Number, Option<u32>),
+}
+
+/// Whose connection settings: built-in defaults → app → account →
+/// desktop, each overriding the one above (`settings.rs`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Level {
+    App,
+    /// Account ID.
+    Account(String),
+    /// Resource key.
+    Desktop(String),
 }
 
 /// Quitting (`quit.rs`).

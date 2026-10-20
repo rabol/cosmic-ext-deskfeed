@@ -259,9 +259,29 @@ impl ConnectionSettings {
         *slot = value.and_then(|v| c.valid(v));
     }
 
+    /// Applies one change from a settings page.
+    pub fn edit(&mut self, edit: Edit) {
+        match edit {
+            Edit::Toggle(t, value) => self.set_toggle(t, value),
+            Edit::Number(n, value) => self.set_number(n, value),
+            Edit::Choice(c, value) => self.set_choice(c, value),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
+}
+
+/// One change to a setting. `None` follows the level above (account and
+/// desktop levels).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edit {
+    Toggle(Toggle, Option<bool>),
+    /// Clamped to the number's range.
+    Number(Number, Option<u32>),
+    /// A value that isn't offered follows the level above.
+    Choice(Choice, Option<u32>),
 }
 
 /// The settings a connection actually uses.

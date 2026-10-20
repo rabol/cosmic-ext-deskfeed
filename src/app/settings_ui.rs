@@ -8,20 +8,29 @@
 
 use super::*;
 
-#[derive(Clone, Copy)]
-pub(super) enum Level {
-    App,
-    Account,
-    Desktop,
+/// A change on the app page, as a message.
+fn app_edit(edit: settings::Edit) -> Message {
+    Message::Settings(SettingsMessage::Edit(Level::App, edit))
 }
 
-/// Dropdown index of an override: follow the level above, on, off.
-fn choice_value(choice: usize) -> Option<bool> {
-    match choice {
+/// An override's dropdown position: follow the level above, on, off.
+pub(super) fn override_toggle(position: usize) -> Option<bool> {
+    match position {
         1 => Some(true),
         2 => Some(false),
         _ => None,
     }
+}
+
+/// A choice's dropdown position on the app page: the options in order.
+pub(super) fn app_choice(c: Choice, position: usize) -> Option<u32> {
+    c.options().get(position).copied()
+}
+
+/// An override's dropdown position for a choice: follow the level above,
+/// then the options.
+pub(super) fn override_choice(c: Choice, position: usize) -> Option<u32> {
+    position.checked_sub(1).and_then(|i| app_choice(c, i))
 }
 
 impl AppModel {
@@ -42,24 +51,7 @@ impl AppModel {
                 self.context_page = ContextPage::DesktopSettings;
                 self.core.window.show_context = true;
             }
-            SettingsMessage::AppToggle(t, on) => {
-                self.edit_settings(Level::App, "", |s| s.set_toggle(t, Some(on)));
-            }
-            SettingsMessage::AppNumber(n, value) => {
-                self.edit_settings(Level::App, "", |s| s.set_number(n, Some(value)));
-            }
-            SettingsMessage::AppChoice(c, i) => {
-                let value = c.options().get(i).copied();
-                self.edit_settings(Level::App, "", |s| s.set_choice(c, value));
-            }
-            SettingsMessage::AccountChoice(id, c, i) => {
-                let value = i.checked_sub(1).and_then(|i| c.options().get(i).copied());
-                self.edit_settings(Level::Account, &id, |s| s.set_choice(c, value));
-            }
-            SettingsMessage::DesktopChoice(key, c, i) => {
-                let value = i.checked_sub(1).and_then(|i| c.options().get(i).copied());
-                self.edit_settings(Level::Desktop, &key, |s| s.set_choice(c, value));
-            }
+            SettingsMessage::Edit(level, edit) => self.edit_settings(&level, edit),
             SettingsMessage::AppTheme(i) => {
                 let value = u32::try_from(i).unwrap_or(0).min(2);
                 save_config!(self, app_theme, set_app_theme, Some(value));
@@ -87,70 +79,43 @@ impl AppModel {
                 crate::log::set_max_size_mib(mib);
                 save_config!(self, log_max_mib, set_log_max_mib, Some(mib));
             }
-            SettingsMessage::AccountToggle(id, t, choice) => {
-                self.edit_settings(Level::Account, &id, |s| {
-                    s.set_toggle(t, choice_value(choice));
-                });
-            }
-            SettingsMessage::AccountNumber(id, n, value) => {
-                self.edit_settings(Level::Account, &id, |s| s.set_number(n, value));
-            }
-            SettingsMessage::DesktopToggle(key, t, choice) => {
-                self.edit_settings(Level::Desktop, &key, |s| {
-                    s.set_toggle(t, choice_value(choice));
-                });
-            }
-            SettingsMessage::DesktopNumber(key, n, value) => {
-                self.edit_settings(Level::Desktop, &key, |s| s.set_number(n, value));
-            }
         }
         Task::none()
     }
 
     /// Changes the app's, an account's or a desktop's settings and saves
     /// the config. Empty account and desktop entries are removed.
-    pub(super) fn edit_settings(
-        &mut self,
-        level: Level,
-        key: &str,
-        f: impl FnOnce(&mut ConnectionSettings),
-    ) {
-        if let Level::App = level {
-            let mut app = self.config.app_settings.clone();
-            f(&mut app);
-            save_config!(self, app_settings, set_app_settings, app);
-            return;
-        }
-        let mut map = match level {
-            Level::Account => self.config.account_settings.clone(),
-            _ => self.config.desktop_settings.clone(),
+    pub(super) fn edit_settings(&mut self, level: &Level, edit: settings::Edit) {
+        let (mut map, key) = match level {
+            Level::App => {
+                let mut app = self.config.app_settings.clone();
+                app.edit(edit);
+                save_config!(self, app_settings, set_app_settings, app);
+                return;
+            }
+            Level::Account(id) => (self.config.account_settings.clone(), id),
+            Level::Desktop(key) => (self.config.desktop_settings.clone(), key),
         };
-        let entry = map.entry(key.to_owned()).or_default();
-        f(entry);
+        let entry = map.entry(key.clone()).or_default();
+        entry.edit(edit);
         if entry.is_empty() {
             map.remove(key);
         }
-        if let Level::Account = level {
+        if let Level::Account(_) = level {
             save_config!(self, account_settings, set_account_settings, map);
         } else {
             save_config!(self, desktop_settings, set_desktop_settings, map);
         }
     }
 
-    /// The settings one level inherits: the app's for an account, and the
-    /// account's (over the app's) for a desktop.
-    fn inherited(&self, account: Option<&str>) -> settings::Effective {
+    /// The app's settings with `account`'s on top; the app's alone for an
+    /// account being added, and for the app page.
+    pub(super) fn account_settings(&self, account: Option<&str>) -> settings::Effective {
         settings::effective(
             Some(&self.config.app_settings),
             account.and_then(|a| self.config.account_settings.get(a)),
             None,
         )
-    }
-
-    /// The app's settings with `account`'s on top; the app's alone for an
-    /// account being added.
-    pub(super) fn account_settings(&self, account: Option<&str>) -> settings::Effective {
-        self.inherited(account)
     }
 
     /// The settings a desktop of `account` uses.
@@ -163,14 +128,14 @@ impl AppModel {
     }
 
     pub(super) fn app_settings_view(&self) -> Element<'_, Message> {
-        let current = self.inherited(None);
+        let current = self.account_settings(None);
         let toggle = |t: Toggle| -> Element<'_, Message> {
             let (name, description) = toggle_text(t);
             widget::settings::item::builder(name)
                 .description(description)
                 .control(
                     widget::toggler(current.toggle(t))
-                        .on_toggle(move |on| Message::Settings(SettingsMessage::AppToggle(t, on))),
+                        .on_toggle(move |on| app_edit(settings::Edit::Toggle(t, Some(on)))),
                 )
                 .into()
         };
@@ -179,7 +144,7 @@ impl AppModel {
             widget::settings::item::builder(name)
                 .description(description)
                 .control(number_spin(n, current.number(n), move |v| {
-                    Message::Settings(SettingsMessage::AppNumber(n, v))
+                    app_edit(settings::Edit::Number(n, Some(v)))
                 }))
                 .into()
         };
@@ -190,7 +155,7 @@ impl AppModel {
             widget::settings::item::builder(name)
                 .description(description)
                 .control(widget::dropdown(labels, selected, move |i| {
-                    Message::Settings(SettingsMessage::AppChoice(c, i))
+                    app_edit(settings::Edit::Choice(c, app_choice(c, i)))
                 }))
                 .into()
         };
@@ -267,26 +232,22 @@ impl AppModel {
             .cloned()
             .unwrap_or_default();
         let rows = OverrideRows {
-            inherited: self.inherited(None),
+            inherited: self.account_settings(None),
             own,
             labels: (&self.follow_app_on, &self.follow_app_off),
             reset_label: fl!("use-app-setting"),
             follow_value: |value: String| fl!("follow-app-value", value = value),
             follow_choice: |value: String| fl!("follow-app-choice", value = value),
         };
-        let id_toggle = id.to_owned();
-        let id_number = id.to_owned();
-        let id_choice = id.to_owned();
         rows.view(
+            None,
             open_note(
                 fl!("account-settings-hint"),
                 self.desks.open_count_for(id) > 0,
                 false,
             ),
             Page::WithAccount,
-            move |t, i| Message::Settings(SettingsMessage::AccountToggle(id_toggle.clone(), t, i)),
-            move |n, v| Message::Settings(SettingsMessage::AccountNumber(id_number.clone(), n, v)),
-            move |c, i| Message::Settings(SettingsMessage::AccountChoice(id_choice.clone(), c, i)),
+            Level::Account(id.to_owned()),
         )
     }
 
@@ -301,16 +262,13 @@ impl AppModel {
             .cloned()
             .unwrap_or_default();
         let rows = OverrideRows {
-            inherited: self.inherited(Some(&account.id)),
+            inherited: self.account_settings(Some(&account.id)),
             own,
             labels: (&self.follow_account_on, &self.follow_account_off),
             reset_label: fl!("use-account-setting"),
             follow_value: |value: String| fl!("follow-account-value", value = value),
             follow_choice: |value: String| fl!("follow-account-choice", value = value),
         };
-        let key_toggle = key.to_owned();
-        let key_number = key.to_owned();
-        let key_choice = key.to_owned();
         let mut security = widget::settings::section().title(fl!("settings-security"));
         let mut any = false;
         if let Some(fp) = self.config.certificate_pins.get(key) {
@@ -351,13 +309,11 @@ impl AppModel {
             ),
         };
         let open = self.desks.running(key).is_some() || self.desks.launching(key).is_some();
-        rows.view_with(
+        rows.view(
             pin,
             open_note(hint, open, true),
             page,
-            move |t, i| Message::Settings(SettingsMessage::DesktopToggle(key_toggle.clone(), t, i)),
-            move |n, v| Message::Settings(SettingsMessage::DesktopNumber(key_number.clone(), n, v)),
-            move |c, i| Message::Settings(SettingsMessage::DesktopChoice(key_choice.clone(), c, i)),
+            Level::Desktop(key.to_owned()),
         )
     }
 }
@@ -395,27 +351,15 @@ struct OverrideRows<'a, F: Fn(String) -> String> {
 }
 
 impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
+    /// The page for `level`, with `last` at its end.
     fn view(
-        self,
-        hint: String,
-        page: Page,
-        on_toggle: impl Fn(Toggle, usize) -> Message + Clone + Send + Sync + 'static,
-        on_number: impl Fn(Number, Option<u32>) -> Message + Clone + 'static,
-        on_choice: impl Fn(Choice, usize) -> Message + Clone + Send + Sync + 'static,
-    ) -> Element<'a, Message> {
-        self.view_with(None, hint, page, on_toggle, on_number, on_choice)
-    }
-
-    /// With `last` at the end of the page.
-    fn view_with(
         self,
         last: Option<Element<'a, Message>>,
         hint: String,
         page: Page,
-        on_toggle: impl Fn(Toggle, usize) -> Message + Clone + Send + Sync + 'static,
-        on_number: impl Fn(Number, Option<u32>) -> Message + Clone + 'static,
-        on_choice: impl Fn(Choice, usize) -> Message + Clone + Send + Sync + 'static,
+        level: Level,
     ) -> Element<'a, Message> {
+        let edit = move |edit| Message::Settings(SettingsMessage::Edit(level.clone(), edit));
         let Self {
             inherited,
             own,
@@ -427,14 +371,18 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
         let current = inherited.with(Some(&own));
         let number = |n: Number| -> Element<'a, Message> {
             let (name, description) = number_text(n);
-            let set = on_number.clone();
+            let set = edit.clone();
             let mut row = widget::row::with_capacity(2)
                 .spacing(cosmic::theme::spacing().space_xs)
                 .align_y(Alignment::Center)
-                .push(number_spin(n, current.number(n), move |v| set(n, Some(v))));
+                .push(number_spin(n, current.number(n), move |v| {
+                    set(settings::Edit::Number(n, Some(v)))
+                }));
             if own.number(n).is_some() {
-                row = row
-                    .push(widget::button::text(reset_label.clone()).on_press(on_number(n, None)));
+                row = row.push(
+                    widget::button::text(reset_label.clone())
+                        .on_press(edit(settings::Edit::Number(n, None))),
+                );
             }
             let inherited_value = number_label(n, inherited.number(n));
             widget::settings::item::builder(name)
@@ -454,11 +402,11 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
                 Some(true) => 1,
                 Some(false) => 2,
             };
-            let on_toggle = on_toggle.clone();
+            let set = edit.clone();
             widget::settings::item::builder(name)
                 .description(description)
                 .control(widget::dropdown(options, Some(selected), move |i| {
-                    on_toggle(t, i)
+                    set(settings::Edit::Toggle(t, override_toggle(i)))
                 }))
                 .into()
         };
@@ -471,11 +419,11 @@ impl<'a, F: Fn(String) -> String> OverrideRows<'a, F> {
                 .choice(c)
                 .and_then(|v| c.options().iter().position(|&o| o == v))
                 .map_or(0, |i| i + 1);
-            let on_choice = on_choice.clone();
+            let set = edit.clone();
             widget::settings::item::builder(name)
                 .description(description)
                 .control(widget::dropdown(labels, Some(selected), move |i| {
-                    on_choice(c, i)
+                    set(settings::Edit::Choice(c, override_choice(c, i)))
                 }))
                 .into()
         };

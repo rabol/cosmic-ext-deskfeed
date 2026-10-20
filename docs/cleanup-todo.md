@@ -87,7 +87,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 - [x] **`Running` and `Launching` share 6 fields** (Done 2026-10-20: both hold a `Start`) (`src/app/model.rs:124-160`). *Simpler:* `Running { start: Launching, session }`. Effort S, risk low.
 - [x] **"Renew, try, renew again on 401" written twice** (Done 2026-10-20: `with_fresh_token`, used for the desktop list and the connection file; tested on its own.) (`src/app/account_flow.rs:552-575`, `src/app/connect.rs:~236-255`). *Simpler:* one helper taking a closure. Effort M, risk med.
 - [x] **About 24 `spawn_blocking` blocks with four different fallbacks** (Done 2026-10-20: all 26 go through `off_ui`, which logs a crash and returns an explicit fallback) (`"task"`, `error-generic`, `Err(())`, `unwrap_or_default`). The §1 bug is one of them. *Simpler:* one helper with an explicit error. Effort S–M, risk low.
-- [ ] **Settings plumbing** (`src/app/settings_ui.rs`).
+- [x] **Settings plumbing** (`src/app/settings_ui.rs`). (Done 2026-10-20: `SettingsMessage::Edit(Level, Edit)` replaces nine messages; `save_config!` replaces eight save copies and fixed `remember_logon`, which kept nothing without a settings store; `inherited` and the `view` wrapper are gone.)
   - Nine near-identical setting messages (App/Account/Desktop × Toggle/Number/Choice).
   - `account_settings` is an alias of `inherited`.
   - `view()` only wraps `view_with`.

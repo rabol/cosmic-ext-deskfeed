@@ -379,27 +379,39 @@ mod fresh_token {
 
 mod settings_pages {
     use super::*;
-    use crate::settings::{Choice, Number, Toggle, clipboard};
+    use crate::app::settings_ui::{app_choice, override_choice, override_toggle};
+    use crate::settings::{Choice, Edit, Number, Toggle, clipboard};
 
     fn settings(app: &mut AppModel, m: SettingsMessage) {
         let _ = app.update(Message::Settings(m));
     }
 
+    /// A change as the page for `level` sends it.
+    fn edit(app: &mut AppModel, level: &Level, e: Edit) {
+        settings(app, SettingsMessage::Edit(level.clone(), e));
+    }
+
     #[test]
     fn app_settings_are_set_clamped_and_offered_values_only() {
         let mut app = app();
-        settings(
+        let c = Choice::Clipboard;
+        edit(
             &mut app,
-            SettingsMessage::AppToggle(Toggle::Fullscreen, true),
+            &Level::App,
+            Edit::Toggle(Toggle::Fullscreen, Some(true)),
         );
-        settings(&mut app, SettingsMessage::AppNumber(Number::Timeout, 5));
-        settings(&mut app, SettingsMessage::AppChoice(Choice::Clipboard, 1));
+        edit(
+            &mut app,
+            &Level::App,
+            Edit::Number(Number::Timeout, Some(5)),
+        );
+        edit(&mut app, &Level::App, Edit::Choice(c, app_choice(c, 1)));
         let s = &app.config.app_settings;
         assert_eq!(s.fullscreen, Some(true));
         assert_eq!(s.timeout_secs, Some(10), "clamped to the smallest");
         assert_eq!(s.clipboard_mode, Some(clipboard::BOTH));
-        // An index past the options unsets it.
-        settings(&mut app, SettingsMessage::AppChoice(Choice::Clipboard, 99));
+        // A position past the options unsets it.
+        edit(&mut app, &Level::App, Edit::Choice(c, app_choice(c, 99)));
         assert_eq!(app.config.app_settings.clipboard_mode, None);
     }
 
@@ -407,64 +419,44 @@ mod settings_pages {
     fn account_overrides_follow_or_override_and_empty_entries_go() {
         let mut app = app();
         let id = "acct-s".to_owned();
+        let level = Level::Account(id.clone());
+        let sound = |position| Edit::Toggle(Toggle::Sound, override_toggle(position));
         // Dropdown: 0 follows the app, 1 on, 2 off.
-        settings(
-            &mut app,
-            SettingsMessage::AccountToggle(id.clone(), Toggle::Sound, 2),
-        );
+        edit(&mut app, &level, sound(2));
         assert_eq!(app.config.account_settings[&id].sound, Some(false));
-        settings(
-            &mut app,
-            SettingsMessage::AccountToggle(id.clone(), Toggle::Sound, 1),
-        );
+        edit(&mut app, &level, sound(1));
         assert_eq!(app.config.account_settings[&id].sound, Some(true));
-        settings(
-            &mut app,
-            SettingsMessage::AccountToggle(id.clone(), Toggle::Sound, 0),
-        );
+        edit(&mut app, &level, sound(0));
         assert!(
             !app.config.account_settings.contains_key(&id),
             "nothing left"
         );
         // Numbers: a value, then back to following.
-        settings(
-            &mut app,
-            SettingsMessage::AccountNumber(id.clone(), Number::Refresh, Some(30)),
-        );
+        edit(&mut app, &level, Edit::Number(Number::Refresh, Some(30)));
         assert_eq!(app.config.account_settings[&id].refresh_mins, Some(30));
-        settings(
-            &mut app,
-            SettingsMessage::AccountNumber(id.clone(), Number::Refresh, None),
-        );
+        edit(&mut app, &level, Edit::Number(Number::Refresh, None));
         assert!(!app.config.account_settings.contains_key(&id));
         // Choices: 0 follows, then the options from 1.
-        settings(
-            &mut app,
-            SettingsMessage::AccountChoice(id.clone(), Choice::Scale, 2),
-        );
+        let scale =
+            |position| Edit::Choice(Choice::Scale, override_choice(Choice::Scale, position));
+        edit(&mut app, &level, scale(2));
         assert_eq!(app.config.account_settings[&id].scale, Some(100));
-        settings(
-            &mut app,
-            SettingsMessage::AccountChoice(id.clone(), Choice::Scale, 0),
-        );
+        edit(&mut app, &level, scale(0));
         assert!(!app.config.account_settings.contains_key(&id));
     }
 
     #[test]
     fn desktop_overrides_are_kept_per_desktop() {
         let mut app = app();
-        settings(
+        let (k1, k2) = (Level::Desktop("k1".into()), Level::Desktop("k2".into()));
+        let c = Choice::Clipboard;
+        edit(
             &mut app,
-            SettingsMessage::DesktopToggle("k1".into(), Toggle::Camera, 1),
+            &k1,
+            Edit::Toggle(Toggle::Camera, override_toggle(1)),
         );
-        settings(
-            &mut app,
-            SettingsMessage::DesktopNumber("k1".into(), Number::Timeout, Some(10_000)),
-        );
-        settings(
-            &mut app,
-            SettingsMessage::DesktopChoice("k2".into(), Choice::Clipboard, 3),
-        );
+        edit(&mut app, &k1, Edit::Number(Number::Timeout, Some(10_000)));
+        edit(&mut app, &k2, Edit::Choice(c, override_choice(c, 3)));
         let d = &app.config.desktop_settings;
         assert_eq!(d["k1"].camera, Some(true));
         assert_eq!(d["k1"].timeout_secs, Some(600), "clamped to the largest");
