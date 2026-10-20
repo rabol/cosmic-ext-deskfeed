@@ -297,7 +297,11 @@ pub enum Message {
     /// The saved sign-ins, or why they couldn't be read.
     SavedLoaded(Result<Vec<Stored>, String>),
     /// Account ID, generation, outcome.
-    Restored(String, u64, Restore),
+    Restored(
+        String,
+        u64,
+        Result<(Arc<SignedIn>, Option<String>), crate::accounts::RenewError>,
+    ),
     RetryRestore(String),
     AddAccount,
     /// Sign in again to an account in the list.

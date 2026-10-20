@@ -252,7 +252,7 @@ impl AppModel {
         cosmic::task::future(async move {
             let outcome = off_ui(
                 move || accounts::shared().restore(&http, &stored, started),
-                Restore::Retry(fl!("error-generic")),
+                Err(accounts::RenewError::Retry(fl!("error-generic"))),
             )
             .await;
             Message::Restored(id, generation, outcome)
@@ -263,13 +263,13 @@ impl AppModel {
         &mut self,
         id: &str,
         generation: u64,
-        outcome: Restore,
+        outcome: Result<(Arc<SignedIn>, Option<String>), accounts::RenewError>,
     ) -> Task<cosmic::Action<Message>> {
         let Some(account) = self.account_mut(id).filter(|a| a.generation == generation) else {
             return Task::none();
         };
         match outcome {
-            Restore::Ready(signed_in, notice) => {
+            Ok((signed_in, notice)) => {
                 account.identity = signed_in.identity.clone();
                 account.notice = notice;
                 account.state = AccountState::Ready {
@@ -280,12 +280,12 @@ impl AppModel {
                 };
                 self.load_resources(id)
             }
-            Restore::SignInAgain(error) => {
+            Err(accounts::RenewError::SignInAgain(error)) => {
                 account.stored = None;
                 account.state = AccountState::NeedsSignIn { error: Some(error) };
                 Task::none()
             }
-            Restore::Retry(error) => {
+            Err(accounts::RenewError::Retry(error)) => {
                 account.can_retry = true;
                 account.state = AccountState::NeedsSignIn { error: Some(error) };
                 Task::none()

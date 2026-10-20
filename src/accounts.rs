@@ -436,18 +436,6 @@ fn token_error_kind(e: &TokenError) -> String {
     }
 }
 
-/// The outcome of signing in with a saved refresh token.
-#[derive(Debug, Clone)]
-pub enum Restore {
-    /// Signed in. The text is a notice if the renewed token couldn't be
-    /// saved.
-    Ready(Arc<SignedIn>, Option<String>),
-    /// The saved sign-in can't be used any more; sign in again.
-    SignInAgain(String),
-    /// Network trouble; the saved sign-in is kept for another try.
-    Retry(String),
-}
-
 impl Accounts {
     /// All saved sign-ins, or the text to show if the keyring can't be read.
     pub fn load_saved(&self) -> Result<Vec<Stored>, String> {
@@ -463,71 +451,46 @@ impl Accounts {
         }
     }
 
-    /// Signs in with a saved refresh token. `started`:
+    /// Signs in with a saved refresh token: the account, and a notice if a
+    /// rotated refresh token couldn't be saved. `started`:
     /// [`Self::sign_out_count`] when this was scheduled, so a restore
     /// queued before a sign-out does nothing after it.
-    pub fn restore(&self, http: &Http, stored: &Stored, started: u64) -> Restore {
-        let config = &self.config;
+    pub fn restore(
+        &self,
+        http: &Http,
+        stored: &Stored,
+        started: u64,
+    ) -> Result<(Arc<SignedIn>, Option<String>), RenewError> {
         let id = account_id(&stored.identity);
         let busy = self.busy(&id);
         let _busy = busy.lock();
         // Signed out since this was scheduled: no network, no saving.
         if self.sign_out_count(&id) != started {
-            return Restore::SignInAgain(fl!("error-session-expired"));
+            return Err(RenewError::SignInAgain(fl!("error-session-expired")));
         }
-        let renewed = token::refresh(http, config, &stored.refresh_token);
-        if let Err(e) = &renewed {
-            crate::app_log!("saved sign-in: renewal failed ({})", token_error_kind(e));
-        }
-        let tokens = match renewed {
-            Ok(tokens) => tokens,
-            Err(TokenError::Transient(_)) => return Restore::Retry(fl!("error-restore-network")),
-            Err(TokenError::InvalidGrant { aadsts }) => {
+        match self.redeem(http, &stored.identity, &stored.refresh_token, started) {
+            Ok((account, saved)) => Ok((account, saved.err())),
+            Err(Failure::Network) => Err(RenewError::Retry(fl!("error-restore-network"))),
+            Err(Failure::Revoked { frequency }) => {
                 // Revoked or expired for good: forget it.
-                let deleted = secrets::delete(config, &stored.identity);
+                let deleted = secrets::delete(&self.config, &stored.identity);
                 crate::app_log!("saved sign-in: deleted (invalid_grant): {deleted:?}");
-                // AADSTS70043 "BadTokenDueToSignInFrequency": the
-                // organization's Conditional Access asks for a new sign-in
-                // after a set time (Microsoft Entra error code reference).
-                return Restore::SignInAgain(if aadsts == Some(70043) {
+                Err(RenewError::SignInAgain(if frequency {
                     fl!("error-sign-in-frequency")
                 } else {
                     fl!("error-saved-sign-in-expired")
-                });
+                }))
             }
             // Policy or interaction needed: an interactive sign-in replaces it.
-            Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
-        };
-        let identity = match renewed_identity(http, config, &tokens, &stored.identity) {
-            Ok(identity) => identity,
-            Err(IdentityCheck::KeysUnavailable) => {
-                return Restore::Retry(fl!("error-restore-network"));
+            Err(Failure::Refused) => {
+                Err(RenewError::SignInAgain(fl!("error-saved-sign-in-expired")))
             }
-            Err(IdentityCheck::Invalid) => {
-                return Restore::SignInAgain(fl!("error-saved-sign-in-expired"));
-            }
-        };
-        let rotated = tokens
-            .refresh_token
-            .as_ref()
-            .is_some_and(|t| t.expose() != stored.refresh_token.expose());
-        crate::app_log!(
-            "saved sign-in: renewed (refresh token {})",
-            if rotated { "rotated" } else { "unchanged" }
-        );
-        let account = Arc::new(SignedIn { identity, tokens });
-        let notice = if rotated {
-            self.save_while_busy(&account, started).err()
-        } else {
-            None
-        };
-        self.note_tokens(&account, started);
-        Restore::Ready(account, notice)
+        }
     }
 
     /// Renews the tokens (see [`Renewal`]) and saves a rotated refresh
-    /// token. `started`: [`Self::sign_out_count`] when the work was
-    /// scheduled.
+    /// token, best effort: if that fails, the next start asks to sign in.
+    /// `started`: [`Self::sign_out_count`] when the work was scheduled.
     pub fn renew(
         &self,
         http: &Http,
@@ -561,50 +524,71 @@ impl Accounts {
         let Some(refresh_token) = &account.tokens.refresh_token else {
             return Err(RenewError::SignInAgain(fl!("error-session-expired")));
         };
-        let tokens = match token::refresh(http, &self.config, refresh_token) {
-            Ok(tokens) => tokens,
-            Err(e) => {
-                crate::app_log!("renewal failed ({})", token_error_kind(&e));
-                return Err(match e {
-                    TokenError::Transient(_) => RenewError::Retry(fl!("error-generic")),
-                    TokenError::InvalidGrant {
-                        aadsts: Some(70043),
-                    } => RenewError::SignInAgain(fl!("error-sign-in-frequency")),
-                    _ => RenewError::SignInAgain(fl!("error-session-expired")),
-                });
+        match self.redeem(http, &account.identity, refresh_token, started) {
+            Ok((renewed, _)) => Ok(renewed),
+            Err(Failure::Network) => Err(RenewError::Retry(fl!("error-generic"))),
+            Err(Failure::Revoked { frequency: true }) => {
+                Err(RenewError::SignInAgain(fl!("error-sign-in-frequency")))
             }
-        };
-        let identity = match renewed_identity(http, &self.config, &tokens, &account.identity) {
-            Ok(identity) => identity,
-            Err(IdentityCheck::KeysUnavailable) => {
-                return Err(RenewError::Retry(fl!("error-generic")));
+            Err(_) => Err(RenewError::SignInAgain(fl!("error-session-expired"))),
+        }
+    }
+
+    /// Renews `identity`'s tokens with `refresh_token`, checks a renewed ID
+    /// token, saves a rotated refresh token (the result of that save comes
+    /// back) and records the tokens as the newest. The caller holds the
+    /// account's lock and has checked for a sign-out since `started`.
+    fn redeem(
+        &self,
+        http: &Http,
+        identity: &Identity,
+        refresh_token: &Secret,
+        started: u64,
+    ) -> Result<(Arc<SignedIn>, Result<(), String>), Failure> {
+        let tokens = token::refresh(http, &self.config, refresh_token).map_err(|e| {
+            crate::app_log!("renewal failed ({})", token_error_kind(&e));
+            match e {
+                TokenError::Transient(_) => Failure::Network,
+                // AADSTS70043 "BadTokenDueToSignInFrequency": the
+                // organization's Conditional Access asks for a new sign-in
+                // after a set time (Microsoft Entra error code reference).
+                TokenError::InvalidGrant { aadsts } => Failure::Revoked {
+                    frequency: aadsts == Some(70043),
+                },
+                _ => Failure::Refused,
             }
-            Err(IdentityCheck::Invalid) => {
-                return Err(RenewError::SignInAgain(fl!("error-session-expired")));
-            }
-        };
-        let renewed = SignedIn { identity, tokens };
-        let rotated = renewed
-            .tokens
+        })?;
+        let identity = renewed_identity(http, &self.config, &tokens, identity)?;
+        let rotated = tokens
             .refresh_token
             .as_ref()
             .is_some_and(|t| t.expose() != refresh_token.expose());
-        if rotated {
-            // Best effort: if this fails, the next start asks to sign in.
-            let _ = self.save_while_busy(&renewed, started);
-        }
-        let renewed = Arc::new(renewed);
-        self.note_tokens(&renewed, started);
-        Ok(renewed)
+        crate::app_log!(
+            "renewed (refresh token {})",
+            if rotated { "rotated" } else { "unchanged" }
+        );
+        let account = Arc::new(SignedIn { identity, tokens });
+        let saved = if rotated {
+            self.save_while_busy(&account, started)
+        } else {
+            Ok(())
+        };
+        self.note_tokens(&account, started);
+        Ok((account, saved))
     }
 }
 
-/// Why renewed tokens can't be used.
-enum IdentityCheck {
-    /// Microsoft's signing keys couldn't be fetched: try again later.
-    KeysUnavailable,
-    /// The renewed ID token is invalid or names another account.
-    Invalid,
+/// Why a refresh token couldn't be used.
+enum Failure {
+    /// Network trouble, or Microsoft's signing keys couldn't be fetched:
+    /// try again later.
+    Network,
+    /// Revoked or expired for good (`invalid_grant`). `frequency`: the
+    /// organization asks for a new sign-in after a set time.
+    Revoked { frequency: bool },
+    /// Interaction or consent needed, or the renewed ID token is invalid or
+    /// names another account.
+    Refused,
 }
 
 /// The identity for renewed tokens. A renewed ID token must name the same
@@ -615,17 +599,17 @@ fn renewed_identity(
     config: &ClientConfig,
     tokens: &TokenSet,
     expected: &Identity,
-) -> Result<Identity, IdentityCheck> {
+) -> Result<Identity, Failure> {
     let Some(raw) = tokens.id_token.as_deref() else {
         return Ok(expected.clone());
     };
-    let keys = id_token::fetch_keys(http).map_err(|_| IdentityCheck::KeysUnavailable)?;
+    let keys = id_token::fetch_keys(http).map_err(|_| Failure::Network)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     id_token::validate_renewed(raw, &keys, &config.client_id, now, expected).map_err(|e| {
         crate::app_log!("renewed ID token refused: {e:?}");
-        IdentityCheck::Invalid
+        Failure::Refused
     })
 }
 
@@ -720,7 +704,11 @@ mod tests {
     }
 
     /// `a.restore`, scheduled now.
-    fn restore_now(a: &Accounts, port: u16, stored: &Stored) -> Restore {
+    fn restore_now(
+        a: &Accounts,
+        port: u16,
+        stored: &Stored,
+    ) -> Result<(Arc<SignedIn>, Option<String>), RenewError> {
         a.restore(
             &http(port),
             stored,
@@ -755,7 +743,7 @@ mod tests {
         let a = accounts(port);
         let _keyring = FakeKeyring::start(Answer::Unlock);
         match restore_now(&a, port, &stored(&me, "rt-old")) {
-            Restore::Ready(account, notice) => {
+            Ok((account, notice)) => {
                 assert_eq!(account.identity, me);
                 assert!(notice.is_none());
             }
@@ -772,7 +760,7 @@ mod tests {
         let a = accounts(port);
         let _keyring = keyring_with(&a, &me, "rt-old");
         let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
-        assert!(matches!(outcome, Restore::Ready(_, None)), "{outcome:?}");
+        assert!(matches!(outcome, Ok((_, None))), "{outcome:?}");
         assert_eq!(tokens(&a), ["rt-new"]);
         // The renewal used the saved token.
         assert!(server.sent().contains("refresh_token=rt-old"));
@@ -786,7 +774,7 @@ mod tests {
         // No keyring.
         match restore_now(&accounts(port), port, &stored(&me, "rt-old")) {
             // Signed in all the same, with a notice.
-            Restore::Ready(_, Some(notice)) => {
+            Ok((_, Some(notice))) => {
                 assert_eq!(notice, fl!("notice-not-saved", detail = unavailable()));
             }
             other => panic!("{other:?}"),
@@ -802,7 +790,7 @@ mod tests {
         let _keyring = keyring_with(&a, &me, "rt-old");
         let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
         assert!(
-            matches!(&outcome, Restore::SignInAgain(m) if *m == fl!("error-saved-sign-in-expired")),
+            matches!(&outcome, Err(RenewError::SignInAgain(m)) if *m == fl!("error-saved-sign-in-expired")),
             "{outcome:?}"
         );
         assert_eq!(tokens(&a), Vec::<String>::new());
@@ -817,7 +805,7 @@ mod tests {
         let _keyring = keyring_with(&a, &me, "rt-old");
         let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
         assert!(
-            matches!(&outcome, Restore::SignInAgain(m) if *m == fl!("error-sign-in-frequency")),
+            matches!(&outcome, Err(RenewError::SignInAgain(m)) if *m == fl!("error-sign-in-frequency")),
             "{outcome:?}"
         );
         assert_eq!(tokens(&a), Vec::<String>::new());
@@ -835,7 +823,10 @@ mod tests {
         let a = accounts(port);
         let _keyring = keyring_with(&a, &me, "rt-old");
         let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
-        assert!(matches!(outcome, Restore::SignInAgain(_)), "{outcome:?}");
+        assert!(
+            matches!(outcome, Err(RenewError::SignInAgain(_))),
+            "{outcome:?}"
+        );
         assert_eq!(tokens(&a), ["rt-old"]);
     }
 
@@ -850,7 +841,10 @@ mod tests {
         a.delete(&me).unwrap();
         assert_eq!(tokens(&a), Vec::<String>::new());
         let outcome = a.restore(&http(1), &stored(&me, "rt-old"), started);
-        assert!(matches!(outcome, Restore::SignInAgain(_)), "{outcome:?}");
+        assert!(
+            matches!(outcome, Err(RenewError::SignInAgain(_))),
+            "{outcome:?}"
+        );
         assert_eq!(tokens(&a), Vec::<String>::new(), "the sign-in came back");
     }
 
@@ -980,7 +974,7 @@ mod tests {
         let _keyring = keyring_with(&a, &me, "rt-old");
         let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
         assert!(
-            matches!(&outcome, Restore::Retry(m) if *m == fl!("error-restore-network")),
+            matches!(&outcome, Err(RenewError::Retry(m)) if *m == fl!("error-restore-network")),
             "{outcome:?}"
         );
         assert_eq!(tokens(&a), ["rt-old"]);
@@ -998,7 +992,7 @@ mod tests {
         );
         let port = server.port;
         let outcome = restore_now(&accounts(port), port, &stored(&me, "rt-old"));
-        assert!(matches!(outcome, Restore::Retry(_)), "{outcome:?}");
+        assert!(matches!(outcome, Err(RenewError::Retry(_))), "{outcome:?}");
     }
 
     #[test]

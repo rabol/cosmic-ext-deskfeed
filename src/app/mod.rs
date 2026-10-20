@@ -17,7 +17,7 @@ use cosmic::widget::{self, about::About, menu, nav_bar};
 use sha2::Digest;
 use url::Url;
 
-use crate::accounts::{self, Restore};
+use crate::accounts;
 use crate::auth::attempt::ClientConfig;
 use crate::auth::id_token::Identity;
 use crate::auth::signin::{self, Cancel, SignInError, SignedIn};

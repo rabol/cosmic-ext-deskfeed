@@ -49,7 +49,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - A `Store` trait with one real implementation.
   - *Simpler:* pass the environment from the caller (or make it a struct with methods), and move the keyring lock into `secrets`.
   - Effort M, risk low.
-- [ ] **Restore and renew repeat one pipeline** (`src/accounts.rs:333-789`).
+- [x] **Restore and renew repeat one pipeline** (Done 2026-10-20: one `redeem` step; restore adds "delete on invalid_grant", each keeps its wording; `restore` returns `Result<…, RenewError>`, so `Restore` is gone. 70043 gives the same text in both, so nothing to merge there.) (`src/accounts.rs:333-789`).
   - Both do lock, sign-out check, refresh, error mapping (AADSTS 70043 handled twice, with different texts), identity check, save and note.
   - `Restore` and `RenewError` have the same shape.
   - *Simpler:* one `renew_tokens(…)`, with restore adding "delete on invalid_grant".
