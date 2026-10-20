@@ -38,12 +38,12 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - *Simpler:* nested message enums (`Message::Account(…)`, `Connection(…)`, `Settings(…)`, `Quit(…)`), so the compiler enforces the routing. `route`, `misrouted` and `routing_check.rs` then go.
   - Effort M–L (about 280 `Message::` sites), risk med.
 - [ ] **The app's state can't be built in a test** (`AppModel` holds libcosmic's `Core`). So flows such as cancelling a desktop before it starts and the sign-out question stay manual tests (3a, 3d), although only the app's own logic decides them. *Simpler:* keep the state (desks, accounts, dialogs, config) in a struct without COSMIC types that `AppModel` owns, with the update logic as methods on it; tests then drive messages through it. Goes well with the routing item above. Effort L, risk med.
-- [ ] **Account state in six global maps** ✓ checked (`src/accounts.rs:184-438`: `ACCOUNT_LOCKS`, `KEYRING`, `SIGN_OUTS`, `LATEST`, `FORGETS`, `SAVED_AFTER`).
+- [x] **Account state in six global maps** (Done 2026-10-20: one `Accounts` value, per account one `AccountState`; tests make their own instance. Still a shared instance (`accounts::shared()`); owning it in the app state goes with phase 3.) ✓ checked (`src/accounts.rs:184-438`: `ACCOUNT_LOCKS`, `KEYRING`, `SIGN_OUTS`, `LATEST`, `FORGETS`, `SAVED_AFTER`).
   - Each has its own lock, plus a `PasswordTicket` generation scheme.
   - Because the state is global, tests need unique account IDs so they don't interfere.
   - *Simpler:* one `Mutex<HashMap<account, AccountState>>`, ideally a value owned by the app.
   - Effort M, risk med (sign-out race fixes live here; keep their tests).
-- [ ] **Twin functions for testing in `src/accounts.rs`.**
+- [x] **Twin functions for testing in `src/accounts.rs`.** (Done 2026-10-20 with the item above: methods on `Accounts`; `renew_if_needed`/`renew_now` are `renew(…, Renewal)`; the `Store` trait and its in-memory fake are gone, the tests use the fake Secret Service; the one-at-a-time keyring lock is in `secrets`.)
   - Pairs: `save`/`save_locked`, `delete`/`delete_in`, `save_password`/`_in`, `forget_password`/`_in`, `load_saved`/`_in`.
   - Triples and more: `restore`/`restore_in`/`restore_at`, `renew_if_needed`/`renew_now`/`renew_in`/`renew_at`.
   - A `Store` trait with one real implementation.

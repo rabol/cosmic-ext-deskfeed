@@ -51,23 +51,37 @@ const PROMPT_WAIT: std::time::Duration = std::time::Duration::from_mins(2);
 const PROMPT_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 
 #[cfg(test)]
 thread_local! {
     /// A private bus for this test thread (`fake.rs`), so tests never
     /// touch the desktop's keyring and don't see each other's.
     static TEST_BUS: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// Set only by the ignored tests that use the session's real keyring.
+    static REAL_KEYRING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// The session bus, or in tests this thread's private bus.
+/// The session bus. In tests: this thread's fake keyring, the real one only
+/// where a test asks for it, and otherwise none (every call fails as if no
+/// Secret Service ran), so a test can never reach the desktop's keyring by
+/// accident.
 fn session_bus() -> zbus::Result<Connection> {
     #[cfg(test)]
-    if let Some(address) = TEST_BUS.with(|b| b.borrow().clone()) {
-        return zbus::blocking::connection::Builder::address(address.as_str())?.build();
+    {
+        if let Some(address) = TEST_BUS.with(|b| b.borrow().clone()) {
+            return zbus::blocking::connection::Builder::address(address.as_str())?.build();
+        }
+        if !REAL_KEYRING.get() {
+            return Err(zbus::Error::Address("no keyring in this test".into()));
+        }
     }
     Connection::session()
 }
+
+/// One keyring call at a time, so the keyring shows at most one unlock
+/// prompt. Held by every [`Keyring`] while it is open.
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `(session, parameters, value, content type)` from the specification.
 type SecretStruct = (OwnedObjectPath, Vec<u8>, Vec<u8>, String);
@@ -185,15 +199,24 @@ fn decode(attributes: &HashMap<String, String>, value: &[u8]) -> Result<Stored, 
 struct Keyring {
     conn: Connection,
     session: OwnedObjectPath,
+    _turn: std::sync::MutexGuard<'static, ()>,
 }
 
 impl Keyring {
     fn open() -> Result<Self, SecretsError> {
+        // A call that panicked can't leave the keyring half-used: go on.
+        let turn = ONE_AT_A_TIME
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let conn = session_bus()?;
         let service = Proxy::new(&conn, BUS_NAME, SERVICE_PATH, SERVICE)?;
         let (_, session): (OwnedValue, OwnedObjectPath) =
             service.call("OpenSession", &("plain", Value::from("")))?;
-        Ok(Self { conn, session })
+        Ok(Self {
+            conn,
+            session,
+            _turn: turn,
+        })
     }
 
     fn proxy<'a>(&'a self, path: &'a str, interface: &'a str) -> Result<Proxy<'a>, SecretsError> {
@@ -555,7 +578,6 @@ mod tests {
         assert!(!format!("{stored:?}").contains("rt-secret"));
     }
 
-    /// Against the real Secret Service: `cargo test -- --ignored keyring`.
     /// On a fake keyring (`fake.rs`); the desktop's is never touched.
     #[test]
     fn keyring_round_trip() {
@@ -745,6 +767,7 @@ mod tests {
     #[test]
     #[ignore = "uses the session's real keyring"]
     fn real_keyring_password() {
+        REAL_KEYRING.set(true);
         let mut id = identity();
         id.object_id = "00000000-0000-0000-0000-00000000test".into();
         save_password(

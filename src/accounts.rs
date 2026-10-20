@@ -125,24 +125,6 @@ pub fn adopt_profile(used: &Path, id: &str) {
     }
 }
 
-/// Removes an account's cookies, RAM cookie folder and offline desktop
-/// list (sign-out, spec §6: credentials and account caches).
-pub fn remove_files(id: &str) -> Result<(), ()> {
-    // Under the account's lock, like the cache's saves (`save_cache`).
-    let lock = account_lock(id);
-    let _account = lock.lock();
-    let mut ok = crate::cache::Store::user().is_none_or(|s| s.remove(id).is_ok());
-    for dir in [profile_dir(id), jars_root().map(|j| j.join(id))]
-        .into_iter()
-        .flatten()
-    {
-        if dir.exists() && fs::remove_dir_all(&dir).is_err() {
-            ok = false;
-        }
-    }
-    if ok { Ok(()) } else { Err(()) }
-}
-
 /// Removes profiles of sign-ins that never finished.
 pub fn clean_unfinished_profiles() {
     if let Some(root) = profiles_root()
@@ -156,240 +138,37 @@ pub fn clean_unfinished_profiles() {
     }
 }
 
-/// One token renewal or keyring write at a time per account (spec §6).
-/// Per account, so one account waiting (for example on a keyring prompt)
-/// doesn't hold up another's renewal.
-static ACCOUNT_LOCKS: LazyLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn account_lock(id: &str) -> Arc<Mutex<()>> {
-    ACCOUNT_LOCKS
-        .lock()
-        .expect("not poisoned")
-        .entry(id.to_owned())
-        .or_default()
-        .clone()
-}
-
-/// One call to the keyring at a time, so it shows at most one unlock
-/// prompt.
-static KEYRING: Mutex<()> = Mutex::new(());
-
-/// Sign-outs per account. Work that started before an account's sign-out
-/// must not save its tokens afterwards (spec §6: late callbacks must not
-/// restore the account).
-static SIGN_OUTS: LazyLock<Mutex<HashMap<String, u64>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-pub fn sign_out_count(id: &str) -> u64 {
-    SIGN_OUTS
-        .lock()
-        .map_or(0, |m| m.get(id).copied().unwrap_or(0))
-}
-
-/// From now on, work that started earlier for this account saves nothing
-/// and its newest tokens are forgotten.
-pub fn note_sign_out(id: &str) {
-    if let Ok(mut m) = SIGN_OUTS.lock() {
-        *m.entry(id.to_owned()).or_insert(0) += 1;
-    }
-    if let Ok(mut latest) = LATEST.lock() {
-        latest.remove(id);
-    }
-}
-
-/// The newest tokens per account (spec §6: a renewal must not reuse a
-/// refresh token another renewal already replaced). Connections and
-/// refreshes each hold their own copy; renewals look here first.
-static LATEST: LazyLock<Mutex<HashMap<String, Arc<SignedIn>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// Records `account`'s tokens as the newest, unless newer ones are known
-/// or the account was signed out since `started`.
-fn note_tokens(account: &Arc<SignedIn>, started: u64) {
-    let id = account_id(&account.identity);
-    if sign_out_count(&id) != started {
-        return;
-    }
-    if let Ok(mut latest) = LATEST.lock() {
-        let newer = latest
-            .get(&id)
-            .is_none_or(|known| account.tokens.expires_at >= known.tokens.expires_at);
-        if newer {
-            latest.insert(id, account.clone());
-        }
-    }
-}
-
-/// The newest tokens known for the account, if newer than `account`'s.
-fn newest(account: &Arc<SignedIn>) -> Option<Arc<SignedIn>> {
-    let latest = LATEST.lock().ok()?;
-    latest
-        .get(&account_id(&account.identity))
-        .filter(|known| known.tokens.expires_at > account.tokens.expires_at)
-        .cloned()
-}
-
-/// An interactive sign-in finished: its tokens are the newest.
-pub fn signed_in(account: &Arc<SignedIn>, started: u64) {
-    note_tokens(account, started);
-}
-
-/// Where saved sign-ins live: the desktop keyring, or a fake in tests.
-trait Store {
-    fn load_all(&self, config: &ClientConfig) -> Result<Vec<Stored>, SecretsError>;
-    fn save(
-        &self,
-        config: &ClientConfig,
-        identity: &Identity,
-        refresh_token: &Secret,
-    ) -> Result<(), SecretsError>;
-    fn delete(&self, config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError>;
-    /// A remembered Windows password for `desktop`.
-    fn save_password(
-        &self,
-        identity: &Identity,
-        desktop: &str,
-        title: &str,
-        password: &Secret,
-    ) -> Result<(), SecretsError>;
-    /// The account's remembered passwords, or one desktop's.
-    fn delete_passwords(
-        &self,
-        identity: &Identity,
-        desktop: Option<&str>,
-    ) -> Result<(), SecretsError>;
-}
-
-/// The desktop keyring (Secret Service).
-struct Keyring;
-
-impl Store for Keyring {
-    fn load_all(&self, config: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
-        let _keyring = KEYRING.lock();
-        secrets::load_all(config)
-    }
-    fn save(
-        &self,
-        config: &ClientConfig,
-        identity: &Identity,
-        refresh_token: &Secret,
-    ) -> Result<(), SecretsError> {
-        let _keyring = KEYRING.lock();
-        secrets::save(config, identity, refresh_token)
-    }
-    fn delete(&self, config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
-        let _keyring = KEYRING.lock();
-        secrets::delete(config, identity)
-    }
-    fn save_password(
-        &self,
-        identity: &Identity,
-        desktop: &str,
-        title: &str,
-        password: &Secret,
-    ) -> Result<(), SecretsError> {
-        let _keyring = KEYRING.lock();
-        secrets::save_password(identity, desktop, title, password)
-    }
-    fn delete_passwords(
-        &self,
-        identity: &Identity,
-        desktop: Option<&str>,
-    ) -> Result<(), SecretsError> {
-        let _keyring = KEYRING.lock();
-        secrets::delete_passwords(identity, desktop)
-    }
-}
-
-/// What the functions below work with: the client identity (its token
-/// endpoint) and the store.
-struct Env<'a> {
+/// Signed-in accounts' shared state and the work on their saved sign-ins:
+/// saving, deleting and renewing tokens, remembered passwords and the
+/// offline list. Per account, one renewal or keyring write at a time
+/// (spec §6), and work scheduled before a sign-out never saves afterwards
+/// (spec §6: late callbacks must not restore the account).
+pub struct Accounts {
+    /// The client identity (its token endpoint and keyring attributes).
     config: ClientConfig,
-    store: &'a dyn Store,
+    /// Per account ID.
+    state: Mutex<HashMap<String, AccountState>>,
 }
 
-fn system() -> Env<'static> {
-    Env {
-        config: ClientConfig::public_remote_desktop(),
-        store: &Keyring,
-    }
+#[derive(Default)]
+struct AccountState {
+    /// Held during a renewal or keyring write for this account. Per
+    /// account, so one account waiting (for example on a keyring prompt)
+    /// doesn't hold up another's.
+    busy: Arc<Mutex<()>>,
+    /// Sign-outs so far; work records the count it was scheduled under.
+    sign_outs: u64,
+    /// The newest tokens (spec §6: a renewal must not reuse a refresh
+    /// token another renewal already replaced). Connections and refreshes
+    /// each hold their own copy; renewals look here first.
+    latest: Option<Arc<SignedIn>>,
+    /// Per desktop: "Forget password" so far, like `sign_outs`.
+    forgets: HashMap<String, u64>,
+    /// Per desktop: the forget count the stored password was saved under.
+    /// A Forget whose deletion runs after a newer save (one scheduled after
+    /// that Forget) leaves the newer password alone.
+    saved_after: HashMap<String, u64>,
 }
-
-/// Saves the account's refresh token, unless it was signed out since
-/// `started` (a [`sign_out_count`]). The error is the notice to show.
-pub fn save(account: &SignedIn, started: u64) -> Result<(), String> {
-    let lock = account_lock(&account_id(&account.identity));
-    let _account = lock.lock();
-    save_locked(&system(), account, started)
-}
-
-fn save_locked(env: &Env, account: &SignedIn, started: u64) -> Result<(), String> {
-    if sign_out_count(&account_id(&account.identity)) != started {
-        crate::app_log!("saved sign-in: not stored (signed out meanwhile)");
-        return Ok(());
-    }
-    let Some(refresh_token) = &account.tokens.refresh_token else {
-        crate::app_log!("saved sign-in: not stored (no refresh token in the response)");
-        return Err(fl!("notice-not-saved", detail = "no refresh token"));
-    };
-    let result = env
-        .store
-        .save(&env.config, &account.identity, refresh_token);
-    // Diagnostics: outcome and error kind only, never tokens or IDs.
-    match &result {
-        Ok(()) => crate::app_log!("saved sign-in: stored"),
-        Err(e) => crate::app_log!("saved sign-in: not stored ({e})"),
-    }
-    result.map_err(|e| fl!("notice-not-saved", detail = keyring_detail(&e)))
-}
-
-/// Signs the account out: from now on its tokens aren't saved, and its
-/// keyring item is deleted.
-pub fn delete(identity: &Identity) -> Result<(), String> {
-    delete_in(&system(), identity)
-}
-
-fn delete_in(env: &Env, identity: &Identity) -> Result<(), String> {
-    note_sign_out(&account_id(identity));
-    let lock = account_lock(&account_id(identity));
-    let _account = lock.lock();
-    let deleted = env.store.delete(&env.config, identity);
-    crate::app_log!("saved sign-in: deleted (sign-out): {deleted:?}");
-    // Under the same lock as their saves (`save_password`).
-    let passwords = env.store.delete_passwords(identity, None);
-    crate::app_log!(
-        "remembered passwords deleted (sign-out): {:?}",
-        passwords.is_ok()
-    );
-    deleted
-        .and(passwords)
-        .map_err(|_| fl!("error-sign-out-incomplete"))
-}
-
-/// Saves the account's offline list, unless it was signed out since
-/// `started` ([`sign_out_count`] when the save was scheduled). Under the
-/// account's lock, like [`remove_files`], so a save queued before a
-/// sign-out can't bring the list back after it.
-pub fn save_cache(
-    store: &crate::cache::Store,
-    id: &str,
-    list: &[crate::cache::CachedWorkspace],
-    started: u64,
-) -> Result<(), String> {
-    let lock = account_lock(id);
-    let _account = lock.lock();
-    if sign_out_count(id) != started {
-        crate::app_log!("offline desktop list: not saved (signed out meanwhile)");
-        return Ok(());
-    }
-    store.save(id, list)
-}
-
-/// "Forget" per account and desktop, like [`SIGN_OUTS`]: a password save
-/// scheduled before a Forget writes nothing after it.
-static FORGETS: LazyLock<Mutex<HashMap<(String, String), u64>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// What a remembered-password save was scheduled under: the account's
 /// sign-outs and the desktop's forgets at that moment.
@@ -399,99 +178,238 @@ pub struct PasswordTicket {
     forgets: u64,
 }
 
-pub fn password_ticket(id: &str, desktop: &str) -> PasswordTicket {
-    PasswordTicket {
-        sign_outs: sign_out_count(id),
-        forgets: FORGETS.lock().map_or(0, |m| {
-            m.get(&(id.to_owned(), desktop.to_owned()))
-                .copied()
-                .unwrap_or(0)
-        }),
+/// When to renew an account's tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Renewal {
+    /// When the access token expires within the margin.
+    IfNeeded,
+    /// Now: the service refused an access token that looked valid
+    /// (revoked, or the clocks disagree).
+    Now,
+}
+
+/// The app's accounts, with Microsoft's public Remote Desktop client.
+pub fn shared() -> &'static Accounts {
+    static SHARED: LazyLock<Accounts> =
+        LazyLock::new(|| Accounts::new(ClientConfig::public_remote_desktop()));
+    &SHARED
+}
+
+impl Accounts {
+    pub fn new(config: ClientConfig) -> Self {
+        Self {
+            config,
+            state: Mutex::default(),
+        }
     }
-}
 
-/// Per account and desktop: the forget count the last stored password was
-/// scheduled under. A Forget whose deletion runs after a newer save (one
-/// scheduled after that Forget) must leave the newer password alone.
-static SAVED_AFTER: LazyLock<Mutex<HashMap<(String, String), u64>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// The user forgot this desktop's password: saves scheduled earlier write
-/// nothing. Call at once, before deleting; give the result to
-/// [`forget_password`].
-pub fn note_forget(id: &str, desktop: &str) -> u64 {
-    FORGETS.lock().map_or(0, |mut m| {
-        let n = m.entry((id.to_owned(), desktop.to_owned())).or_insert(0);
-        *n += 1;
-        *n
-    })
-}
-
-/// Remembers a Windows password, unless the account signed out or the
-/// password was forgotten since `ticket`. `Ok(false)`: not saved for that
-/// reason. Under the account's lock, like the deletions.
-pub fn save_password(
-    identity: &Identity,
-    desktop: &str,
-    title: &str,
-    password: &Secret,
-    ticket: PasswordTicket,
-) -> Result<bool, String> {
-    save_password_in(&system(), identity, desktop, title, password, ticket)
-}
-
-fn save_password_in(
-    env: &Env,
-    identity: &Identity,
-    desktop: &str,
-    title: &str,
-    password: &Secret,
-    ticket: PasswordTicket,
-) -> Result<bool, String> {
-    let id = account_id(identity);
-    let lock = account_lock(&id);
-    let _account = lock.lock();
-    if password_ticket(&id, desktop) != ticket {
-        crate::app_log!("remembered password: not stored (signed out or forgotten meanwhile)");
-        return Ok(false);
+    /// Runs `f` on the account's state.
+    fn with<R>(&self, id: &str, f: impl FnOnce(&mut AccountState) -> R) -> R {
+        let mut all = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        f(all.entry(id.to_owned()).or_default())
     }
-    env.store
-        .save_password(identity, desktop, title, password)
-        .map_err(|e| keyring_detail(&e))?;
-    if let Ok(mut m) = SAVED_AFTER.lock() {
-        m.insert((id, desktop.to_owned()), ticket.forgets);
-    }
-    Ok(true)
-}
 
-/// Deletes one desktop's remembered password. `forget`: what
-/// [`note_forget`] returned for this Forget.
-pub fn forget_password(identity: &Identity, desktop: &str, forget: u64) -> Result<(), String> {
-    forget_password_in(&system(), identity, desktop, forget)
-}
-
-fn forget_password_in(
-    env: &Env,
-    identity: &Identity,
-    desktop: &str,
-    forget: u64,
-) -> Result<(), String> {
-    let id = account_id(identity);
-    let lock = account_lock(&id);
-    let _account = lock.lock();
-    // A password saved after this Forget was asked for is the user's
-    // newer choice: keep it.
-    let newer = SAVED_AFTER
-        .lock()
-        .ok()
-        .and_then(|m| m.get(&(id, desktop.to_owned())).copied())
-        .is_some_and(|saved| saved >= forget);
-    if newer {
-        return Ok(());
+    /// The account's lock for renewals and keyring writes.
+    fn busy(&self, id: &str) -> Arc<Mutex<()>> {
+        self.with(id, |a| a.busy.clone())
     }
-    env.store
-        .delete_passwords(identity, Some(desktop))
-        .map_err(|e| keyring_detail(&e))
+
+    pub fn sign_out_count(&self, id: &str) -> u64 {
+        self.with(id, |a| a.sign_outs)
+    }
+
+    /// From now on, work that started earlier for this account saves nothing
+    /// and its newest tokens are forgotten.
+    pub fn note_sign_out(&self, id: &str) {
+        self.with(id, |a| {
+            a.sign_outs += 1;
+            a.latest = None;
+        });
+    }
+
+    /// Records `account`'s tokens as the newest, unless newer ones are known
+    /// or the account was signed out since `started`.
+    fn note_tokens(&self, account: &Arc<SignedIn>, started: u64) {
+        self.with(&account_id(&account.identity), |a| {
+            let newer = a
+                .latest
+                .as_ref()
+                .is_none_or(|known| account.tokens.expires_at >= known.tokens.expires_at);
+            if a.sign_outs == started && newer {
+                a.latest = Some(account.clone());
+            }
+        });
+    }
+
+    /// The newest tokens known for the account, if newer than `account`'s.
+    fn newest(&self, account: &Arc<SignedIn>) -> Option<Arc<SignedIn>> {
+        self.with(&account_id(&account.identity), |a| {
+            a.latest
+                .clone()
+                .filter(|known| known.tokens.expires_at > account.tokens.expires_at)
+        })
+    }
+
+    /// An interactive sign-in finished: its tokens are the newest.
+    pub fn signed_in(&self, account: &Arc<SignedIn>, started: u64) {
+        self.note_tokens(account, started);
+    }
+
+    /// Saves the account's refresh token, unless it was signed out since
+    /// `started` (a [`Self::sign_out_count`]). The error is the notice to
+    /// show.
+    pub fn save(&self, account: &SignedIn, started: u64) -> Result<(), String> {
+        let busy = self.busy(&account_id(&account.identity));
+        let _busy = busy.lock();
+        self.save_while_busy(account, started)
+    }
+
+    /// [`Self::save`], for a caller that holds the account's lock.
+    fn save_while_busy(&self, account: &SignedIn, started: u64) -> Result<(), String> {
+        if self.sign_out_count(&account_id(&account.identity)) != started {
+            crate::app_log!("saved sign-in: not stored (signed out meanwhile)");
+            return Ok(());
+        }
+        let Some(refresh_token) = &account.tokens.refresh_token else {
+            crate::app_log!("saved sign-in: not stored (no refresh token in the response)");
+            return Err(fl!("notice-not-saved", detail = "no refresh token"));
+        };
+        let result = secrets::save(&self.config, &account.identity, refresh_token);
+        // Diagnostics: outcome and error kind only, never tokens or IDs.
+        match &result {
+            Ok(()) => crate::app_log!("saved sign-in: stored"),
+            Err(e) => crate::app_log!("saved sign-in: not stored ({e})"),
+        }
+        result.map_err(|e| fl!("notice-not-saved", detail = keyring_detail(&e)))
+    }
+
+    /// Signs the account out: from now on its tokens aren't saved, and its
+    /// keyring items (sign-in and remembered passwords) are deleted.
+    pub fn delete(&self, identity: &Identity) -> Result<(), String> {
+        let id = account_id(identity);
+        self.note_sign_out(&id);
+        let busy = self.busy(&id);
+        let _busy = busy.lock();
+        let deleted = secrets::delete(&self.config, identity);
+        crate::app_log!("saved sign-in: deleted (sign-out): {deleted:?}");
+        // Under the same lock as their saves (`save_password`).
+        let passwords = secrets::delete_passwords(identity, None);
+        crate::app_log!(
+            "remembered passwords deleted (sign-out): {:?}",
+            passwords.is_ok()
+        );
+        deleted
+            .and(passwords)
+            .map_err(|_| fl!("error-sign-out-incomplete"))
+    }
+
+    /// Removes an account's cookies, RAM cookie folder and offline desktop
+    /// list (sign-out, spec §6: credentials and account caches). Under the
+    /// account's lock, like the offline list's saves.
+    pub fn remove_files(&self, id: &str) -> Result<(), ()> {
+        let busy = self.busy(id);
+        let _busy = busy.lock();
+        let mut ok = crate::cache::Store::user().is_none_or(|s| s.remove(id).is_ok());
+        for dir in [profile_dir(id), jars_root().map(|j| j.join(id))]
+            .into_iter()
+            .flatten()
+        {
+            if dir.exists() && fs::remove_dir_all(&dir).is_err() {
+                ok = false;
+            }
+        }
+        if ok { Ok(()) } else { Err(()) }
+    }
+
+    /// Saves the account's offline list, unless it was signed out since
+    /// `started`. Under the account's lock, like [`Self::remove_files`], so
+    /// a save queued before a sign-out can't bring the list back after it.
+    pub fn save_cache(
+        &self,
+        store: &crate::cache::Store,
+        id: &str,
+        list: &[crate::cache::CachedWorkspace],
+        started: u64,
+    ) -> Result<(), String> {
+        let busy = self.busy(id);
+        let _busy = busy.lock();
+        if self.sign_out_count(id) != started {
+            crate::app_log!("offline desktop list: not saved (signed out meanwhile)");
+            return Ok(());
+        }
+        store.save(id, list)
+    }
+
+    pub fn password_ticket(&self, id: &str, desktop: &str) -> PasswordTicket {
+        self.with(id, |a| PasswordTicket {
+            sign_outs: a.sign_outs,
+            forgets: a.forgets.get(desktop).copied().unwrap_or(0),
+        })
+    }
+
+    /// The user forgot this desktop's password: saves scheduled earlier
+    /// write nothing. Call at once, before deleting; give the result to
+    /// [`Self::forget_password`].
+    pub fn note_forget(&self, id: &str, desktop: &str) -> u64 {
+        self.with(id, |a| {
+            let n = a.forgets.entry(desktop.to_owned()).or_insert(0);
+            *n += 1;
+            *n
+        })
+    }
+
+    /// Remembers a Windows password, unless the account signed out or the
+    /// password was forgotten since `ticket`. `Ok(false)`: not saved for
+    /// that reason. Under the account's lock, like the deletions.
+    pub fn save_password(
+        &self,
+        identity: &Identity,
+        desktop: &str,
+        title: &str,
+        password: &Secret,
+        ticket: PasswordTicket,
+    ) -> Result<bool, String> {
+        let id = account_id(identity);
+        let busy = self.busy(&id);
+        let _busy = busy.lock();
+        if self.password_ticket(&id, desktop) != ticket {
+            crate::app_log!("remembered password: not stored (signed out or forgotten meanwhile)");
+            return Ok(false);
+        }
+        secrets::save_password(identity, desktop, title, password)
+            .map_err(|e| keyring_detail(&e))?;
+        self.with(&id, |a| {
+            a.saved_after.insert(desktop.to_owned(), ticket.forgets);
+        });
+        Ok(true)
+    }
+
+    /// Deletes one desktop's remembered password. `forget`: what
+    /// [`Self::note_forget`] returned for this Forget.
+    pub fn forget_password(
+        &self,
+        identity: &Identity,
+        desktop: &str,
+        forget: u64,
+    ) -> Result<(), String> {
+        let id = account_id(identity);
+        let busy = self.busy(&id);
+        let _busy = busy.lock();
+        // A password saved after this Forget was asked for is the user's
+        // newer choice: keep it.
+        let newer = self.with(&id, |a| {
+            a.saved_after
+                .get(desktop)
+                .is_some_and(|&saved| saved >= forget)
+        });
+        if newer {
+            return Ok(());
+        }
+        secrets::delete_passwords(identity, Some(desktop)).map_err(|e| keyring_detail(&e))
+    }
 }
 
 pub fn keyring_detail(e: &SecretsError) -> String {
@@ -518,24 +436,6 @@ fn token_error_kind(e: &TokenError) -> String {
     }
 }
 
-/// All saved sign-ins, or the text to show if the keyring can't be read.
-pub fn load_saved() -> Result<Vec<Stored>, String> {
-    load_saved_in(&system())
-}
-
-fn load_saved_in(env: &Env) -> Result<Vec<Stored>, String> {
-    match env.store.load_all(&env.config) {
-        Ok(all) => {
-            crate::app_log!("saved sign-in: {} found", all.len());
-            Ok(all)
-        }
-        Err(e) => {
-            crate::app_log!("saved sign-in: can't load ({e})");
-            Err(fl!("error-keyring-load", detail = keyring_detail(&e)))
-        }
-    }
-}
-
 /// The outcome of signing in with a saved refresh token.
 #[derive(Debug, Clone)]
 pub enum Restore {
@@ -548,79 +448,155 @@ pub enum Restore {
     Retry(String),
 }
 
-/// Signs in with a saved refresh token. `started`: [`sign_out_count`] when
-/// this was scheduled, so a restore queued before a sign-out does nothing
-/// after it.
-pub fn restore(http: &Http, stored: &Stored, started: u64) -> Restore {
-    restore_at(http, &system(), stored, started)
-}
-
-/// Tests: `restore_at` scheduled now.
-#[cfg(test)]
-fn restore_in(http: &Http, env: &Env, stored: &Stored) -> Restore {
-    restore_at(
-        http,
-        env,
-        stored,
-        sign_out_count(&account_id(&stored.identity)),
-    )
-}
-
-fn restore_at(http: &Http, env: &Env, stored: &Stored, started: u64) -> Restore {
-    let config = &env.config;
-    let id = account_id(&stored.identity);
-    let lock = account_lock(&id);
-    let _account = lock.lock();
-    // Signed out since this was scheduled: no network, no saving.
-    if sign_out_count(&id) != started {
-        return Restore::SignInAgain(fl!("error-session-expired"));
-    }
-    let renewed = token::refresh(http, config, &stored.refresh_token);
-    if let Err(e) = &renewed {
-        crate::app_log!("saved sign-in: renewal failed ({})", token_error_kind(e));
-    }
-    let tokens = match renewed {
-        Ok(tokens) => tokens,
-        Err(TokenError::Transient(_)) => return Restore::Retry(fl!("error-restore-network")),
-        Err(TokenError::InvalidGrant { aadsts }) => {
-            // Revoked or expired for good: forget it.
-            let deleted = env.store.delete(config, &stored.identity);
-            crate::app_log!("saved sign-in: deleted (invalid_grant): {deleted:?}");
-            // AADSTS70043 "BadTokenDueToSignInFrequency": the organization's
-            // Conditional Access asks for a new sign-in after a set time
-            // (Microsoft Entra error code reference).
-            return Restore::SignInAgain(if aadsts == Some(70043) {
-                fl!("error-sign-in-frequency")
-            } else {
-                fl!("error-saved-sign-in-expired")
-            });
+impl Accounts {
+    /// All saved sign-ins, or the text to show if the keyring can't be read.
+    pub fn load_saved(&self) -> Result<Vec<Stored>, String> {
+        match secrets::load_all(&self.config) {
+            Ok(all) => {
+                crate::app_log!("saved sign-in: {} found", all.len());
+                Ok(all)
+            }
+            Err(e) => {
+                crate::app_log!("saved sign-in: can't load ({e})");
+                Err(fl!("error-keyring-load", detail = keyring_detail(&e)))
+            }
         }
-        // Policy or interaction needed: an interactive sign-in replaces it.
-        Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
-    };
-    let identity = match renewed_identity(http, config, &tokens, &stored.identity) {
-        Ok(identity) => identity,
-        Err(IdentityCheck::KeysUnavailable) => return Restore::Retry(fl!("error-restore-network")),
-        Err(IdentityCheck::Invalid) => {
-            return Restore::SignInAgain(fl!("error-saved-sign-in-expired"));
+    }
+
+    /// Signs in with a saved refresh token. `started`:
+    /// [`Self::sign_out_count`] when this was scheduled, so a restore
+    /// queued before a sign-out does nothing after it.
+    pub fn restore(&self, http: &Http, stored: &Stored, started: u64) -> Restore {
+        let config = &self.config;
+        let id = account_id(&stored.identity);
+        let busy = self.busy(&id);
+        let _busy = busy.lock();
+        // Signed out since this was scheduled: no network, no saving.
+        if self.sign_out_count(&id) != started {
+            return Restore::SignInAgain(fl!("error-session-expired"));
         }
-    };
-    let rotated = tokens
-        .refresh_token
-        .as_ref()
-        .is_some_and(|t| t.expose() != stored.refresh_token.expose());
-    crate::app_log!(
-        "saved sign-in: renewed (refresh token {})",
-        if rotated { "rotated" } else { "unchanged" }
-    );
-    let account = Arc::new(SignedIn { identity, tokens });
-    let notice = if rotated {
-        save_locked(env, &account, started).err()
-    } else {
-        None
-    };
-    note_tokens(&account, started);
-    Restore::Ready(account, notice)
+        let renewed = token::refresh(http, config, &stored.refresh_token);
+        if let Err(e) = &renewed {
+            crate::app_log!("saved sign-in: renewal failed ({})", token_error_kind(e));
+        }
+        let tokens = match renewed {
+            Ok(tokens) => tokens,
+            Err(TokenError::Transient(_)) => return Restore::Retry(fl!("error-restore-network")),
+            Err(TokenError::InvalidGrant { aadsts }) => {
+                // Revoked or expired for good: forget it.
+                let deleted = secrets::delete(config, &stored.identity);
+                crate::app_log!("saved sign-in: deleted (invalid_grant): {deleted:?}");
+                // AADSTS70043 "BadTokenDueToSignInFrequency": the
+                // organization's Conditional Access asks for a new sign-in
+                // after a set time (Microsoft Entra error code reference).
+                return Restore::SignInAgain(if aadsts == Some(70043) {
+                    fl!("error-sign-in-frequency")
+                } else {
+                    fl!("error-saved-sign-in-expired")
+                });
+            }
+            // Policy or interaction needed: an interactive sign-in replaces it.
+            Err(_) => return Restore::SignInAgain(fl!("error-saved-sign-in-expired")),
+        };
+        let identity = match renewed_identity(http, config, &tokens, &stored.identity) {
+            Ok(identity) => identity,
+            Err(IdentityCheck::KeysUnavailable) => {
+                return Restore::Retry(fl!("error-restore-network"));
+            }
+            Err(IdentityCheck::Invalid) => {
+                return Restore::SignInAgain(fl!("error-saved-sign-in-expired"));
+            }
+        };
+        let rotated = tokens
+            .refresh_token
+            .as_ref()
+            .is_some_and(|t| t.expose() != stored.refresh_token.expose());
+        crate::app_log!(
+            "saved sign-in: renewed (refresh token {})",
+            if rotated { "rotated" } else { "unchanged" }
+        );
+        let account = Arc::new(SignedIn { identity, tokens });
+        let notice = if rotated {
+            self.save_while_busy(&account, started).err()
+        } else {
+            None
+        };
+        self.note_tokens(&account, started);
+        Restore::Ready(account, notice)
+    }
+
+    /// Renews the tokens (see [`Renewal`]) and saves a rotated refresh
+    /// token. `started`: [`Self::sign_out_count`] when the work was
+    /// scheduled.
+    pub fn renew(
+        &self,
+        http: &Http,
+        account: Arc<SignedIn>,
+        when: Renewal,
+        started: u64,
+    ) -> Result<Arc<SignedIn>, RenewError> {
+        let force = when == Renewal::Now;
+        if !force && !account.tokens.needs_refresh(Instant::now()) {
+            return Ok(account);
+        }
+        let busy = self.busy(&account_id(&account.identity));
+        let _busy = busy.lock();
+        // Signed out since this was scheduled: no network, no saving.
+        if self.sign_out_count(&account_id(&account.identity)) != started {
+            return Err(RenewError::SignInAgain(fl!("error-session-expired")));
+        }
+        // Another renewal may have finished while this one waited for the
+        // lock: use its result, or at least its (rotated) refresh token.
+        let refused = account.tokens.access_token.expose().to_owned();
+        let account = match self.newest(&account) {
+            Some(known)
+                if !known.tokens.needs_refresh(Instant::now())
+                    && (!force || known.tokens.access_token.expose() != refused) =>
+            {
+                return Ok(known);
+            }
+            Some(known) => known,
+            None => account,
+        };
+        let Some(refresh_token) = &account.tokens.refresh_token else {
+            return Err(RenewError::SignInAgain(fl!("error-session-expired")));
+        };
+        let tokens = match token::refresh(http, &self.config, refresh_token) {
+            Ok(tokens) => tokens,
+            Err(e) => {
+                crate::app_log!("renewal failed ({})", token_error_kind(&e));
+                return Err(match e {
+                    TokenError::Transient(_) => RenewError::Retry(fl!("error-generic")),
+                    TokenError::InvalidGrant {
+                        aadsts: Some(70043),
+                    } => RenewError::SignInAgain(fl!("error-sign-in-frequency")),
+                    _ => RenewError::SignInAgain(fl!("error-session-expired")),
+                });
+            }
+        };
+        let identity = match renewed_identity(http, &self.config, &tokens, &account.identity) {
+            Ok(identity) => identity,
+            Err(IdentityCheck::KeysUnavailable) => {
+                return Err(RenewError::Retry(fl!("error-generic")));
+            }
+            Err(IdentityCheck::Invalid) => {
+                return Err(RenewError::SignInAgain(fl!("error-session-expired")));
+            }
+        };
+        let renewed = SignedIn { identity, tokens };
+        let rotated = renewed
+            .tokens
+            .refresh_token
+            .as_ref()
+            .is_some_and(|t| t.expose() != refresh_token.expose());
+        if rotated {
+            // Best effort: if this fails, the next start asks to sign in.
+            let _ = self.save_while_busy(&renewed, started);
+        }
+        let renewed = Arc::new(renewed);
+        self.note_tokens(&renewed, started);
+        Ok(renewed)
+    }
 }
 
 /// Why renewed tokens can't be used.
@@ -662,217 +638,60 @@ pub enum RenewError {
     SignInAgain(String),
 }
 
-/// Renews the tokens when the access token expires within the margin, and
-/// saves a rotated refresh token.
-pub fn renew_if_needed(
-    http: &Http,
-    account: Arc<SignedIn>,
-    started: u64,
-) -> Result<Arc<SignedIn>, RenewError> {
-    renew_at(http, &system(), account, false, started)
-}
-
-/// Renews the tokens now: the service refused an access token that looked
-/// valid (revoked, or the clocks disagree).
-pub fn renew_now(
-    http: &Http,
-    account: Arc<SignedIn>,
-    started: u64,
-) -> Result<Arc<SignedIn>, RenewError> {
-    renew_at(http, &system(), account, true, started)
-}
-
-/// Tests: `renew_at` scheduled now.
-#[cfg(test)]
-fn renew_in(
-    http: &Http,
-    env: &Env,
-    account: Arc<SignedIn>,
-    force: bool,
-) -> Result<Arc<SignedIn>, RenewError> {
-    let started = sign_out_count(&account_id(&account.identity));
-    renew_at(http, env, account, force, started)
-}
-
-/// `started`: [`sign_out_count`] when the work was scheduled.
-fn renew_at(
-    http: &Http,
-    env: &Env,
-    account: Arc<SignedIn>,
-    force: bool,
-    started: u64,
-) -> Result<Arc<SignedIn>, RenewError> {
-    if !force && !account.tokens.needs_refresh(Instant::now()) {
-        return Ok(account);
-    }
-    let lock = account_lock(&account_id(&account.identity));
-    let _account = lock.lock();
-    // Signed out since this was scheduled: no network, no saving.
-    if sign_out_count(&account_id(&account.identity)) != started {
-        return Err(RenewError::SignInAgain(fl!("error-session-expired")));
-    }
-    // Another renewal may have finished while this one waited for the
-    // lock: use its result, or at least its (rotated) refresh token.
-    let refused = account.tokens.access_token.expose().to_owned();
-    let account = match newest(&account) {
-        Some(known)
-            if !known.tokens.needs_refresh(Instant::now())
-                && (!force || known.tokens.access_token.expose() != refused) =>
-        {
-            return Ok(known);
-        }
-        Some(known) => known,
-        None => account,
-    };
-    let Some(refresh_token) = &account.tokens.refresh_token else {
-        return Err(RenewError::SignInAgain(fl!("error-session-expired")));
-    };
-    let tokens = match token::refresh(http, &env.config, refresh_token) {
-        Ok(tokens) => tokens,
-        Err(e) => {
-            crate::app_log!("renewal failed ({})", token_error_kind(&e));
-            return Err(match e {
-                TokenError::Transient(_) => RenewError::Retry(fl!("error-generic")),
-                TokenError::InvalidGrant {
-                    aadsts: Some(70043),
-                } => RenewError::SignInAgain(fl!("error-sign-in-frequency")),
-                _ => RenewError::SignInAgain(fl!("error-session-expired")),
-            });
-        }
-    };
-    let identity = match renewed_identity(http, &env.config, &tokens, &account.identity) {
-        Ok(identity) => identity,
-        Err(IdentityCheck::KeysUnavailable) => {
-            return Err(RenewError::Retry(fl!("error-generic")));
-        }
-        Err(IdentityCheck::Invalid) => {
-            return Err(RenewError::SignInAgain(fl!("error-session-expired")));
-        }
-    };
-    let renewed = SignedIn { identity, tokens };
-    let rotated = renewed
-        .tokens
-        .refresh_token
-        .as_ref()
-        .is_some_and(|t| t.expose() != refresh_token.expose());
-    if rotated {
-        // Best effort: if this fails, the next start asks to sign in.
-        let _ = save_locked(env, &renewed, started);
-    }
-    let renewed = Arc::new(renewed);
-    note_tokens(&renewed, started);
-    Ok(renewed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::secrets::fake::{Answer, FakeKeyring};
     use crate::service::endpoint::EndpointPolicy;
     use crate::service::http::BearerToken;
     use crate::test_util::token_server;
     use std::time::Duration;
     use url::Url;
 
-    /// An in-memory keyring. `fail` makes every call fail like a locked or
-    /// missing Secret Service.
-    #[derive(Default)]
-    struct FakeStore {
-        saved: Mutex<Vec<(Identity, String)>>,
-        /// Remembered passwords: account and desktop.
-        passwords: Mutex<Vec<(Identity, String)>>,
-        fail: bool,
-    }
-
-    impl FakeStore {
-        fn with(identity: &Identity, token: &str) -> Self {
-            let s = Self::default();
-            s.saved
-                .lock()
-                .unwrap()
-                .push((identity.clone(), token.to_owned()));
-            s
-        }
-        fn tokens(&self) -> Vec<String> {
-            self.saved
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|(_, t)| t.clone())
-                .collect()
-        }
-        fn err() -> SecretsError {
-            SecretsError::Unavailable("test".into())
-        }
-    }
-
-    impl Store for FakeStore {
-        fn load_all(&self, _: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
-            if self.fail {
-                return Err(Self::err());
-            }
-            Ok(self
-                .saved
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|(identity, t)| Stored {
-                    identity: identity.clone(),
-                    refresh_token: Secret::new(t.clone()),
-                })
-                .collect())
-        }
-        fn save(
-            &self,
-            _: &ClientConfig,
-            identity: &Identity,
-            rt: &Secret,
-        ) -> Result<(), SecretsError> {
-            if self.fail {
-                return Err(Self::err());
-            }
-            let mut saved = self.saved.lock().unwrap();
-            saved.retain(|(i, _)| i != identity);
-            saved.push((identity.clone(), rt.expose().to_owned()));
-            Ok(())
-        }
-        fn delete(&self, _: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
-            if self.fail {
-                return Err(Self::err());
-            }
-            self.saved.lock().unwrap().retain(|(i, _)| i != identity);
-            Ok(())
-        }
-        fn save_password(
-            &self,
-            identity: &Identity,
-            desktop: &str,
-            _: &str,
-            _: &Secret,
-        ) -> Result<(), SecretsError> {
-            self.passwords
-                .lock()
-                .unwrap()
-                .push((identity.clone(), desktop.to_owned()));
-            Ok(())
-        }
-        fn delete_passwords(
-            &self,
-            identity: &Identity,
-            desktop: Option<&str>,
-        ) -> Result<(), SecretsError> {
-            self.passwords
-                .lock()
-                .unwrap()
-                .retain(|(i, d)| i != identity || desktop.is_some_and(|k| k != d));
-            Ok(())
-        }
-    }
-
-    /// The token endpoint on a local test server; the store given.
-    fn env(port: u16, store: &FakeStore) -> Env<'_> {
+    /// Accounts whose token endpoint is a local test server on `port`.
+    /// Their keyring is this thread's fake one, if a test started it;
+    /// without one, every keyring call fails as with no Secret Service.
+    fn accounts(port: u16) -> Accounts {
         let mut config = ClientConfig::public_remote_desktop();
         config.authority = Url::parse(&format!("http://127.0.0.1:{port}/organizations")).unwrap();
-        Env { config, store }
+        Accounts::new(config)
+    }
+
+    /// A fake keyring holding `token` for `identity`.
+    fn keyring_with(a: &Accounts, identity: &Identity, token: &str) -> FakeKeyring {
+        let keyring = FakeKeyring::start(Answer::Unlock);
+        secrets::save(&a.config, identity, &Secret::new(token.into())).unwrap();
+        keyring
+    }
+
+    /// The saved refresh tokens.
+    fn tokens(a: &Accounts) -> Vec<String> {
+        secrets::load_all(&a.config)
+            .unwrap()
+            .iter()
+            .map(|s| s.refresh_token.expose().to_owned())
+            .collect()
+    }
+
+    /// Remembered passwords: (account object ID, desktop).
+    fn passwords(keyring: &FakeKeyring) -> Vec<(String, String)> {
+        let mut all: Vec<_> = keyring
+            .items()
+            .into_iter()
+            .filter(|i| {
+                i.attributes
+                    .get("type")
+                    .is_some_and(|t| t == "windows-password")
+            })
+            .map(|i| {
+                (
+                    i.attributes["account"].clone(),
+                    i.attributes["desktop"].clone(),
+                )
+            })
+            .collect();
+        all.sort();
+        all
     }
 
     fn http(port: u16) -> Http {
@@ -900,6 +719,30 @@ mod tests {
         })
     }
 
+    /// `a.restore`, scheduled now.
+    fn restore_now(a: &Accounts, port: u16, stored: &Stored) -> Restore {
+        a.restore(
+            &http(port),
+            stored,
+            a.sign_out_count(&account_id(&stored.identity)),
+        )
+    }
+
+    /// `a.renew`, scheduled now.
+    fn renew_now(
+        a: &Accounts,
+        port: u16,
+        account: Arc<SignedIn>,
+        when: Renewal,
+    ) -> Result<Arc<SignedIn>, RenewError> {
+        let started = a.sign_out_count(&account_id(&account.identity));
+        a.renew(&http(port), account, when, started)
+    }
+
+    fn unavailable() -> String {
+        keyring_detail(&SecretsError::Unavailable(String::new()))
+    }
+
     const OK_SAME: &str = r#"{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"refresh_token":"rt-old"}"#;
     const OK_ROTATED: &str = r#"{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"refresh_token":"rt-new"}"#;
     const BAD: &str = "400 Bad Request";
@@ -909,15 +752,16 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000a1");
         let server = token_server("200 OK", OK_SAME);
         let port = server.port;
-        let store = FakeStore::default();
-        match restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old")) {
+        let a = accounts(port);
+        let _keyring = FakeKeyring::start(Answer::Unlock);
+        match restore_now(&a, port, &stored(&me, "rt-old")) {
             Restore::Ready(account, notice) => {
                 assert_eq!(account.identity, me);
                 assert!(notice.is_none());
             }
             other => panic!("{other:?}"),
         }
-        assert_eq!(store.tokens(), Vec::<String>::new());
+        assert_eq!(tokens(&a), Vec::<String>::new());
     }
 
     #[test]
@@ -925,10 +769,11 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000a2");
         let server = token_server("200 OK", OK_ROTATED);
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
-        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
+        let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
         assert!(matches!(outcome, Restore::Ready(_, None)), "{outcome:?}");
-        assert_eq!(store.tokens(), ["rt-new"]);
+        assert_eq!(tokens(&a), ["rt-new"]);
         // The renewal used the saved token.
         assert!(server.sent().contains("refresh_token=rt-old"));
     }
@@ -938,20 +783,11 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000a3");
         let server = token_server("200 OK", OK_ROTATED);
         let port = server.port;
-        let store = FakeStore {
-            fail: true,
-            ..FakeStore::default()
-        };
-        match restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old")) {
+        // No keyring.
+        match restore_now(&accounts(port), port, &stored(&me, "rt-old")) {
             // Signed in all the same, with a notice.
             Restore::Ready(_, Some(notice)) => {
-                assert_eq!(
-                    notice,
-                    fl!(
-                        "notice-not-saved",
-                        detail = keyring_detail(&FakeStore::err())
-                    )
-                );
+                assert_eq!(notice, fl!("notice-not-saved", detail = unavailable()));
             }
             other => panic!("{other:?}"),
         }
@@ -962,13 +798,14 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000a4");
         let server = token_server(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
-        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
+        let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
         assert!(
             matches!(&outcome, Restore::SignInAgain(m) if *m == fl!("error-saved-sign-in-expired")),
             "{outcome:?}"
         );
-        assert_eq!(store.tokens(), Vec::<String>::new());
+        assert_eq!(tokens(&a), Vec::<String>::new());
     }
 
     #[test]
@@ -976,13 +813,14 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000a5");
         let server = token_server(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
-        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
+        let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
         assert!(
             matches!(&outcome, Restore::SignInAgain(m) if *m == fl!("error-sign-in-frequency")),
             "{outcome:?}"
         );
-        assert_eq!(store.tokens(), Vec::<String>::new());
+        assert_eq!(tokens(&a), Vec::<String>::new());
     }
 
     #[test]
@@ -994,59 +832,52 @@ mod tests {
             r#"{"error":"interaction_required","error_codes":[50076]}"#,
         );
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
-        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
+        let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
         assert!(matches!(outcome, Restore::SignInAgain(_)), "{outcome:?}");
-        assert_eq!(store.tokens(), ["rt-old"]);
+        assert_eq!(tokens(&a), ["rt-old"]);
     }
 
     #[test]
     fn a_restore_queued_before_sign_out_does_nothing_after_it() {
         let me = identity("00000000-0000-0000-0000-0000000000f1");
-        let store = FakeStore::with(&me, "rt-old");
-        // Scheduled, then the sign-out completes before it runs.
-        let started = sign_out_count(&account_id(&me));
-        delete_in(&env(1, &store), &me).unwrap();
-        assert_eq!(store.tokens(), Vec::<String>::new());
         // Port 1: any network attempt would end as Retry, not SignInAgain.
-        let outcome = restore_at(&http(1), &env(1, &store), &stored(&me, "rt-old"), started);
+        let a = accounts(1);
+        let _keyring = keyring_with(&a, &me, "rt-old");
+        // Scheduled, then the sign-out completes before it runs.
+        let started = a.sign_out_count(&account_id(&me));
+        a.delete(&me).unwrap();
+        assert_eq!(tokens(&a), Vec::<String>::new());
+        let outcome = a.restore(&http(1), &stored(&me, "rt-old"), started);
         assert!(matches!(outcome, Restore::SignInAgain(_)), "{outcome:?}");
-        assert_eq!(
-            store.tokens(),
-            Vec::<String>::new(),
-            "the sign-in came back"
-        );
+        assert_eq!(tokens(&a), Vec::<String>::new(), "the sign-in came back");
     }
 
     #[test]
     fn a_renewal_queued_before_sign_out_saves_nothing_after_it() {
         let me = identity("00000000-0000-0000-0000-0000000000f2");
-        let store = FakeStore::with(&me, "rt-old");
-        let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
-        let started = sign_out_count(&account_id(&me));
-        delete_in(&env(1, &store), &me).unwrap();
         // A server that would hand out a rotated token, if asked.
         let server = token_server("200 OK", OK_ROTATED);
         let port = server.port;
-        for force in [false, true] {
-            let result = renew_at(
-                &http(port),
-                &env(port, &store),
-                account.clone(),
-                force,
-                started,
-            );
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
+        let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
+        let started = a.sign_out_count(&account_id(&me));
+        a.delete(&me).unwrap();
+        for when in [Renewal::IfNeeded, Renewal::Now] {
+            let result = a.renew(&http(port), account.clone(), when, started);
             assert!(
                 matches!(result, Err(RenewError::SignInAgain(_))),
                 "{result:?}"
             );
         }
         assert_eq!(
-            store.tokens(),
+            tokens(&a),
             Vec::<String>::new(),
             "a rotated token was saved"
         );
-        assert!(newest(&account).is_none(), "its tokens are still known");
+        assert!(a.newest(&account).is_none(), "its tokens are still known");
     }
 
     #[test]
@@ -1054,46 +885,40 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000f3");
         let id = account_id(&me);
         let pw = Secret::new("hunter2".into());
-        let store = FakeStore::default();
-        let e = env(1, &store);
+        let a = accounts(1);
+        let keyring = FakeKeyring::start(Answer::Unlock);
         // Normal: saved.
-        let ticket = password_ticket(&id, "desk-1");
-        assert_eq!(
-            save_password_in(&e, &me, "desk-1", "D", &pw, ticket),
-            Ok(true)
-        );
+        let ticket = a.password_ticket(&id, "desk-1");
+        assert_eq!(a.save_password(&me, "desk-1", "D", &pw, ticket), Ok(true));
         // Saved first, deleted by the sign-out after it: gone.
-        delete_in(&e, &me).unwrap();
-        assert_eq!(*store.passwords.lock().unwrap(), []);
+        a.delete(&me).unwrap();
+        assert_eq!(passwords(&keyring), []);
         // Scheduled before the sign-out, run after it: nothing written.
         let other = identity("00000000-0000-0000-0000-0000000000f4");
         let other_id = account_id(&other);
-        let ticket = password_ticket(&other_id, "desk-1");
-        delete_in(&e, &other).unwrap();
+        let ticket = a.password_ticket(&other_id, "desk-1");
+        a.delete(&other).unwrap();
         assert_eq!(
-            save_password_in(&e, &other, "desk-1", "D", &pw, ticket),
+            a.save_password(&other, "desk-1", "D", &pw, ticket),
             Ok(false)
         );
-        assert_eq!(*store.passwords.lock().unwrap(), []);
+        assert_eq!(passwords(&keyring), []);
         // Scheduled before Forget, run after it: nothing written, and
         // another desktop's password is untouched.
         let third = identity("00000000-0000-0000-0000-0000000000f5");
         let third_id = account_id(&third);
-        let keep = password_ticket(&third_id, "desk-2");
+        let keep = a.password_ticket(&third_id, "desk-2");
+        assert_eq!(a.save_password(&third, "desk-2", "D", &pw, keep), Ok(true));
+        let ticket = a.password_ticket(&third_id, "desk-1");
+        let forget = a.note_forget(&third_id, "desk-1");
+        a.forget_password(&third, "desk-1", forget).unwrap();
         assert_eq!(
-            save_password_in(&e, &third, "desk-2", "D", &pw, keep),
-            Ok(true)
-        );
-        let ticket = password_ticket(&third_id, "desk-1");
-        let forget = note_forget(&third_id, "desk-1");
-        forget_password_in(&e, &third, "desk-1", forget).unwrap();
-        assert_eq!(
-            save_password_in(&e, &third, "desk-1", "D", &pw, ticket),
+            a.save_password(&third, "desk-1", "D", &pw, ticket),
             Ok(false)
         );
         assert_eq!(
-            *store.passwords.lock().unwrap(),
-            [(third, "desk-2".to_owned())]
+            passwords(&keyring),
+            [(third.object_id.clone(), "desk-2".to_owned())]
         );
     }
 
@@ -1102,30 +927,28 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000f7");
         let id = account_id(&me);
         let pw = Secret::new("hunter2".into());
-        let store = FakeStore::default();
-        let e = env(1, &store);
+        let a = accounts(1);
+        let keyring = FakeKeyring::start(Answer::Unlock);
         // Forget asked for (its deletion is held up), then the desktop is
         // connected again with "remember", and that save runs first.
-        let forget = note_forget(&id, "desk");
-        let ticket = password_ticket(&id, "desk");
+        let forget = a.note_forget(&id, "desk");
+        let ticket = a.password_ticket(&id, "desk");
+        assert_eq!(a.save_password(&me, "desk", "D", &pw, ticket), Ok(true));
+        a.forget_password(&me, "desk", forget).unwrap();
         assert_eq!(
-            save_password_in(&e, &me, "desk", "D", &pw, ticket),
-            Ok(true)
-        );
-        forget_password_in(&e, &me, "desk", forget).unwrap();
-        assert_eq!(
-            *store.passwords.lock().unwrap(),
-            [(me.clone(), "desk".to_owned())]
+            passwords(&keyring),
+            [(me.object_id.clone(), "desk".to_owned())]
         );
         // A Forget asked for after that save does delete it.
-        let forget = note_forget(&id, "desk");
-        forget_password_in(&e, &me, "desk", forget).unwrap();
-        assert_eq!(*store.passwords.lock().unwrap(), []);
+        let forget = a.note_forget(&id, "desk");
+        a.forget_password(&me, "desk", forget).unwrap();
+        assert_eq!(passwords(&keyring), []);
     }
 
     #[test]
     fn a_cache_save_queued_before_sign_out_writes_nothing() {
         let id = account_id(&identity("00000000-0000-0000-0000-0000000000f6"));
+        let a = accounts(1);
         let tmp = tempfile::tempdir().unwrap();
         let store = crate::cache::Store::at(tmp.path().to_path_buf());
         let list = vec![crate::cache::CachedWorkspace {
@@ -1133,14 +956,15 @@ mod tests {
             resources: Vec::new(),
         }];
         // Normal: saved.
-        save_cache(&store, &id, &list, sign_out_count(&id)).unwrap();
+        a.save_cache(&store, &id, &list, a.sign_out_count(&id))
+            .unwrap();
         assert!(store.load(&id, Duration::from_hours(1)).is_some());
         // Scheduled, then the sign-out (its counter and the removal), then
         // the save runs: nothing comes back.
-        let started = sign_out_count(&id);
-        note_sign_out(&id);
+        let started = a.sign_out_count(&id);
+        a.note_sign_out(&id);
         store.remove(&id).unwrap();
-        save_cache(&store, &id, &list, started).unwrap();
+        a.save_cache(&store, &id, &list, started).unwrap();
         assert!(
             store.load(&id, Duration::from_hours(1)).is_none(),
             "the offline list came back"
@@ -1152,13 +976,14 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000a7");
         let server = token_server("503 Service Unavailable", "busy");
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
-        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
+        let outcome = restore_now(&a, port, &stored(&me, "rt-old"));
         assert!(
             matches!(&outcome, Restore::Retry(m) if *m == fl!("error-restore-network")),
             "{outcome:?}"
         );
-        assert_eq!(store.tokens(), ["rt-old"]);
+        assert_eq!(tokens(&a), ["rt-old"]);
     }
 
     #[test]
@@ -1172,18 +997,16 @@ mod tests {
             r#"{"access_token":"a","token_type":"Bearer","refresh_token":"rt-old","id_token":"x.y.z"}"#,
         );
         let port = server.port;
-        let store = FakeStore::default();
-        let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
+        let outcome = restore_now(&accounts(port), port, &stored(&me, "rt-old"));
         assert!(matches!(outcome, Restore::Retry(_)), "{outcome:?}");
     }
 
     #[test]
     fn renewal_is_skipped_while_the_token_is_fresh() {
         let me = identity("00000000-0000-0000-0000-0000000000b1");
-        let store = FakeStore::default();
         let account = signed_in(&me, Some("rt-old"), Duration::from_secs(3600));
         // Port 1: any request would fail, so success means none was made.
-        let renewed = renew_in(&http(1), &env(1, &store), account.clone(), false).unwrap();
+        let renewed = renew_now(&accounts(1), 1, account.clone(), Renewal::IfNeeded).unwrap();
         assert!(Arc::ptr_eq(&renewed, &account));
     }
 
@@ -1194,11 +1017,12 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000b7");
         let server = token_server("200 OK", OK_ROTATED);
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
         let mut account =
             Arc::into_inner(signed_in(&me, Some("rt-old"), Duration::from_secs(3600))).unwrap();
         account.tokens.expires_wall = SystemTime::now() - Duration::from_hours(5);
-        let renewed = renew_in(&http(port), &env(port, &store), Arc::new(account), false).unwrap();
+        let renewed = renew_now(&a, port, Arc::new(account), Renewal::IfNeeded).unwrap();
         assert_eq!(renewed.tokens.access_token.expose(), "new-access");
     }
 
@@ -1207,9 +1031,10 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000b8");
         let server = token_server("200 OK", OK_ROTATED);
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
         let account = signed_in(&me, Some("rt-old"), Duration::from_secs(3600));
-        let renewed = renew_in(&http(port), &env(port, &store), account, true).unwrap();
+        let renewed = renew_now(&a, port, account, Renewal::Now).unwrap();
         assert_eq!(renewed.tokens.access_token.expose(), "new-access");
     }
 
@@ -1218,42 +1043,42 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000b2");
         let server = token_server("200 OK", OK_ROTATED);
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
         let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
-        let renewed = renew_in(&http(port), &env(port, &store), account, false).unwrap();
+        let renewed = renew_now(&a, port, account, Renewal::IfNeeded).unwrap();
         assert_eq!(renewed.tokens.access_token.expose(), "new-access");
-        assert_eq!(store.tokens(), ["rt-new"]);
+        assert_eq!(tokens(&a), ["rt-new"]);
     }
 
     #[test]
     fn renewal_failures_are_explained() {
         let me = identity("00000000-0000-0000-0000-0000000000b3");
-        let store = FakeStore::default();
         let server = token_server("503 Service Unavailable", "busy");
         let port = server.port;
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
-            renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
+            renew_now(&accounts(port), port, account, Renewal::IfNeeded).unwrap_err(),
             RenewError::Retry(fl!("error-generic"))
         );
         let server = token_server(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
         let port = server.port;
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
-            renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
+            renew_now(&accounts(port), port, account, Renewal::IfNeeded).unwrap_err(),
             RenewError::SignInAgain(fl!("error-session-expired"))
         );
         let server = token_server(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
         let port = server.port;
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
-            renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
+            renew_now(&accounts(port), port, account, Renewal::IfNeeded).unwrap_err(),
             RenewError::SignInAgain(fl!("error-sign-in-frequency"))
         );
         // No refresh token: nothing to renew with, no request.
         let account = signed_in(&me, None, Duration::ZERO);
         assert_eq!(
-            renew_in(&http(1), &env(1, &store), account, false).unwrap_err(),
+            renew_now(&accounts(1), 1, account, Renewal::IfNeeded).unwrap_err(),
             RenewError::SignInAgain(fl!("error-session-expired"))
         );
     }
@@ -1266,31 +1091,29 @@ mod tests {
         let me = identity("00000000-0000-0000-0000-0000000000b5");
         let server = token_server("200 OK", OK_ROTATED);
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
         let copy = signed_in(&me, Some("rt-old"), Duration::ZERO);
-        let first = renew_in(&http(port), &env(port, &store), copy.clone(), false).unwrap();
-        let second = renew_in(&http(port), &env(port, &store), copy, false).unwrap();
+        let first = renew_now(&a, port, copy.clone(), Renewal::IfNeeded).unwrap();
+        let second = renew_now(&a, port, copy, Renewal::IfNeeded).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(server.sent().matches("grant_type=refresh_token").count(), 1);
-        assert_eq!(store.tokens(), ["rt-new"]);
+        assert_eq!(tokens(&a), ["rt-new"]);
     }
 
     #[test]
     fn signing_out_forgets_the_newest_tokens() {
         let me = identity("00000000-0000-0000-0000-0000000000b6");
+        let a = accounts(1);
         let fresh = signed_in(&me, Some("rt"), Duration::from_secs(3600));
-        signed_in_now(&fresh);
+        a.signed_in(&fresh, a.sign_out_count(&account_id(&me)));
         let stale = signed_in(&me, Some("rt"), Duration::ZERO);
-        assert!(newest(&stale).is_some());
-        note_sign_out(&account_id(&me));
-        assert!(newest(&stale).is_none());
+        assert!(a.newest(&stale).is_some());
+        a.note_sign_out(&account_id(&me));
+        assert!(a.newest(&stale).is_none());
         // Late work from before the sign-out records nothing.
-        note_tokens(&fresh, sign_out_count(&account_id(&me)) - 1);
-        assert!(newest(&stale).is_none());
-    }
-
-    fn signed_in_now(account: &Arc<SignedIn>) {
-        super::signed_in(account, sign_out_count(&account_id(&account.identity)));
+        a.note_tokens(&fresh, a.sign_out_count(&account_id(&me)) - 1);
+        assert!(a.newest(&stale).is_none());
     }
 
     #[test]
@@ -1305,63 +1128,56 @@ mod tests {
             r#"{"access_token":"a","token_type":"Bearer","refresh_token":"rt-new","id_token":"x.y.z"}"#,
         );
         let port = server.port;
-        let store = FakeStore::with(&me, "rt-old");
+        let a = accounts(port);
+        let _keyring = keyring_with(&a, &me, "rt-old");
         let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
         assert!(matches!(
-            renew_in(&http(port), &env(port, &store), account, false),
+            renew_now(&a, port, account, Renewal::IfNeeded),
             Err(RenewError::Retry(_))
         ));
-        assert_eq!(store.tokens(), ["rt-old"]);
+        assert_eq!(tokens(&a), ["rt-old"]);
     }
 
     #[test]
     fn work_started_before_a_sign_out_never_saves_afterwards() {
         // Spec §6: late callbacks must not restore the account.
         let me = identity("00000000-0000-0000-0000-0000000000c1");
-        let store = FakeStore::default();
+        let a = accounts(1);
+        let _keyring = FakeKeyring::start(Answer::Unlock);
         let account = signed_in(&me, Some("rt-late"), Duration::from_secs(3600));
-        let started = sign_out_count(&account_id(&me));
-        delete_in(&env(1, &store), &me).unwrap();
-        assert_eq!(save_locked(&env(1, &store), &account, started), Ok(()));
-        assert_eq!(store.tokens(), Vec::<String>::new());
+        let started = a.sign_out_count(&account_id(&me));
+        a.delete(&me).unwrap();
+        assert_eq!(a.save(&account, started), Ok(()));
+        assert_eq!(tokens(&a), Vec::<String>::new());
         // A sign-in after the sign-out saves normally.
-        let started = sign_out_count(&account_id(&me));
-        save_locked(&env(1, &store), &account, started).unwrap();
-        assert_eq!(store.tokens(), ["rt-late"]);
+        let started = a.sign_out_count(&account_id(&me));
+        a.save(&account, started).unwrap();
+        assert_eq!(tokens(&a), ["rt-late"]);
     }
 
     #[test]
     fn sign_out_blocks_late_saves_even_if_the_keyring_fails() {
         let me = identity("00000000-0000-0000-0000-0000000000c2");
-        let failing = FakeStore {
-            fail: true,
-            ..FakeStore::default()
-        };
-        let before = sign_out_count(&account_id(&me));
-        assert_eq!(
-            delete_in(&env(1, &failing), &me).unwrap_err(),
-            fl!("error-sign-out-incomplete")
-        );
-        assert_eq!(sign_out_count(&account_id(&me)), before + 1);
+        // No keyring.
+        let a = accounts(1);
+        let before = a.sign_out_count(&account_id(&me));
+        assert_eq!(a.delete(&me).unwrap_err(), fl!("error-sign-out-incomplete"));
+        assert_eq!(a.sign_out_count(&account_id(&me)), before + 1);
     }
 
     #[test]
     fn loading_saved_sign_ins() {
         let me = identity("00000000-0000-0000-0000-0000000000d1");
-        let store = FakeStore::with(&me, "rt");
-        let all = load_saved_in(&env(1, &store)).unwrap();
+        let a = accounts(1);
+        let keyring = keyring_with(&a, &me, "rt");
+        let all = a.load_saved().unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].identity, me);
-        let failing = FakeStore {
-            fail: true,
-            ..FakeStore::default()
-        };
+        // No keyring any more.
+        drop(keyring);
         assert_eq!(
-            load_saved_in(&env(1, &failing)).unwrap_err(),
-            fl!(
-                "error-keyring-load",
-                detail = keyring_detail(&FakeStore::err())
-            )
+            a.load_saved().unwrap_err(),
+            fl!("error-keyring-load", detail = unavailable())
         );
     }
 
@@ -1389,10 +1205,9 @@ mod tests {
 
     #[test]
     fn sign_outs_are_counted_per_account() {
-        let before_a = sign_out_count("test-a");
-        let before_b = sign_out_count("test-b");
-        note_sign_out("test-a");
-        assert_eq!(sign_out_count("test-a"), before_a + 1);
-        assert_eq!(sign_out_count("test-b"), before_b);
+        let a = accounts(1);
+        a.note_sign_out("test-a");
+        assert_eq!(a.sign_out_count("test-a"), 1);
+        assert_eq!(a.sign_out_count("test-b"), 0);
     }
 }

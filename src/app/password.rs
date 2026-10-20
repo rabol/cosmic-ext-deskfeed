@@ -133,11 +133,15 @@ impl AppModel {
             return Task::none();
         };
         // At once: a save already on its way writes nothing.
-        let forget = crate::accounts::note_forget(&id, key);
+        let forget = crate::accounts::shared().note_forget(&id, key);
         let key = key.to_owned();
         Task::future(async move {
             let deleted = off_ui(
-                move || crate::accounts::forget_password(&identity, &key, forget).is_ok(),
+                move || {
+                    crate::accounts::shared()
+                        .forget_password(&identity, &key, forget)
+                        .is_ok()
+                },
                 false,
             )
             .await;

@@ -248,7 +248,11 @@ impl cosmic::Application for AppModel {
         app.rebuild_nav(&Page::Add);
         let title = app.update_title();
         let load = cosmic::task::future(async {
-            let result = off_ui(accounts::load_saved, Err(fl!("error-generic"))).await;
+            let result = off_ui(
+                || accounts::shared().load_saved(),
+                Err(fl!("error-generic")),
+            )
+            .await;
             Message::SavedLoaded(result)
         });
         let deps = app.check_dependencies();

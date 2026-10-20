@@ -254,7 +254,7 @@ impl AppModel {
                     let result = off_ui(
                         move || {
                             launcher::stop_all(&[session], launcher::STOP_GRACE);
-                            accounts::remove_files(&owner)
+                            accounts::shared().remove_files(&owner)
                         },
                         Err(()),
                     )

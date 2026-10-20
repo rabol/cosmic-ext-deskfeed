@@ -84,7 +84,7 @@ impl AppModel {
                 // meanwhile wins.
                 Ok(true)
                     if self.account(&id).is_some()
-                        && crate::accounts::password_ticket(&id, &key) == ticket =>
+                        && crate::accounts::shared().password_ticket(&id, &key) == ticket =>
                 {
                     crate::app_log!("Windows password remembered for a desktop");
                     self.set_saved_password(&key, true);
@@ -234,13 +234,18 @@ impl AppModel {
         let http = self.http.clone();
         let key = key.to_owned();
         // Read now: a sign-out before this runs stops it.
-        let started = accounts::sign_out_count(&id);
+        let started = accounts::shared().sign_out_count(&id);
         cosmic::task::future(async move {
             let result = off_ui(
                 move || {
                     // The access token also goes to FreeRDP, so it must stay
                     // valid through the connection.
-                    let signed_in = accounts::renew_if_needed(&http, signed_in, started)?;
+                    let signed_in = accounts::shared().renew(
+                        &http,
+                        signed_in,
+                        accounts::Renewal::IfNeeded,
+                        started,
+                    )?;
                     let get = |s: &SignedIn| {
                         http.get(&url, Role::ConnectionFile, Some(&s.tokens.access_token))
                     };
@@ -248,7 +253,12 @@ impl AppModel {
                         // Refused although it looked valid: renew once and retry.
                         Err(HttpError::Status { status: 401, .. }) => {
                             crate::app_log!("connection file: access token refused; renewing");
-                            let renewed = accounts::renew_now(&http, signed_in, started)?;
+                            let renewed = accounts::shared().renew(
+                                &http,
+                                signed_in,
+                                accounts::Renewal::Now,
+                                started,
+                            )?;
                             (get(&renewed).map_err(refused_or_shown_http)?, renewed)
                         }
                         other => (

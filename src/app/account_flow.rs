@@ -53,10 +53,10 @@ impl AppModel {
                     return Task::none();
                 };
                 let (signed_in, sign_in) = (signed_in.clone(), a.sign_in);
-                let started = accounts::sign_out_count(&id);
+                let started = accounts::shared().sign_out_count(&id);
                 return cosmic::task::future(async move {
                     let result = off_ui(
-                        move || accounts::save(&signed_in, started),
+                        move || accounts::shared().save(&signed_in, started),
                         Err(fl!("error-generic")),
                     )
                     .await;
@@ -218,10 +218,10 @@ impl AppModel {
         };
         let (id, list) = (id.to_owned(), to_cached(list));
         // Read now: a sign-out before the save runs stops it.
-        let started = accounts::sign_out_count(&id);
+        let started = accounts::shared().sign_out_count(&id);
         Task::future(async move {
             let result = off_ui(
-                move || accounts::save_cache(&store, &id, &list, started),
+                move || accounts::shared().save_cache(&store, &id, &list, started),
                 Ok(()),
             )
             .await;
@@ -248,10 +248,10 @@ impl AppModel {
         let http = self.http.clone();
         let id = id.to_owned();
         // Read now: a sign-out before the restore runs stops it.
-        let started = accounts::sign_out_count(&id);
+        let started = accounts::shared().sign_out_count(&id);
         cosmic::task::future(async move {
             let outcome = off_ui(
-                move || accounts::restore(&http, &stored, started),
+                move || accounts::shared().restore(&http, &stored, started),
                 Restore::Retry(fl!("error-generic")),
             )
             .await;
@@ -463,12 +463,12 @@ impl AppModel {
             self.accounts.push(account);
         }
         self.rebuild_nav(&Page::Account(id.clone()));
-        let started = accounts::sign_out_count(&id);
-        accounts::signed_in(&signed_in, started);
+        let started = accounts::shared().sign_out_count(&id);
+        accounts::shared().signed_in(&signed_in, started);
         let save_id = id.clone();
         let save = cosmic::task::future(async move {
             let result = off_ui(
-                move || accounts::save(&signed_in, started),
+                move || accounts::shared().save(&signed_in, started),
                 Err(fl!("error-generic")),
             )
             .await;
@@ -512,21 +512,31 @@ impl AppModel {
         let http = self.http.clone();
         let id = id.to_owned();
         // Read now: a sign-out before this runs stops it.
-        let started = accounts::sign_out_count(&id);
+        let started = accounts::shared().sign_out_count(&id);
         let owner = id.clone();
         cosmic::task::future(async move {
             let result = off_ui(
                 move || {
                     // No more requests once the account signed out.
-                    let wanted = || accounts::sign_out_count(&owner) == started;
+                    let wanted = || accounts::shared().sign_out_count(&owner) == started;
                     // An expired access token would only get "session expired".
-                    let signed_in = accounts::renew_if_needed(&http, signed_in, started)?;
+                    let signed_in = accounts::shared().renew(
+                        &http,
+                        signed_in,
+                        accounts::Renewal::IfNeeded,
+                        started,
+                    )?;
                     let (feeds, signed_in) =
                         match discovery::discover(&http, &signed_in.tokens.access_token, &wanted) {
                             // Refused although it looked valid: renew once and retry.
                             Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
                                 crate::app_log!("desktop list: access token refused; renewing");
-                                let renewed = accounts::renew_now(&http, signed_in, started)?;
+                                let renewed = accounts::shared().renew(
+                                    &http,
+                                    signed_in,
+                                    accounts::Renewal::Now,
+                                    started,
+                                )?;
                                 let feeds = discovery::discover(
                                     &http,
                                     &renewed.tokens.access_token,
@@ -650,7 +660,7 @@ impl AppModel {
         }
         let http = self.http.clone();
         let id = id.to_owned();
-        let started = accounts::sign_out_count(&id);
+        let started = accounts::shared().sign_out_count(&id);
         let owner = id.clone();
         cosmic::task::future(async move {
             let icons = off_ui(
@@ -659,7 +669,7 @@ impl AppModel {
                     let mut refused = 0;
                     for url in missing {
                         // No more requests once the account signed out.
-                        if accounts::sign_out_count(&owner) != started {
+                        if accounts::shared().sign_out_count(&owner) != started {
                             break;
                         }
                         let fetched = http
@@ -746,7 +756,7 @@ impl AppModel {
             let id = retry.id.clone();
             tasks.push(cosmic::task::future(async move {
                 let owner = id.clone();
-                let result = off_ui(move || accounts::remove_files(&owner), Err(())).await;
+                let result = off_ui(move || accounts::shared().remove_files(&owner), Err(())).await;
                 Message::SignOutFilesRemoved(id, result)
             }));
         }
@@ -791,7 +801,7 @@ impl AppModel {
         let account = self.accounts.remove(pos);
         self.icons.retain(|(account, _), _| account != id);
         // From now on nothing started earlier saves its tokens.
-        accounts::note_sign_out(id);
+        accounts::shared().note_sign_out(id);
         let sign_in = match &account.state {
             AccountState::SigningIn { cancel } => {
                 cancel.cancel();
@@ -837,7 +847,7 @@ impl AppModel {
                             cancel.cancel_and_wait(launcher::STOP_GRACE);
                         }
                         launcher::stop_all(&sessions, launcher::STOP_GRACE);
-                        accounts::remove_files(&owner)
+                        accounts::shared().remove_files(&owner)
                     },
                     Err(()),
                 )
@@ -862,7 +872,7 @@ fn keyring_cleanup(
         // The saved sign-in and the remembered passwords, under the
         // account's lock like their saves.
         let result = off_ui(
-            move || accounts::delete(&identity),
+            move || accounts::shared().delete(&identity),
             Err(fl!("error-sign-out-incomplete")),
         )
         .await;
