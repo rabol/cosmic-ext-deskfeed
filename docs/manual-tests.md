@@ -8,7 +8,6 @@ Install the current build first (`just install`, or the package).
 
 ### Sign-in and accounts
 
-1. **Sign in again after reinstalling.** The saved sign-in had expired under the tenant's sign-in time limit. Reinstall, open Deskfeed, select Sign in on the account. *Expected:* one Microsoft sign-in page, then the desktop list.
 2. **Sleep for over an hour** (commit `0b957ce`). Sign in, let the computer sleep for more than an hour, wake it, select Connect. *Expected:* the desktop connects, or the account shows a Sign in button. Never a raw error. Also, within 5 minutes of waking, the list's "Updated …" time changes to the time after waking, even after a short sleep (the log says "woke from sleep: refreshing desktop lists").
 
 3a. **Sign out with a desktop open.** Connect a desktop, then select Sign out on its account. *Expected:* a question "Sign out of …?" with "Disconnect and sign out" and Cancel. Cancel keeps everything; the other button disconnects and signs out. Without anything connected, Sign out happens at once as before.
@@ -34,10 +33,6 @@ Install the current build first (`just install`, or the package).
 8. **Display scaling** (ADR 0015). On a monitor with scaling other than 100 %, connect a desktop. *Expected:* text in Windows is the same size as in COSMIC's apps.
 9. **Camera** (ADR 0013), on a desktop whose administrator allows cameras. Turn on the Camera setting, connect, open Windows' Camera app. *Expected:* the camera works. Unplug and plug it back in: note what happens.
 
-### Connection files (ADR 0024)
-
-14a. **Desktops still connect after the stricter connection-file checks.** Connect each of your desktops once. *Expected:* they connect as before. If one doesn't, the log has a line "connection file: dropped for their form: …" naming the property; tell me the name (it holds no tenant data).
-
 ### Administrator policy (ADR 0021)
 
 15. **Clipboard and microphone still work where allowed.** With the clipboard on in Settings, connect your usual desktop and copy text both ways. *Expected:* it works. If it doesn't, the desktop's row says "Clipboard off: your organization doesn't allow it", and the log has a line "Device policy from the connection file" showing what the feed allows. Tell me what it says.
@@ -55,5 +50,7 @@ Install the current build first (`just install`, or the package).
 
 ## Done
 
+- 2026-10-20: sign in again after reinstalling: one Microsoft sign-in page, then the desktop list.
+- 2026-10-20: every desktop still connects after the stricter connection-file checks (ADR 0024).
 - 2026-10-19: tray menu lists the open desktop and switches to it.
 - 2026-10-19: "Keep running in the background" in the quit dialog closes the window and keeps the desktop connected (fix `7fc05ab`).
