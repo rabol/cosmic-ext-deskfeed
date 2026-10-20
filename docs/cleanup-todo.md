@@ -85,7 +85,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 
 - [x] **Wayland setup copy-pasted 5 times** (Done 2026-10-20: `connect()`, `no_wayland`; `with_window` folded into `focus`) (`src/workspace.rs:128-152, 228-250, 327-347` and tests); `map_err(NoWayland)` about 10 times. *Simpler:* `fn connect()` + `From` for the error. Effort S, risk low.
 - [x] **`Running` and `Launching` share 6 fields** (Done 2026-10-20: both hold a `Start`) (`src/app/model.rs:124-160`). *Simpler:* `Running { start: Launching, session }`. Effort S, risk low.
-- [ ] **"Renew, try, renew again on 401" written twice** (`src/app/account_flow.rs:552-575`, `src/app/connect.rs:~236-255`). *Simpler:* one helper taking a closure. Effort M, risk med.
+- [x] **"Renew, try, renew again on 401" written twice** (Done 2026-10-20: `with_fresh_token`, used for the desktop list and the connection file; tested on its own.) (`src/app/account_flow.rs:552-575`, `src/app/connect.rs:~236-255`). *Simpler:* one helper taking a closure. Effort M, risk med.
 - [x] **About 24 `spawn_blocking` blocks with four different fallbacks** (Done 2026-10-20: all 26 go through `off_ui`, which logs a crash and returns an explicit fallback) (`"task"`, `error-generic`, `Err(())`, `unwrap_or_default`). The §1 bug is one of them. *Simpler:* one helper with an explicit error. Effort S–M, risk low.
 - [ ] **Settings plumbing** (`src/app/settings_ui.rs`).
   - Nine near-identical setting messages (App/Account/Desktop × Toggle/Number/Choice).

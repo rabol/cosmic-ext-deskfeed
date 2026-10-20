@@ -541,32 +541,14 @@ impl AppModel {
                     // No more requests once the account signed out.
                     let wanted = || sign_ins.sign_out_count(&owner) == started;
                     // An expired access token would only get "session expired".
-                    let signed_in =
-                        sign_ins.renew(&http, signed_in, accounts::Renewal::IfNeeded, started)?;
-                    let (feeds, signed_in) =
-                        match discovery::discover(&http, &signed_in.tokens.access_token, &wanted) {
-                            // Refused although it looked valid: renew once and retry.
-                            Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
-                                crate::app_log!("desktop list: access token refused; renewing");
-                                let renewed = sign_ins.renew(
-                                    &http,
-                                    signed_in,
-                                    accounts::Renewal::Now,
-                                    started,
-                                )?;
-                                let feeds = discovery::discover(
-                                    &http,
-                                    &renewed.tokens.access_token,
-                                    &wanted,
-                                )
-                                .map_err(refused_or_shown)?;
-                                (feeds, renewed)
-                            }
-                            other => (
-                                other.map_err(|e| StepError::Show(describe_fetch_error(&e)))?,
-                                signed_in,
-                            ),
-                        };
+                    let (feeds, signed_in) = with_fresh_token(
+                        &sign_ins,
+                        &http,
+                        signed_in,
+                        started,
+                        "desktop list",
+                        |token| discovery::discover(&http, token, &wanted),
+                    )?;
                     let list = feeds
                         .into_iter()
                         .map(|f| workspace_view(&signed_in, f))
@@ -904,4 +886,32 @@ fn keyring_cleanup(
         .await;
         Message::Account(AccountMessage::SignOutFinished(id, Box::new(kept), result))
     })
+}
+
+/// Runs `request` with the account's access token, renewed first if it
+/// expires soon. If the service refuses it anyway (401: revoked, or the
+/// clocks disagree), the token is renewed once more and the request tried
+/// again; refused a second time, the account must sign in again. `what`
+/// names the request in the log. Blocking.
+pub(super) fn with_fresh_token<T>(
+    sign_ins: &accounts::Accounts,
+    http: &Http,
+    signed_in: Arc<SignedIn>,
+    started: u64,
+    what: &str,
+    request: impl Fn(&crate::service::http::BearerToken) -> Result<T, FetchError>,
+) -> Result<(T, Arc<SignedIn>), StepError> {
+    let signed_in = sign_ins.renew(http, signed_in, accounts::Renewal::IfNeeded, started)?;
+    match request(&signed_in.tokens.access_token) {
+        Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
+            crate::app_log!("{what}: access token refused; renewing");
+            let renewed = sign_ins.renew(http, signed_in, accounts::Renewal::Now, started)?;
+            let value = request(&renewed.tokens.access_token).map_err(refused_or_shown)?;
+            Ok((value, renewed))
+        }
+        result => {
+            let value = result.map_err(|e| StepError::Show(describe_fetch_error(&e)))?;
+            Ok((value, signed_in))
+        }
+    }
 }

@@ -245,30 +245,17 @@ impl AppModel {
                 move || {
                     // The access token also goes to FreeRDP, so it must stay
                     // valid through the connection.
-                    let signed_in =
-                        sign_ins.renew(&http, signed_in, accounts::Renewal::IfNeeded, started)?;
-                    let get = |s: &SignedIn| {
-                        http.get(&url, Role::ConnectionFile, Some(&s.tokens.access_token))
-                    };
-                    let (resp, signed_in) = match get(&signed_in) {
-                        // Refused although it looked valid: renew once and retry.
-                        Err(HttpError::Status { status: 401, .. }) => {
-                            crate::app_log!("connection file: access token refused; renewing");
-                            let renewed = sign_ins.renew(
-                                &http,
-                                signed_in,
-                                accounts::Renewal::Now,
-                                started,
-                            )?;
-                            (get(&renewed).map_err(refused_or_shown_http)?, renewed)
-                        }
-                        other => (
-                            other.map_err(|e| {
-                                StepError::Show(describe_fetch_error(&FetchError::Http(e)))
-                            })?,
-                            signed_in,
-                        ),
-                    };
+                    let (resp, signed_in) = super::account_flow::with_fresh_token(
+                        &sign_ins,
+                        &http,
+                        signed_in,
+                        started,
+                        "connection file",
+                        |token| {
+                            http.get(&url, Role::ConnectionFile, Some(token))
+                                .map_err(FetchError::Http)
+                        },
+                    )?;
                     ConnectionFile::parse(&resp.body)
                         .map(|c| {
                             // Names only: they come from Deskfeed's own list.

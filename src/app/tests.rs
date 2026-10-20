@@ -266,3 +266,109 @@ fn quit_from_the_menu_with_nothing_open_doesnt_ask() {
     let _ = app.update(MenuAction::Quit.message());
     assert_eq!(app.quit, Quit::Stopping);
 }
+
+mod fresh_token {
+    use super::*;
+    use crate::app::account_flow::with_fresh_token;
+    use crate::test_util::token_server;
+    use std::sync::Mutex;
+
+    const RENEWED: &str = r#"{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"refresh_token":"rt"}"#;
+
+    /// Accounts whose token endpoint is the test server on `port`.
+    fn sign_ins(port: u16) -> crate::accounts::Accounts {
+        let mut config = crate::auth::attempt::ClientConfig::public_remote_desktop();
+        config.authority = Url::parse(&format!("http://127.0.0.1:{port}/organizations")).unwrap();
+        crate::accounts::Accounts::new(config)
+    }
+
+    /// A fresh-looking account that can be renewed.
+    fn account() -> Arc<SignedIn> {
+        let mut a = Arc::into_inner(signed_in("00000000-0000-0000-0000-0000000000f9")).unwrap();
+        a.tokens.refresh_token = Some(crate::auth::token::Secret::new("rt".into()));
+        Arc::new(a)
+    }
+
+    fn status(code: u16) -> FetchError {
+        FetchError::Http(HttpError::Status {
+            status: code,
+            body: Vec::new(),
+        })
+    }
+
+    type Outcome = Result<(u32, Arc<SignedIn>), StepError>;
+
+    /// Runs `with_fresh_token` with requests that answer `answers` in turn;
+    /// returns the result and the access tokens the requests got.
+    fn run(port: u16, answers: Vec<Result<u32, FetchError>>) -> (Outcome, Vec<String>) {
+        let answers = Mutex::new(answers.into_iter());
+        let seen = Mutex::new(Vec::new());
+        let result = with_fresh_token(
+            &sign_ins(port),
+            &Http::new(EndpointPolicy::local_test(port)),
+            account(),
+            0,
+            "test",
+            |token| {
+                seen.lock().unwrap().push(token.expose().to_owned());
+                answers.lock().unwrap().next().expect("no more answers")
+            },
+        );
+        (result, seen.into_inner().unwrap())
+    }
+
+    #[test]
+    fn a_fresh_token_is_used_as_it_is() {
+        let server = token_server("200 OK", RENEWED);
+        let (result, seen) = run(server.port, vec![Ok(7)]);
+        let (value, signed_in) = result.unwrap();
+        assert_eq!(value, 7);
+        assert_eq!(signed_in.tokens.access_token.expose(), "access");
+        assert_eq!(seen, ["access"]);
+        assert_eq!(server.sent(), "", "no renewal");
+    }
+
+    #[test]
+    fn a_refused_token_is_renewed_once_and_the_request_tried_again() {
+        let server = token_server("200 OK", RENEWED);
+        let (result, seen) = run(server.port, vec![Err(status(401)), Ok(7)]);
+        let (value, signed_in) = result.unwrap();
+        assert_eq!(value, 7);
+        assert_eq!(signed_in.tokens.access_token.expose(), "new-access");
+        assert_eq!(seen, ["access", "new-access"]);
+        assert_eq!(server.sent().matches("grant_type=refresh_token").count(), 1);
+    }
+
+    #[test]
+    fn refused_twice_means_signing_in_again() {
+        let server = token_server("200 OK", RENEWED);
+        let (result, _) = run(server.port, vec![Err(status(401)), Err(status(401))]);
+        assert!(
+            matches!(&result, Err(StepError::SignInAgain(t)) if *t == fl!("error-session-expired")),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn other_failures_are_shown_without_renewing() {
+        let server = token_server("200 OK", RENEWED);
+        let (result, seen) = run(server.port, vec![Err(status(403))]);
+        assert!(
+            matches!(&result, Err(StepError::Show(t)) if *t == fl!("error-forbidden")),
+            "{result:?}"
+        );
+        assert_eq!(seen.len(), 1);
+        assert_eq!(server.sent(), "", "no renewal");
+    }
+
+    #[test]
+    fn a_renewal_that_fails_on_the_network_is_shown() {
+        let server = token_server("503 Service Unavailable", "busy");
+        let (result, seen) = run(server.port, vec![Err(status(401))]);
+        assert!(
+            matches!(&result, Err(StepError::Show(t)) if *t == fl!("error-generic")),
+            "{result:?}"
+        );
+        assert_eq!(seen.len(), 1, "not tried again without a new token");
+    }
+}

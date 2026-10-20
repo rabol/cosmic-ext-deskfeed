@@ -207,10 +207,6 @@ pub(super) fn refused_or_shown(e: FetchError) -> StepError {
     }
 }
 
-pub(super) fn refused_or_shown_http(e: HttpError) -> StepError {
-    refused_or_shown(FetchError::Http(e))
-}
-
 /// A keyring problem, as the detail of a message.
 pub(super) fn keyring_detail(e: &SecretsError) -> String {
     match e {
