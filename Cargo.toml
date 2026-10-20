@@ -51,6 +51,9 @@ testkit = { package = "cosmic-ext-deskfeed-testkit", path = "testkit" }
 # Reading settings files the way cosmic-config does (`ron::from_str`), in
 # tests only; the same version libcosmic already uses.
 ron = "0.12"
+# A mock HTTP server for tests (ADR 0003: compared with wiremock and
+# httpmock); tests only.
+mockito = "1"
 
 [build-dependencies]
 xdgen = "0.1"

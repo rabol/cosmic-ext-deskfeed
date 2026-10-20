@@ -174,7 +174,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - `start_without_gateway` re-implements `launch_with` step by step and can drift.
   - *Simpler:* `fake_freerdp(script)`, `launch_fake(spec, script)`, `is_gone(pid)`.
   - Effort M, risk low.
-- [ ] **Four hand-written fake HTTP servers and ~14 temp-dir naming schemes.** *Simpler:* one configurable test server in `test_util`, and `tempfile` (already in Cargo.lock) as a dev-dependency (an ADR line per the minimal-dependencies rule). Effort S, risk low.
+- [ ] **Four hand-written fake HTTP servers and ~14 temp-dir naming schemes.** *HTTP part done 2026-10-20: mockito (ADR 0003, compared with wiremock and httpmock); one raw server stays for hostile cases. Temp folders still open (`tempfile`, under "Hand-written code where a mature crate fits").* *Simpler:* one configurable test server in `test_util`, and `tempfile` (already in Cargo.lock) as a dev-dependency (an ADR line per the minimal-dependencies rule). Effort S, risk low.
 - [ ] **Hand-written code where a mature crate fits** (owner, 2026-10-20: "keep minimal does not mean handcode everything"). Weigh each honestly — crate if it replaces real code or a tricky format and is widely used; record it in an ADR:
   - test HTTP fakes → `mockito` (decided; one small raw server stays for hostile cases);
   - test temp folders → `tempfile`;

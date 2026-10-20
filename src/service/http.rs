@@ -275,64 +275,26 @@ mod redact_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Read, Write};
+    use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
-    use std::sync::Mutex;
     use std::thread;
 
-    /// A one-thread HTTP server that records every request it receives and
-    /// answers each with the next canned response.
-    struct Server {
-        port: u16,
-        requests: Arc<Mutex<Vec<String>>>,
+    /// Mocks for any GET or POST (the client's only methods), each
+    /// expected never to arrive.
+    fn never(server: &mut mockito::ServerGuard) -> [mockito::Mock; 2] {
+        ["GET", "POST"].map(|method| {
+            server
+                .mock(method, mockito::Matcher::Any)
+                .expect(0)
+                .create()
+        })
     }
 
-    impl Server {
-        fn start(responses: Vec<String>) -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-            let port = listener.local_addr().unwrap().port();
-            let requests = Arc::new(Mutex::new(Vec::new()));
-            let seen = requests.clone();
-            thread::spawn(move || {
-                for (stream, response) in listener.incoming().zip(responses) {
-                    let mut stream = stream.unwrap();
-                    let mut reader = BufReader::new(stream.try_clone().unwrap());
-                    let mut head = String::new();
-                    let mut len = 0;
-                    loop {
-                        let mut line = String::new();
-                        if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                            break;
-                        }
-                        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                            len = v.trim().parse().unwrap();
-                        }
-                        head.push_str(&line);
-                    }
-                    let mut body = vec![0; len];
-                    reader.read_exact(&mut body).unwrap();
-                    head.push_str(&String::from_utf8_lossy(&body));
-                    seen.lock().unwrap().push(head);
-                    stream.write_all(response.as_bytes()).unwrap();
-                }
-            });
-            Self { port, requests }
-        }
-
-        fn requests(&self) -> Vec<String> {
-            self.requests.lock().unwrap().clone()
-        }
-
-        fn url(&self, path: &str) -> Url {
-            Url::parse(&format!("http://127.0.0.1:{}{path}", self.port)).unwrap()
-        }
-    }
-
-    fn reply(status: &str, extra: &str, body: &str) -> String {
-        format!(
-            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n{body}",
-            body.len()
-        )
+    /// A mock server (mockito) and the policy for it.
+    fn mock_server() -> (mockito::ServerGuard, Http, u16) {
+        let server = mockito::Server::new();
+        let port = crate::test_util::port_of(&server);
+        (server, Http::new(EndpointPolicy::local_test(port)), port)
     }
 
     const FEED: &str = "/api/arm/feeddiscovery/tenants/t1/webfeed";
@@ -343,51 +305,55 @@ mod tests {
 
     #[test]
     fn feed_request_carries_token_and_client_header() {
-        let server = Server::start(vec![reply("200 OK", "Content-Type: text/xml\r\n", "<x/>")]);
-        let http = Http::new(EndpointPolicy::local_test(server.port));
+        let (mut server, http, port) = mock_server();
+        // Answered only with both headers; exactly one request.
+        let feed = server
+            .mock("GET", FEED)
+            .match_header("authorization", "Bearer secret-token")
+            .match_header("x-ms-user-agent", X_MS_USER_AGENT)
+            .with_header("content-type", "text/xml")
+            .with_body("<x/>")
+            .expect(1)
+            .create();
         let resp = http
-            .get(&server.url(FEED), Role::Feed, Some(&token()))
+            .get(&local(port, FEED), Role::Feed, Some(&token()))
             .unwrap();
         assert_eq!(resp.body, b"<x/>");
-        let reqs = server.requests();
-        assert_eq!(reqs.len(), 1);
-        let req = reqs[0].to_ascii_lowercase();
-        assert!(req.contains("authorization: bearer secret-token"));
-        assert!(req.contains(&format!(
-            "x-ms-user-agent: {}",
-            X_MS_USER_AGENT.to_ascii_lowercase()
-        )));
+        feed.assert();
     }
 
     #[test]
     fn redirect_is_not_followed_and_token_does_not_leak() {
-        let other = Server::start(vec![reply("200 OK", "", "stolen")]);
-        let target = other.url(FEED);
-        let server = Server::start(vec![reply(
-            "302 Found",
-            &format!("Location: {target}\r\n"),
-            "",
-        )]);
-        let http = Http::new(EndpointPolicy::local_test(server.port));
+        let mut other = mockito::Server::new();
+        let stolen = never(&mut other);
+        let target = format!("{}{FEED}", other.url());
+        let (mut server, http, port) = mock_server();
+        let redirect = server
+            .mock("GET", FEED)
+            .with_status(302)
+            .with_header("location", &target)
+            .expect(1)
+            .create();
         let err = http
-            .get(&server.url(FEED), Role::Feed, Some(&token()))
+            .get(&local(port, FEED), Role::Feed, Some(&token()))
             .unwrap_err();
         assert!(
             matches!(err, HttpError::Redirected { status: 302 }),
             "{err:?}"
         );
-        assert_eq!(server.requests().len(), 1);
+        redirect.assert();
         thread::sleep(Duration::from_millis(100));
-        assert!(other.requests().is_empty(), "redirect target was contacted");
+        // The redirect target was never contacted.
+        stolen.iter().for_each(mockito::Mock::assert);
     }
 
     #[test]
     fn disallowed_url_makes_no_request() {
-        let server = Server::start(vec![reply("200 OK", "", "")]);
-        let http = Http::new(EndpointPolicy::local_test(server.port));
+        let (mut server, http, port) = mock_server();
+        let any = never(&mut server);
         for path in ["/somewhere/else", "/api/arm/feeddiscoveryx"] {
             let err = http
-                .get(&server.url(path), Role::Feed, Some(&token()))
+                .get(&local(port, path), Role::Feed, Some(&token()))
                 .unwrap_err();
             assert!(
                 matches!(err, HttpError::Endpoint(EndpointError::NotAllowed)),
@@ -395,11 +361,10 @@ mod tests {
             );
         }
         // Same host and path, but another port than the policy allows.
-        let other_port =
-            Url::parse(&format!("http://127.0.0.1:{}{FEED}", server.port + 1)).unwrap();
+        let other_port = local(port + 1, FEED);
         assert!(http.get(&other_port, Role::Feed, Some(&token())).is_err());
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(server.requests(), Vec::<String>::new());
+        any.iter().for_each(mockito::Mock::assert);
     }
 
     #[test]
@@ -519,7 +484,8 @@ mod tests {
     /// feed with a token).
     #[test]
     fn no_role_follows_redirects() {
-        let other = Server::start(vec![reply("200 OK", "", "never")]);
+        let mut other = mockito::Server::new();
+        let untouched = never(&mut other);
         let gets = [
             (Role::FeedDiscovery, "/api/arm/feeddiscovery", true),
             (
@@ -539,24 +505,32 @@ mod tests {
             ),
             (Role::SigningKeys, "/common/discovery/v2.0/keys", false),
         ];
-        let location = format!("Location: {}\r\n", other.url("/stolen"));
+        let location = format!("{}/stolen", other.url());
         for (role, path, with_token) in gets {
-            let server = Server::start(vec![reply("302 Found", &location, "")]);
-            let http = Http::new(EndpointPolicy::local_test(server.port));
+            let (mut server, http, port) = mock_server();
+            server
+                .mock("GET", path)
+                .with_status(302)
+                .with_header("location", &location)
+                .create();
             let token = token();
             let err = http
-                .get(&server.url(path), role, with_token.then_some(&token))
+                .get(&local(port, path), role, with_token.then_some(&token))
                 .unwrap_err();
             assert!(
                 matches!(err, HttpError::Redirected { status: 302 }),
                 "{role:?}: {err:?}"
             );
         }
-        let server = Server::start(vec![reply("307 Temporary Redirect", &location, "")]);
-        let http = Http::new(EndpointPolicy::local_test(server.port));
+        let (mut server, http, port) = mock_server();
+        server
+            .mock("POST", "/organizations/oauth2/v2.0/token")
+            .with_status(307)
+            .with_header("location", &location)
+            .create();
         let err = http
             .post_form(
-                &server.url("/organizations/oauth2/v2.0/token"),
+                &local(port, "/organizations/oauth2/v2.0/token"),
                 Role::Token,
                 &[("grant_type", "refresh_token")],
             )
@@ -565,18 +539,17 @@ mod tests {
             matches!(err, HttpError::Redirected { status: 307 }),
             "{err:?}"
         );
-        assert!(
-            other.requests().is_empty(),
-            "a redirect target was contacted"
-        );
+        // No redirect target was contacted.
+        untouched.iter().for_each(mockito::Mock::assert);
     }
 
     #[test]
     fn oversized_body_is_rejected() {
         let big = "x".repeat(usize::try_from(Role::ConnectionFile.max_body()).unwrap() + 1);
-        let server = Server::start(vec![reply("200 OK", "", &big)]);
-        let http = Http::new(EndpointPolicy::local_test(server.port));
-        let url = server.url("/api/arm/feeddiscovery/tenants/t1/rdps/r.rdp");
+        let (mut server, http, port) = mock_server();
+        let path = "/api/arm/feeddiscovery/tenants/t1/rdps/r.rdp";
+        server.mock("GET", path).with_body(&big).create();
+        let url = local(port, path);
         let err = http
             .get(&url, Role::ConnectionFile, Some(&token()))
             .unwrap_err();
@@ -585,13 +558,14 @@ mod tests {
 
     #[test]
     fn error_status_keeps_body_for_parsing() {
-        let server = Server::start(vec![reply(
-            "400 Bad Request",
-            "",
-            "{\"error\":\"invalid_grant\"}",
-        )]);
-        let http = Http::new(EndpointPolicy::local_test(server.port));
-        let url = server.url("/organizations/oauth2/v2.0/token");
+        let (mut server, http, port) = mock_server();
+        let path = "/organizations/oauth2/v2.0/token";
+        server
+            .mock("POST", path)
+            .with_status(400)
+            .with_body("{\"error\":\"invalid_grant\"}")
+            .create();
+        let url = local(port, path);
         let err = http
             .post_form(&url, Role::Token, &[("grant_type", "refresh_token")])
             .unwrap_err();
@@ -603,19 +577,24 @@ mod tests {
 
     #[test]
     fn token_request_has_no_bearer_or_feed_header() {
-        let server = Server::start(vec![reply("200 OK", "", "{}")]);
-        let http = Http::new(EndpointPolicy::local_test(server.port));
-        let url = server.url("/organizations/oauth2/v2.0/token");
+        let (mut server, http, port) = mock_server();
+        let path = "/organizations/oauth2/v2.0/token";
+        // Answered only without both headers and with exactly this body.
+        let token_endpoint = server
+            .mock("POST", path)
+            .match_header("authorization", mockito::Matcher::Missing)
+            .match_header("x-ms-user-agent", mockito::Matcher::Missing)
+            .match_body("grant_type=authorization_code&code=c")
+            .with_body("{}")
+            .expect(1)
+            .create();
         http.post_form(
-            &url,
+            &local(port, path),
             Role::Token,
             &[("grant_type", "authorization_code"), ("code", "c")],
         )
         .unwrap();
-        let req = server.requests()[0].to_ascii_lowercase();
-        assert!(!req.contains("authorization:"));
-        assert!(!req.contains("x-ms-user-agent"));
-        assert!(req.contains("grant_type=authorization_code&code=c"));
+        token_endpoint.assert();
     }
 
     #[test]

@@ -44,3 +44,14 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
     - loading through cosmic-config with a temporary settings folder: needs process-wide environment changes that race between parallel tests;
     - no test.
   - Chosen: `ron`.
+- **`mockito` 1.7, test-only (2026-10-20):** mock HTTP servers in the tests, replacing three hand-written fake servers.
+  - Options compared:
+
+    | | mockito 1.7.2 | wiremock 0.6.5 | httpmock 0.8.3 |
+    |---|---|---|---|
+    | usable from plain (non-async) tests | yes | no, async only | yes |
+    | new crates for our tests | 16 | 18 | 25 |
+
+    All three can set status, headers and bodies, answer redirects, and check headers and bodies.
+  - Chosen: mockito.
+  - One small raw server (`one_connection` in `http.rs`) stays, for what a mock server can't send: a compressed bomb, a server that stalls, an answer cut off halfway.

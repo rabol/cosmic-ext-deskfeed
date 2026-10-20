@@ -769,7 +769,7 @@ mod tests {
     use super::*;
     use crate::service::endpoint::EndpointPolicy;
     use crate::service::http::BearerToken;
-    use crate::test_util::serve_once;
+    use crate::test_util::token_server;
     use std::time::Duration;
     use url::Url;
 
@@ -907,7 +907,8 @@ mod tests {
     #[test]
     fn restore_without_rotation_saves_nothing() {
         let me = identity("00000000-0000-0000-0000-0000000000a1");
-        let (port, _) = serve_once("200 OK", OK_SAME);
+        let server = token_server("200 OK", OK_SAME);
+        let port = server.port;
         let store = FakeStore::default();
         match restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old")) {
             Restore::Ready(account, notice) => {
@@ -922,19 +923,21 @@ mod tests {
     #[test]
     fn restore_saves_a_rotated_token() {
         let me = identity("00000000-0000-0000-0000-0000000000a2");
-        let (port, sent) = serve_once("200 OK", OK_ROTATED);
+        let server = token_server("200 OK", OK_ROTATED);
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
         assert!(matches!(outcome, Restore::Ready(_, None)), "{outcome:?}");
         assert_eq!(store.tokens(), ["rt-new"]);
         // The renewal used the saved token.
-        assert!(sent.lock().unwrap().contains("refresh_token=rt-old"));
+        assert!(server.sent().contains("refresh_token=rt-old"));
     }
 
     #[test]
     fn restore_reports_when_the_rotated_token_cant_be_saved() {
         let me = identity("00000000-0000-0000-0000-0000000000a3");
-        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let server = token_server("200 OK", OK_ROTATED);
+        let port = server.port;
         let store = FakeStore {
             fail: true,
             ..FakeStore::default()
@@ -957,7 +960,8 @@ mod tests {
     #[test]
     fn invalid_saved_sign_in_is_deleted() {
         let me = identity("00000000-0000-0000-0000-0000000000a4");
-        let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
+        let server = token_server(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
         assert!(
@@ -970,7 +974,8 @@ mod tests {
     #[test]
     fn sign_in_frequency_is_explained() {
         let me = identity("00000000-0000-0000-0000-0000000000a5");
-        let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
+        let server = token_server(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
         assert!(
@@ -984,10 +989,11 @@ mod tests {
     fn interaction_required_keeps_the_saved_sign_in() {
         // An interactive sign-in will replace it; nothing is deleted.
         let me = identity("00000000-0000-0000-0000-0000000000a6");
-        let (port, _) = serve_once(
+        let server = token_server(
             BAD,
             r#"{"error":"interaction_required","error_codes":[50076]}"#,
         );
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
         assert!(matches!(outcome, Restore::SignInAgain(_)), "{outcome:?}");
@@ -1020,7 +1026,8 @@ mod tests {
         let started = sign_out_count(&account_id(&me));
         delete_in(&env(1, &store), &me).unwrap();
         // A server that would hand out a rotated token, if asked.
-        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let server = token_server("200 OK", OK_ROTATED);
+        let port = server.port;
         for force in [false, true] {
             let result = renew_at(
                 &http(port),
@@ -1144,7 +1151,8 @@ mod tests {
     #[test]
     fn network_trouble_offers_retry_and_keeps_the_saved_sign_in() {
         let me = identity("00000000-0000-0000-0000-0000000000a7");
-        let (port, _) = serve_once("503 Service Unavailable", "busy");
+        let server = token_server("503 Service Unavailable", "busy");
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
         assert!(
@@ -1160,10 +1168,11 @@ mod tests {
         // can't be fetched (here the test server answers only the token
         // request), retry later.
         let me = identity("00000000-0000-0000-0000-0000000000a8");
-        let (port, _) = serve_once(
+        let server = token_server(
             "200 OK",
             r#"{"access_token":"a","token_type":"Bearer","refresh_token":"rt-old","id_token":"x.y.z"}"#,
         );
+        let port = server.port;
         let store = FakeStore::default();
         let outcome = restore_in(&http(port), &env(port, &store), &stored(&me, "rt-old"));
         assert!(matches!(outcome, Restore::Retry(_)), "{outcome:?}");
@@ -1184,7 +1193,8 @@ mod tests {
         // The monotonic clock says an hour is left, but the computer slept
         // through it: the wall clock says it has expired.
         let me = identity("00000000-0000-0000-0000-0000000000b7");
-        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let server = token_server("200 OK", OK_ROTATED);
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let mut account =
             Arc::into_inner(signed_in(&me, Some("rt-old"), Duration::from_secs(3600))).unwrap();
@@ -1196,7 +1206,8 @@ mod tests {
     #[test]
     fn forced_renewal_renews_a_fresh_looking_token() {
         let me = identity("00000000-0000-0000-0000-0000000000b8");
-        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let server = token_server("200 OK", OK_ROTATED);
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let account = signed_in(&me, Some("rt-old"), Duration::from_secs(3600));
         let renewed = renew_in(&http(port), &env(port, &store), account, true).unwrap();
@@ -1206,7 +1217,8 @@ mod tests {
     #[test]
     fn renewal_saves_a_rotated_token() {
         let me = identity("00000000-0000-0000-0000-0000000000b2");
-        let (port, _) = serve_once("200 OK", OK_ROTATED);
+        let server = token_server("200 OK", OK_ROTATED);
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
         let renewed = renew_in(&http(port), &env(port, &store), account, false).unwrap();
@@ -1218,19 +1230,22 @@ mod tests {
     fn renewal_failures_are_explained() {
         let me = identity("00000000-0000-0000-0000-0000000000b3");
         let store = FakeStore::default();
-        let (port, _) = serve_once("503 Service Unavailable", "busy");
+        let server = token_server("503 Service Unavailable", "busy");
+        let port = server.port;
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
             renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
             RenewError::Retry(fl!("error-generic"))
         );
-        let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
+        let server = token_server(BAD, r#"{"error":"invalid_grant","error_codes":[70008]}"#);
+        let port = server.port;
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
             renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
             RenewError::SignInAgain(fl!("error-session-expired"))
         );
-        let (port, _) = serve_once(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
+        let server = token_server(BAD, r#"{"error":"invalid_grant","error_codes":[70043]}"#);
+        let port = server.port;
         let account = signed_in(&me, Some("rt"), Duration::ZERO);
         assert_eq!(
             renew_in(&http(port), &env(port, &store), account, false).unwrap_err(),
@@ -1248,21 +1263,16 @@ mod tests {
     fn a_second_renewal_reuses_the_first_ones_result() {
         // Two connections start with the same expired copy. The first
         // renews (and rotates the refresh token); the second must not send
-        // the old refresh token again. The test server answers only once.
+        // the old refresh token again: only one renewal request is sent.
         let me = identity("00000000-0000-0000-0000-0000000000b5");
-        let (port, sent) = serve_once("200 OK", OK_ROTATED);
+        let server = token_server("200 OK", OK_ROTATED);
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let copy = signed_in(&me, Some("rt-old"), Duration::ZERO);
         let first = renew_in(&http(port), &env(port, &store), copy.clone(), false).unwrap();
         let second = renew_in(&http(port), &env(port, &store), copy, false).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
-        assert_eq!(
-            sent.lock()
-                .unwrap()
-                .matches("grant_type=refresh_token")
-                .count(),
-            1
-        );
+        assert_eq!(server.sent().matches("grant_type=refresh_token").count(), 1);
         assert_eq!(store.tokens(), ["rt-new"]);
     }
 
@@ -1291,10 +1301,11 @@ mod tests {
         // server answers only the token request), so the renewal is
         // retried later and nothing is saved.
         let me = identity("00000000-0000-0000-0000-0000000000b4");
-        let (port, _) = serve_once(
+        let server = token_server(
             "200 OK",
             r#"{"access_token":"a","token_type":"Bearer","refresh_token":"rt-new","id_token":"x.y.z"}"#,
         );
+        let port = server.port;
         let store = FakeStore::with(&me, "rt-old");
         let account = signed_in(&me, Some("rt-old"), Duration::ZERO);
         assert!(matches!(

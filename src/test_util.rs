@@ -2,43 +2,63 @@
 
 //! Helpers shared by tests (compiled only for `cargo test`).
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 
-/// A local HTTP server that answers one request with `status` and a JSON
-/// `body`. Returns its port and the request body it received.
-pub fn serve_once(status: &str, body: &str) -> (u16, Arc<Mutex<String>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let seen = Arc::new(Mutex::new(String::new()));
-    let seen2 = seen.clone();
-    let (status, body) = (status.to_owned(), body.to_owned());
-    std::thread::spawn(move || {
-        let (mut s, _) = listener.accept().unwrap();
-        let mut r = BufReader::new(s.try_clone().unwrap());
-        let mut len = 0;
-        loop {
-            let mut line = String::new();
-            r.read_line(&mut line).unwrap();
-            if line == "\r\n" {
-                break;
-            }
-            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                len = v.trim().parse().unwrap();
-            }
-        }
-        let mut b = vec![0; len];
-        r.read_exact(&mut b).unwrap();
-        *seen2.lock().unwrap() = String::from_utf8(b).unwrap();
-        write!(
-            s,
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
+/// A mock Microsoft token endpoint (mockito): answers every
+/// `POST …/oauth2/v2.0/token` with `status` (for example "400 Bad
+/// Request") and the JSON `body`, and keeps the request bodies it got.
+/// Any other request (the signing keys, for example) gets mockito's 501.
+pub struct TokenServer {
+    _server: mockito::ServerGuard,
+    pub port: u16,
+    sent: Arc<Mutex<Vec<String>>>,
+}
+
+impl TokenServer {
+    /// Every request body received, in order, one per line.
+    pub fn sent(&self) -> String {
+        self.sent.lock().unwrap().join("\n")
+    }
+}
+
+/// The port a mockito server listens on (it binds 127.0.0.1).
+pub fn port_of(server: &mockito::ServerGuard) -> u16 {
+    server
+        .host_with_port()
+        .rsplit_once(':')
+        .and_then(|(_, p)| p.parse().ok())
+        .expect("mockito listens on host:port")
+}
+
+pub fn token_server(status: &str, body: &str) -> TokenServer {
+    let mut server = mockito::Server::new();
+    let port = port_of(&server);
+    let code: usize = status
+        .split_whitespace()
+        .next()
+        .and_then(|c| c.parse().ok())
+        .expect("a status like \"200 OK\"");
+    let sent = Arc::new(Mutex::new(Vec::new()));
+    let (seen, body) = (sent.clone(), body.to_owned());
+    server
+        .mock(
+            "POST",
+            mockito::Matcher::Regex(r"/oauth2/v2\.0/token$".into()),
         )
-        .unwrap();
-    });
-    (port, seen)
+        .with_status(code)
+        .with_header("content-type", "application/json")
+        .with_body_from_request(move |request| {
+            let text = request.utf8_lossy_body().unwrap_or_default().into_owned();
+            seen.lock().unwrap().push(text);
+            body.clone().into_bytes()
+        })
+        .create();
+    TokenServer {
+        _server: server,
+        port,
+        sent,
+    }
 }
 
 /// Random-input testing (ADR 0023), shared with the sign-in helper.

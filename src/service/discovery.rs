@@ -83,57 +83,45 @@ pub fn discover(
 mod tests {
     use super::*;
     use crate::service::endpoint::EndpointPolicy;
-    use std::collections::HashMap;
-    use std::io::{BufRead, BufReader, Write};
-    use std::net::TcpListener;
 
-    /// Answers `count` requests with fixed bodies by path; 404 otherwise.
-    fn serve(listener: TcpListener, routes: HashMap<String, (u16, String)>, count: usize) {
-        std::thread::spawn(move || {
-            for stream in listener.incoming().take(count) {
-                let mut s = stream.unwrap();
-                let mut r = BufReader::new(s.try_clone().unwrap());
-                let mut first = String::new();
-                r.read_line(&mut first).unwrap();
-                loop {
-                    let mut l = String::new();
-                    r.read_line(&mut l).unwrap();
-                    if l == "\r\n" {
-                        break;
-                    }
-                }
-                let path = first.split(' ').nth(1).unwrap().split('?').next().unwrap();
-                let (status, body) = routes.get(path).cloned().unwrap_or((404, String::new()));
-                write!(
-                    s,
-                    "HTTP/1.1 {status} X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                )
-                .unwrap();
-            }
-        });
+    /// A mock server (mockito), its port, and the policy for it.
+    fn mock_server() -> (mockito::ServerGuard, u16, Http) {
+        let server = mockito::Server::new();
+        let port = crate::test_util::port_of(&server);
+        (server, port, Http::new(EndpointPolicy::local_test(port)))
     }
 
-    fn bind() -> (TcpListener, u16) {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = l.local_addr().unwrap().port();
-        (l, port)
+    /// Answers GETs of `path` (any query) with `status` and `body`.
+    fn route(
+        server: &mut mockito::ServerGuard,
+        path: &str,
+        status: usize,
+        body: &str,
+    ) -> mockito::Mock {
+        server
+            .mock("GET", path)
+            .match_query(mockito::Matcher::Any)
+            .with_status(status)
+            .with_body(body)
+            .create()
     }
 
     #[test]
     fn stops_requesting_once_no_longer_wanted() {
-        let (listener, port) = bind();
+        let (mut server, port, http) = mock_server();
         let base = format!("http://127.0.0.1:{port}/api/arm/feeddiscovery/tenants");
         let discovery = format!(
             r#"<TenantFeedURLs xmlns="http://schemas.microsoft.com/ts/2014/03/tswfdiscovery">
                  <TenantFeedURL FeedURL="{base}/t1/webfeed" TenantId="t1"/>
                </TenantFeedURLs>"#
         );
-        let routes = HashMap::from([("/api/arm/feeddiscovery".to_owned(), (200, discovery))]);
-        // Answers only the discovery request: a feed request after it
-        // would fail to connect, not end as Cancelled.
-        serve(listener, routes, 1);
-        let http = Http::new(EndpointPolicy::local_test(port));
+        route(&mut server, "/api/arm/feeddiscovery", 200, &discovery);
+        // The feed must not be asked for once it's no longer wanted.
+        let feed = server
+            .mock("GET", "/api/arm/feeddiscovery/tenants/t1/webfeed")
+            .match_query(mockito::Matcher::Any)
+            .expect(0)
+            .create();
         let asked = std::cell::Cell::new(0);
         let wanted = || {
             asked.set(asked.get() + 1);
@@ -142,11 +130,12 @@ mod tests {
         let result = discover(&http, &BearerToken::new("t".into()), &wanted);
         assert!(matches!(result, Err(FetchError::Cancelled)), "{result:?}");
         assert_eq!(asked.get(), 2);
+        feed.assert();
     }
 
     #[test]
     fn partial_failure_keeps_good_feeds() {
-        let (listener, port) = bind();
+        let (mut server, port, http) = mock_server();
         let base = format!("http://127.0.0.1:{port}/api/arm/feeddiscovery/tenants");
         let discovery = format!(
             r#"<TenantFeedURLs xmlns="http://schemas.microsoft.com/ts/2014/03/tswfdiscovery">
@@ -157,22 +146,24 @@ mod tests {
         let good = r#"<ResourceCollection xmlns="http://schemas.microsoft.com/ts/2007/05/tswf">
               <Publisher Name="Good" ID="p"><Resources><Resource ID="r1" Title="Desk" Type="Desktop"/></Resources></Publisher>
             </ResourceCollection>"#;
-        let routes = HashMap::from([
-            (
-                "/api/arm/feeddiscovery".to_owned(),
-                (200, format!("\u{feff}{discovery}")),
-            ),
-            (
-                "/api/arm/feeddiscovery/tenants/t1/webfeed".to_owned(),
-                (200, good.to_owned()),
-            ),
-            (
-                "/api/arm/feeddiscovery/tenants/t2/webfeed".to_owned(),
-                (500, String::new()),
-            ),
-        ]);
-        serve(listener, routes, 3);
-        let http = Http::new(EndpointPolicy::local_test(port));
+        route(
+            &mut server,
+            "/api/arm/feeddiscovery",
+            200,
+            &format!("\u{feff}{discovery}"),
+        );
+        route(
+            &mut server,
+            "/api/arm/feeddiscovery/tenants/t1/webfeed",
+            200,
+            good,
+        );
+        route(
+            &mut server,
+            "/api/arm/feeddiscovery/tenants/t2/webfeed",
+            500,
+            "",
+        );
         let feeds = discover(&http, &BearerToken::new("t".into()), &|| true).unwrap();
         assert_eq!(feeds.len(), 2);
         assert_eq!(feeds[0].result.as_ref().unwrap().resources[0].title, "Desk");
@@ -185,13 +176,8 @@ mod tests {
 
     #[test]
     fn discovery_failure_is_an_error() {
-        let (listener, port) = bind();
-        serve(
-            listener,
-            HashMap::from([("/api/arm/feeddiscovery".to_owned(), (401, String::new()))]),
-            1,
-        );
-        let http = Http::new(EndpointPolicy::local_test(port));
+        let (mut server, _, http) = mock_server();
+        route(&mut server, "/api/arm/feeddiscovery", 401, "");
         let err = discover(&http, &BearerToken::new("t".into()), &|| true).unwrap_err();
         assert!(matches!(
             err,
@@ -201,19 +187,11 @@ mod tests {
 
     #[test]
     fn feed_urls_outside_policy_are_not_fetched() {
-        let (listener, port) = bind();
+        let (mut server, _, http) = mock_server();
         let discovery = r#"<TenantFeedURLs xmlns="http://schemas.microsoft.com/ts/2014/03/tswfdiscovery">
                  <TenantFeedURL FeedURL="https://evil.example/api/arm/feeddiscovery/tenants/t1/webfeed" TenantId="t1"/>
                </TenantFeedURLs>"#;
-        serve(
-            listener,
-            HashMap::from([(
-                "/api/arm/feeddiscovery".to_owned(),
-                (200, discovery.to_owned()),
-            )]),
-            1,
-        );
-        let http = Http::new(EndpointPolicy::local_test(port));
+        route(&mut server, "/api/arm/feeddiscovery", 200, discovery);
         let feeds = discover(&http, &BearerToken::new("t".into()), &|| true).unwrap();
         assert!(matches!(
             feeds[0].result,

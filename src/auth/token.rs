@@ -266,11 +266,7 @@ mod description_tests {
 mod tests {
     use super::*;
     use crate::service::endpoint::EndpointPolicy;
-    use std::sync::{Arc, Mutex};
-
-    fn serve(status: &str, body: &str) -> (u16, Arc<Mutex<String>>) {
-        crate::test_util::serve_once(status, body)
-    }
+    use crate::test_util::token_server;
 
     fn config(port: u16) -> ClientConfig {
         let mut c = ClientConfig::public_remote_desktop();
@@ -288,16 +284,17 @@ mod tests {
 
     #[test]
     fn exchange_sends_pkce_and_parses_tokens() {
-        let (port, seen) = serve(
+        let server = token_server(
             "200 OK",
             r#"{"token_type":"Bearer","expires_in":3599,"access_token":"AT","refresh_token":"RT","id_token":"ID"}"#,
         );
+        let port = server.port;
         let http = Http::new(EndpointPolicy::local_test(port));
         let tokens = exchange_code(&http, &config(port), &code()).unwrap();
         assert_eq!(tokens.refresh_token.as_ref().unwrap().expose(), "RT");
         assert_eq!(tokens.id_token.as_deref(), Some("ID"));
         assert!(!tokens.needs_refresh(Instant::now()));
-        let body = seen.lock().unwrap().clone();
+        let body = server.sent();
         for part in [
             "grant_type=authorization_code",
             "code=the-code",
@@ -312,10 +309,11 @@ mod tests {
 
     #[test]
     fn refresh_keeps_old_token_when_not_rotated() {
-        let (port, _) = serve(
+        let server = token_server(
             "200 OK",
             r#"{"token_type":"Bearer","expires_in":3599,"access_token":"AT2"}"#,
         );
+        let port = server.port;
         let http = Http::new(EndpointPolicy::local_test(port));
         let old = Secret::new("RT-old".into());
         let tokens = refresh(&http, &config(port), &old).unwrap();
@@ -360,7 +358,8 @@ mod tests {
             ),
         ];
         for (status, body, want) in cases {
-            let (port, _) = serve(status, body);
+            let server = token_server(status, body);
+            let port = server.port;
             let http = Http::new(EndpointPolicy::local_test(port));
             let got = refresh(&http, &config(port), &Secret::new("x".into())).unwrap_err();
             assert_eq!(got, want, "{body}");
@@ -374,7 +373,8 @@ mod tests {
             r#"{"access_token":"","token_type":"Bearer"}"#,
             r#"{"access_token":"x","token_type":"pop"}"#,
         ] {
-            let (port, _) = serve("200 OK", body);
+            let server = token_server("200 OK", body);
+            let port = server.port;
             let http = Http::new(EndpointPolicy::local_test(port));
             assert_eq!(
                 exchange_code(&http, &config(port), &code()).unwrap_err(),
