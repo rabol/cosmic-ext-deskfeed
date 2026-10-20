@@ -15,9 +15,8 @@
 //!
 //! Blocking; call from `spawn_blocking`.
 
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -106,20 +105,17 @@ impl Store {
             return Err("list too large to keep offline".into());
         }
         crate::files::private_dir(&dir).map_err(|e| e.kind().to_string())?;
-        let tmp = dir.join(format!(".{FILE}.{}", std::process::id()));
+        // A uniquely named temporary file (0600), renamed over the list; on
+        // any error it is removed when dropped.
         let result = (|| {
-            let mut f = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&tmp)?;
-            f.write_all(&text)?;
-            f.sync_all()?;
-            fs::rename(&tmp, dir.join(FILE))
+            let mut tmp = tempfile::Builder::new()
+                .prefix(&format!(".{FILE}."))
+                .tempfile_in(&dir)?;
+            tmp.write_all(&text)?;
+            tmp.as_file().sync_all()?;
+            tmp.persist(dir.join(FILE)).map_err(|e| e.error)?;
+            Ok::<_, std::io::Error>(())
         })();
-        if result.is_err() {
-            let _ = fs::remove_file(&tmp);
-        }
         result.map_err(|e| e.kind().to_string())
     }
 
@@ -268,6 +264,31 @@ mod tests {
             fs::write(st.dir("ab12").unwrap().join(FILE), b"{not json").unwrap();
             assert!(st.load("ab12", DAY).is_none());
             assert!(!st.dir("ab12").unwrap().join(FILE).exists());
+        });
+    }
+
+    #[test]
+    fn a_leftover_temporary_file_or_a_second_save_does_not_block_saving() {
+        with_store(|st| {
+            // A temporary file a crashed run left behind, under any name
+            // this process might pick.
+            let d = st.dir("ab12").unwrap();
+            crate::files::private_dir(&d).unwrap();
+            fs::write(d.join(format!(".{FILE}.{}", std::process::id())), "x").unwrap();
+            st.save("ab12", &sample()).unwrap();
+            assert_eq!(st.load("ab12", DAY).unwrap().workspaces, sample());
+            // Saves at the same time all succeed, and no temporary file
+            // of theirs is left.
+            std::thread::scope(|scope| {
+                let saves: Vec<_> = (0..8)
+                    .map(|_| scope.spawn(|| st.save("ab12", &sample())))
+                    .collect();
+                for save in saves {
+                    save.join().unwrap().unwrap();
+                }
+            });
+            let left = fs::read_dir(&d).unwrap().count();
+            assert_eq!(left, 2, "the list and the crashed run's file");
         });
     }
 

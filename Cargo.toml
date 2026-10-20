@@ -25,6 +25,9 @@ roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.3"
+# Temporary files: the offline list's atomic save, and folders in tests
+# (ADR 0003); already shipped through cosmic-config.
+tempfile = "3"
 # Local time for labels (ADR 0003); already in the tree through libcosmic,
 # which turns on the same features.
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
@@ -61,9 +64,6 @@ ron = "0.12"
 # A mock HTTP server for tests (ADR 0003: compared with wiremock and
 # httpmock); tests only.
 mockito = "1"
-# Temporary folders for tests, removed even when a test fails (ADR 0003);
-# already in the tree through cosmic-config.
-tempfile = "3"
 
 [build-dependencies]
 xdgen = "0.1"

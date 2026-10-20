@@ -61,6 +61,7 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
     - `temp-dir` or `testdir`: smaller, but new crates for the same job;
     - our own guard type in `testkit`: about 20 lines that `tempfile` already does, including unique names.
   - Chosen: `tempfile`, in the app and the sign-in helper.
+  - Since 2026-10-20 also in the app itself, for the offline list's atomic save: a unique temporary file instead of one named after the process ID, which a crashed run's leftover or a second save at the same time made fail. Nothing new ships: cosmic-config already brings it. The helper's cookie jar keeps its own: one process, one save, and `tempfile` would be new in the helper.
 - **`jiff` 0.2 (2026-10-20):** local time for the labels in the window and the report, and the log's UTC timestamps.
   - Options compared:
     - `jiff`: already built into the app through libcosmic (its calendar), with the system time zone on, so nothing new; reads `TZ`, else `/etc/localtime`, like the C library;
