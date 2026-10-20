@@ -643,6 +643,7 @@ impl AppModel {
             | Message::Disconnect(..)
             | Message::WorkspaceMoved(..)
             | Message::QuitRequested
+            | Message::QuitChosen
             | Message::QuitToBackground
             | Message::QuitConfirm
             | Message::QuitCancel
@@ -662,7 +663,24 @@ impl AppModel {
             | Message::AccountNumber(..)
             | Message::DesktopToggle(..)
             | Message::DesktopNumber(..) => self.settings_message(message),
-            other => self.app_message(other),
+            // Listed, not a catch-all: a new message that isn't routed is a
+            // compile error, not a silent no-op (QuitChosen, 2026-10-20).
+            Message::Awake(..)
+            | Message::CheckDependencies
+            | Message::DependenciesChecked(..)
+            | Message::DiagnosticsReady(..)
+            | Message::DiagnosticsSaved(..)
+            | Message::DismissNotice
+            | Message::LaunchUrl(..)
+            | Message::OpenDiagnostics
+            | Message::OpenLogFolder
+            | Message::SaveDiagnostics
+            | Message::SearchInput(..)
+            | Message::StartedAgain(..)
+            | Message::ToggleContextPage(..)
+            | Message::ToggleFavorite(..)
+            | Message::Tray(..)
+            | Message::UpdateConfig(..) => self.app_message(message),
         }
     }
 
