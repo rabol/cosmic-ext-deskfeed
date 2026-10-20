@@ -14,8 +14,7 @@
 
 use url::Url;
 
-/// The account's user name, for `login_hint`.
-pub const LOGIN_HINT_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_LOGIN_HINT";
+pub use common::helper::LOGIN_HINT_ENV;
 
 const MAX_HINT: usize = 256;
 

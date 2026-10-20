@@ -118,7 +118,7 @@ pub(super) fn spawn_freerdp(
     if let Some(file) = proxy_file {
         cmd.env(PROXY_FILE_ENV, file);
     }
-    cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_PROFILE", profile);
+    cmd.env(helper::PROFILE_ENV, profile);
     // The account's user name for Microsoft's page (ADR 0026). Plain
     // text only: a NUL would stop the launch.
     if let Some(name) = login_hint.filter(|n| !n.is_empty() && !n.chars().any(char::is_control)) {
@@ -127,7 +127,7 @@ pub(super) fn spawn_freerdp(
     // The sign-in window's title in the user's language; the helper has no
     // translations of its own (signin/src/freerdp.rs, `TITLE_ENV`).
     cmd.env(
-        "COSMIC_EXT_DESKFEED_SIGNIN_TITLE",
+        helper::TITLE_ENV,
         safe_title(&crate::fl!("sign-in-window-title")),
     );
     // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it

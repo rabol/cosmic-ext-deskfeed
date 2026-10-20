@@ -22,9 +22,7 @@ use serde_json::{Value, json};
 use crate::protocol::{self, RedirectTarget, Reply};
 use crate::view::{self, Show, SignInView};
 
-const PROFILE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_PROFILE";
-/// The window title in the user's language, set by the app for FreeRDP.
-const TITLE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_TITLE";
+use common::helper::{PROFILE_ENV, TITLE_ENV};
 
 /// The title from `TITLE_ENV`: one line, printable, bounded; English
 /// without it.

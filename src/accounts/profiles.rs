@@ -8,9 +8,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 
-/// Folder of the RAM cookie folders; shared with the helper
-/// (`signin/src/session_jar.rs`).
-const JAR_DIR: &str = "cosmic-ext-deskfeed-web";
+use common::helper::JAR_DIR;
 
 fn profiles_root() -> Option<PathBuf> {
     Some(dirs::data_dir()?.join("cosmic-ext-deskfeed").join("signin"))

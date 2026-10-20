@@ -13,7 +13,7 @@ use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use common::helper::{Reply, Request};
 use url::Url;
 
 use super::attempt::{Attempt, CallbackError, ClientConfig};
@@ -185,25 +185,6 @@ pub fn find_helper() -> Option<PathBuf> {
     .find(|p| crate::sessions::launcher::is_executable(p))
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-enum Reply {
-    Ok {
-        code: String,
-        state: String,
-    },
-    Error {
-        error: String,
-        error_codes: Option<String>,
-        state: Option<String>,
-    },
-    Cancelled,
-    Timeout,
-    Failed {
-        reason: String,
-    },
-}
-
 /// Runs an interactive sign-in. `profile` is the account's private web
 /// view directory. `login_hint` pre-selects a known account.
 pub fn sign_in(
@@ -288,12 +269,16 @@ fn run_helper(
         });
     }
 
-    let request = serde_json::json!({
-        "url": url.as_str(),
-        "title": crate::fl!("sign-in-window-title"),
-        "timeout_ms": u64::try_from(time.as_millis()).unwrap_or(u64::MAX),
-    });
-    let wrote = writeln!(stdin, "{request}").and_then(|()| stdin.flush());
+    let request = Request {
+        url: url.to_string(),
+        title: crate::fl!("sign-in-window-title"),
+        silent_first: false,
+        timeout_ms: u64::try_from(time.as_millis()).unwrap_or(u64::MAX),
+    };
+    let wrote = serde_json::to_string(&request)
+        .map_err(std::io::Error::other)
+        .and_then(|line| writeln!(stdin, "{line}"))
+        .and_then(|()| stdin.flush());
     {
         // Hand stdin to the canceller; if already cancelled, drop it now.
         let mut state = cancel.state();
@@ -379,6 +364,7 @@ fn callback_url(config: &ClientConfig, reply: &Reply) -> Result<Url, SignInError
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::service::endpoint::EndpointPolicy;
     use std::os::unix::fs::PermissionsExt;

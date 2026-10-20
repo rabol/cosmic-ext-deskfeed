@@ -7,7 +7,7 @@
 //! stdin and reads one JSON [`Reply`] line from its stdout. Closing stdin
 //! cancels the sign-in. Both are private pipes created by the app.
 
-use serde::{Deserialize, Serialize};
+pub use common::helper::{Reply, Request};
 use url::Url;
 
 /// The sign-in must start here (spec §6).
@@ -18,23 +18,6 @@ const MAX_REQUEST_LEN: usize = 16 * 1024;
 /// (`MAX_CALLBACK_LEN` in `auth/attempt.rs`). Real ones are a few KiB.
 const MAX_REDIRECT_LEN: usize = 16 * 1024;
 const MAX_TIMEOUT_MS: u64 = 15 * 60 * 1000;
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Request {
-    /// The authorize URL to open.
-    pub url: String,
-    /// Window title.
-    #[serde(default)]
-    pub title: String,
-    /// `true`: show the window only if the user has to do something
-    /// (silent renewal with existing cookies). `false`: show at once.
-    #[serde(default)]
-    pub silent_first: bool,
-    /// 0 means the default (5 minutes).
-    #[serde(default)]
-    pub timeout_ms: u64,
-}
 
 #[derive(Debug)]
 pub struct ValidRequest {
@@ -229,34 +212,6 @@ fn is_native_client(url: &Url) -> bool {
     )
 }
 
-/// The single line the helper writes to stdout.
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum Reply {
-    /// Only `code` and `state` are passed on (spec §6). The app checks
-    /// `state`.
-    Ok {
-        code: String,
-        state: String,
-    },
-    /// The identity provider returned an error. Only short codes.
-    Error {
-        error: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error_codes: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        state: Option<String>,
-    },
-    /// The user closed the window, or the app closed the pipe.
-    Cancelled,
-    Timeout,
-    /// The request was refused or the page could not load (for example a
-    /// TLS error).
-    Failed {
-        reason: String,
-    },
-}
-
 fn reply_from_redirect(url: &Url) -> Reply {
     // The app refuses longer callbacks too (`auth/attempt.rs`); refusing
     // here keeps an oversized one from being copied around at all.
@@ -348,6 +303,16 @@ mod silent_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The request line as the app writes it (`src/auth/signin.rs`).
+    #[test]
+    fn the_apps_request_line_is_accepted() {
+        let line = r#"{"url":"https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?x=1","title":"Sign in","timeout_ms":300000}"#;
+        let req = parse_request(line).unwrap();
+        assert_eq!(req.title, "Sign in");
+        assert_eq!(req.timeout_ms, 300_000);
+        assert!(!req.silent_first);
+    }
 
     const NATIVE_CLIENT: &str = "https://login.microsoftonline.com/common/oauth2/nativeclient";
 

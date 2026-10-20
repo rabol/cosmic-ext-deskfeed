@@ -67,7 +67,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
     - the clipboard as a `u32` with a constants module instead of an enum;
     - a doc comment (line 37) naming a `ClipboardMode` type that doesn't exist ✓ checked.
   - Effort M, risk med (the saved format must stay the same).
-- [ ] **The helper/app protocol is defined twice.**
+- [x] **The helper/app protocol is defined twice.** (Done 2026-10-20: `common::helper` holds `Request`, `Reply`, `ProxyFile`, the four environment-variable names and `JAR_DIR`; the app writes its request and proxy file from the types instead of `json!`. The wrong-account marker went with the `client_info` check.)
   - `Reply` is in both `src/auth/signin.rs:148-165` and `signin/src/protocol.rs`.
   - The request is ad-hoc `json!` in the app, but typed in the helper.
   - Environment-variable names and `JAR_DIR` are duplicated (`PROXY_FILE_ENV`, `…_SIGNIN_PROFILE`, `…_SIGNIN_TITLE` as literals).

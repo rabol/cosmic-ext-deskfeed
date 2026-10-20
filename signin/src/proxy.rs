@@ -9,7 +9,7 @@
 
 use std::io::Read as _;
 
-pub const PROXY_FILE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_PROXY_FILE";
+use common::helper::{PROXY_FILE_ENV, ProxyFile};
 const MAX_FILE: u64 = 8 * 1024;
 const MAX_URI: usize = 2048;
 const MAX_IGNORED: usize = 64;
@@ -19,13 +19,6 @@ pub struct Proxy {
     pub uri: String,
     /// Hosts that bypass it (`no_proxy`).
     pub ignore_hosts: Vec<String>,
-}
-
-#[derive(serde::Deserialize)]
-struct File {
-    uri: String,
-    #[serde(default)]
-    no_proxy: Option<String>,
 }
 
 /// The proxy to use: `Ok(None)` without the variable. An `Err` when the
@@ -43,7 +36,7 @@ pub fn from_env() -> Result<Option<Proxy>, ()> {
 }
 
 pub fn parse(text: &str) -> Result<Proxy, ()> {
-    let file: File = serde_json::from_str(text).map_err(|_| ())?;
+    let file: ProxyFile = serde_json::from_str(text).map_err(|_| ())?;
     let printable = |s: &str| !s.chars().any(char::is_control);
     if file.uri.is_empty() || file.uri.len() > MAX_URI || !printable(&file.uri) {
         return Err(());

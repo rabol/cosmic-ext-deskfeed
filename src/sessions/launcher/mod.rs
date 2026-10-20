@@ -23,6 +23,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use common::helper::{self, LOGIN_HINT_ENV, PROXY_FILE_ENV};
+
 use serde::{Deserialize, Serialize};
 
 use super::rdpfile::ConnectionFile;
