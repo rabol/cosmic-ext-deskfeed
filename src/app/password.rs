@@ -121,12 +121,7 @@ impl AppModel {
         if !changed {
             return;
         }
-        match &self.config_handler {
-            Some(handler) => {
-                let _ = self.config.set_saved_passwords(handler, keys);
-            }
-            None => self.config.saved_passwords = keys,
-        }
+        save_config!(self, saved_passwords, set_saved_passwords, keys);
     }
 
     /// Deletes a desktop's remembered password from the keyring, in the
@@ -199,8 +194,6 @@ impl AppModel {
         }
         let mut map = self.config.logon_settings.clone();
         map.insert(key.to_owned(), logon);
-        if let Some(handler) = &self.config_handler {
-            let _ = self.config.set_logon_settings(handler, map);
-        }
+        save_config!(self, logon_settings, set_logon_settings, map);
     }
 }

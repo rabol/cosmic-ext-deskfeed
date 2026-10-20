@@ -8,12 +8,7 @@ use super::*;
 
 impl AppModel {
     pub(super) fn save_certificate_pins(&mut self, pins: BTreeMap<String, String>) {
-        match &self.config_handler {
-            Some(handler) => {
-                let _ = self.config.set_certificate_pins(handler, pins);
-            }
-            None => self.config.certificate_pins = pins,
-        }
+        save_config!(self, certificate_pins, set_certificate_pins, pins);
     }
 }
 

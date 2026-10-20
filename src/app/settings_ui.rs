@@ -62,21 +62,11 @@ impl AppModel {
             }
             SettingsMessage::AppTheme(i) => {
                 let value = u32::try_from(i).unwrap_or(0).min(2);
-                match &self.config_handler {
-                    Some(handler) => {
-                        let _ = self.config.set_app_theme(handler, Some(value));
-                    }
-                    None => self.config.app_theme = Some(value),
-                }
+                save_config!(self, app_theme, set_app_theme, Some(value));
                 return apply_theme(value);
             }
             SettingsMessage::AppBackground(on) => {
-                match &self.config_handler {
-                    Some(handler) => {
-                        let _ = self.config.set_background(handler, on);
-                    }
-                    None => self.config.background = on,
-                }
+                save_config!(self, background, set_background, on);
                 if !on {
                     // Back to closing ends the app; the tray goes with the
                     // subscription.
@@ -95,12 +85,7 @@ impl AppModel {
                 let (min, max, _) = crate::log::MAX_SIZE_MIB;
                 let mib = mib.clamp(min, max);
                 crate::log::set_max_size_mib(mib);
-                match &self.config_handler {
-                    Some(handler) => {
-                        let _ = self.config.set_log_max_mib(handler, Some(mib));
-                    }
-                    None => self.config.log_max_mib = Some(mib),
-                }
+                save_config!(self, log_max_mib, set_log_max_mib, Some(mib));
             }
             SettingsMessage::AccountToggle(id, t, choice) => {
                 self.edit_settings(Level::Account, &id, |s| {
@@ -133,12 +118,7 @@ impl AppModel {
         if let Level::App = level {
             let mut app = self.config.app_settings.clone();
             f(&mut app);
-            match &self.config_handler {
-                Some(handler) => {
-                    let _ = self.config.set_app_settings(handler, app);
-                }
-                None => self.config.app_settings = app,
-            }
+            save_config!(self, app_settings, set_app_settings, app);
             return;
         }
         let mut map = match level {
@@ -150,17 +130,11 @@ impl AppModel {
         if entry.is_empty() {
             map.remove(key);
         }
-        let Some(handler) = &self.config_handler else {
-            match level {
-                Level::Account => self.config.account_settings = map,
-                _ => self.config.desktop_settings = map,
-            }
-            return;
-        };
-        let _ = match level {
-            Level::Account => self.config.set_account_settings(handler, map),
-            _ => self.config.set_desktop_settings(handler, map),
-        };
+        if let Level::Account = level {
+            save_config!(self, account_settings, set_account_settings, map);
+        } else {
+            save_config!(self, desktop_settings, set_desktop_settings, map);
+        }
     }
 
     /// The settings one level inherits: the app's for an account, and the

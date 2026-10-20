@@ -376,3 +376,124 @@ mod fresh_token {
         assert_eq!(seen.len(), 1, "not tried again without a new token");
     }
 }
+
+mod settings_pages {
+    use super::*;
+    use crate::settings::{Choice, Number, Toggle, clipboard};
+
+    fn settings(app: &mut AppModel, m: SettingsMessage) {
+        let _ = app.update(Message::Settings(m));
+    }
+
+    #[test]
+    fn app_settings_are_set_clamped_and_offered_values_only() {
+        let mut app = app();
+        settings(
+            &mut app,
+            SettingsMessage::AppToggle(Toggle::Fullscreen, true),
+        );
+        settings(&mut app, SettingsMessage::AppNumber(Number::Timeout, 5));
+        settings(&mut app, SettingsMessage::AppChoice(Choice::Clipboard, 1));
+        let s = &app.config.app_settings;
+        assert_eq!(s.fullscreen, Some(true));
+        assert_eq!(s.timeout_secs, Some(10), "clamped to the smallest");
+        assert_eq!(s.clipboard_mode, Some(clipboard::BOTH));
+        // An index past the options unsets it.
+        settings(&mut app, SettingsMessage::AppChoice(Choice::Clipboard, 99));
+        assert_eq!(app.config.app_settings.clipboard_mode, None);
+    }
+
+    #[test]
+    fn account_overrides_follow_or_override_and_empty_entries_go() {
+        let mut app = app();
+        let id = "acct-s".to_owned();
+        // Dropdown: 0 follows the app, 1 on, 2 off.
+        settings(
+            &mut app,
+            SettingsMessage::AccountToggle(id.clone(), Toggle::Sound, 2),
+        );
+        assert_eq!(app.config.account_settings[&id].sound, Some(false));
+        settings(
+            &mut app,
+            SettingsMessage::AccountToggle(id.clone(), Toggle::Sound, 1),
+        );
+        assert_eq!(app.config.account_settings[&id].sound, Some(true));
+        settings(
+            &mut app,
+            SettingsMessage::AccountToggle(id.clone(), Toggle::Sound, 0),
+        );
+        assert!(
+            !app.config.account_settings.contains_key(&id),
+            "nothing left"
+        );
+        // Numbers: a value, then back to following.
+        settings(
+            &mut app,
+            SettingsMessage::AccountNumber(id.clone(), Number::Refresh, Some(30)),
+        );
+        assert_eq!(app.config.account_settings[&id].refresh_mins, Some(30));
+        settings(
+            &mut app,
+            SettingsMessage::AccountNumber(id.clone(), Number::Refresh, None),
+        );
+        assert!(!app.config.account_settings.contains_key(&id));
+        // Choices: 0 follows, then the options from 1.
+        settings(
+            &mut app,
+            SettingsMessage::AccountChoice(id.clone(), Choice::Scale, 2),
+        );
+        assert_eq!(app.config.account_settings[&id].scale, Some(100));
+        settings(
+            &mut app,
+            SettingsMessage::AccountChoice(id.clone(), Choice::Scale, 0),
+        );
+        assert!(!app.config.account_settings.contains_key(&id));
+    }
+
+    #[test]
+    fn desktop_overrides_are_kept_per_desktop() {
+        let mut app = app();
+        settings(
+            &mut app,
+            SettingsMessage::DesktopToggle("k1".into(), Toggle::Camera, 1),
+        );
+        settings(
+            &mut app,
+            SettingsMessage::DesktopNumber("k1".into(), Number::Timeout, Some(10_000)),
+        );
+        settings(
+            &mut app,
+            SettingsMessage::DesktopChoice("k2".into(), Choice::Clipboard, 3),
+        );
+        let d = &app.config.desktop_settings;
+        assert_eq!(d["k1"].camera, Some(true));
+        assert_eq!(d["k1"].timeout_secs, Some(600), "clamped to the largest");
+        assert_eq!(d["k2"].clipboard_mode, Some(clipboard::TO_DESKTOP));
+        assert_eq!(d["k2"].camera, None);
+    }
+
+    #[test]
+    fn other_app_settings_are_kept() {
+        let mut app = app();
+        settings(&mut app, SettingsMessage::AppTheme(1));
+        settings(&mut app, SettingsMessage::AppBackground(true));
+        settings(&mut app, SettingsMessage::AppLogSize(u32::MAX));
+        assert_eq!(app.config.app_theme, Some(1));
+        assert!(app.config.background);
+        assert_eq!(app.config.log_max_mib, Some(crate::log::MAX_SIZE_MIB.1));
+        let _ = app.update(Message::App(AppMessage::ToggleFavorite("k1".into())));
+        assert!(app.config.favorites.contains("k1"));
+    }
+
+    /// Also without a settings store (it couldn't be opened), a logon
+    /// choice holds for this run.
+    #[test]
+    fn a_logon_choice_is_remembered_without_a_settings_store() {
+        let mut app = app();
+        app.remember_logon("k1", LogonSetting::EmptyDomain);
+        assert_eq!(
+            app.config.logon_settings.get("k1"),
+            Some(&LogonSetting::EmptyDomain)
+        );
+    }
+}

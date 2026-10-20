@@ -35,6 +35,24 @@ use crate::sessions::launcher::{self, LaunchSpec, LogonSetting, SessionEnd, Sess
 use crate::sessions::rdpfile::{CameraPolicy, ConnectionFile, RdpError};
 use crate::settings::{self, Choice, ConnectionSettings, Limited, Number, Toggle};
 
+/// Sets one of `Config`'s fields and saves it: through cosmic-config's
+/// generated setter `$set`, which also sets it in memory, or in memory only
+/// when there is no settings store (it couldn't be opened; tests). A write
+/// that fails is logged.
+macro_rules! save_config {
+    ($app:expr, $field:ident, $set:ident, $value:expr) => {{
+        let value = $value;
+        match &$app.config_handler {
+            Some(handler) => {
+                if let Err(e) = $app.config.$set(handler, value) {
+                    crate::app_log!("settings: {} not saved ({e})", stringify!($field));
+                }
+            }
+            None => $app.config.$field = value,
+        }
+    }};
+}
+
 mod account_flow;
 mod background;
 mod certificate;
@@ -727,12 +745,7 @@ impl AppModel {
                 if !favorites.remove(&key) {
                     favorites.insert(key);
                 }
-                match &self.config_handler {
-                    Some(handler) => {
-                        let _ = self.config.set_favorites(handler, favorites);
-                    }
-                    None => self.config.favorites = favorites,
-                }
+                save_config!(self, favorites, set_favorites, favorites);
             }
             AppMessage::CheckDependencies => return self.check_dependencies(),
             AppMessage::DependenciesChecked(checks) => {
