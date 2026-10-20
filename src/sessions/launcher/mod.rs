@@ -90,18 +90,9 @@ pub struct LaunchSpec {
     /// groups it with the app and "open on a new workspace" can find it.
     pub window_title: String,
     pub app_id: String,
-    /// The Deskfeed account, so the sign-in helper can steer FreeRDP's own
-    /// sign-in to it and refuse another (ADR 0026).
-    pub account: Option<HelperAccount>,
-}
-
-/// The account the sign-in helper expects (signin/src/account.rs):
-/// identifiers and a name, no secrets.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HelperAccount {
-    pub object_id: String,
-    pub tenant_id: String,
-    pub username: Option<String>,
+    /// The account's user name, so FreeRDP's own sign-in for the desktop
+    /// starts with it selected (ADR 0026).
+    pub login_hint: Option<String>,
 }
 
 /// A window title FreeRDP can take as one argument line: no control
@@ -312,7 +303,7 @@ fn launch_with(
         output,
         proxy,
         proxy_file.as_deref(),
-        spec.account.as_ref(),
+        spec.login_hint.as_deref(),
     )?;
     drop(read_end);
     if send_args(write_end, &args).is_err() {

@@ -78,7 +78,6 @@ pub(super) fn end_outcome(
             SessionEnd::Replaced
                 | SessionEnd::AppRefused(_)
                 | SessionEnd::ProxyAuthRefused
-                | SessionEnd::WrongAccount
                 | SessionEnd::HostTimedOut
         )
     {
@@ -175,7 +174,6 @@ pub(super) fn reconnects(
         SessionEnd::Replaced
         | SessionEnd::AppRefused(_)
         | SessionEnd::ProxyAuthRefused
-        | SessionEnd::WrongAccount
         | SessionEnd::Closed
         | SessionEnd::DisconnectedByServer
         | SessionEnd::Cancelled
@@ -604,7 +602,6 @@ mod tests {
             SessionEnd::Replaced,
             SessionEnd::AppRefused(AppRefusal::NotFound),
             SessionEnd::ProxyAuthRefused,
-            SessionEnd::WrongAccount,
         ] {
             for (was_connected, reconnecting) in [(true, false), (false, true), (true, true)] {
                 assert!(

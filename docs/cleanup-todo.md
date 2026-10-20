@@ -127,7 +127,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 
 ## 4. Things that never or barely do anything
 
-- [ ] **The `client_info` account check never runs** (ADR 0026 addendum; you chose to keep it for now).
+- [x] **The `client_info` account check never runs** (Removed 2026-10-20, owner's decision; the name hint stays) (ADR 0026 addendum; you chose to keep it for now).
   - It spans `signin/src/account.rs`, `vet`/`AfterSilent::PickAccount`/`WRONG_ACCOUNT_LINE` in `freerdp.rs`, the `account` field in `protocol.rs`, and on the app side `ACCOUNT_ENV`, the marker, `SessionEnd::WrongAccount`, a message and tests.
   - Every desktop sign-in logs "account not confirmed (no client_info)". It is the helper's only reason to depend on `base64`.
   - *If removed:* keep `login_hint`, drop the rest.

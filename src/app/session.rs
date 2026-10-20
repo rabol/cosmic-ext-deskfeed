@@ -171,7 +171,7 @@ impl AppModel {
             && !was_connected
             && tried == Some(&LogonSetting::EntraSignIn)
             // Picking another account is a slip, not Entra sign-in failing.
-            && !matches!(end, SessionEnd::WrongAccount | SessionEnd::HostTimedOut)
+            && *end != SessionEnd::HostTimedOut
         {
             self.desks.at(key).entra_failures += 1;
         }

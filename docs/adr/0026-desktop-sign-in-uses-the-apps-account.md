@@ -1,6 +1,6 @@
 # 0026. The desktop sign-in uses the app's account
 
-- Status: Accepted. The hint works; the account check is inactive (addendum, 2026-10-20).
+- Status: Accepted. The hint works; the account check was removed (addenda, 2026-10-20).
 - Date: 2026-10-19
 
 ## Context
@@ -57,3 +57,17 @@ What this means:
 Also verified that day: the helper's status lines reach Deskfeed through FreeRDP's error output. They appear in the app's log. So a refusal would show its own message.
 
 A check that works would have to see the token, and only FreeRDP does. That would need a change in FreeRDP, or Deskfeed redeeming the code itself, which FreeRDP 3.32.2's helper protocol doesn't allow.
+
+## Addendum (2026-10-20): the check is removed
+
+The owner decided to remove the inactive check. These are gone:
+- reading `client_info`;
+- comparing accounts;
+- the account-list retry;
+- the refusal line and `SessionEnd::WrongAccount`;
+- the account IDs passed to the helper;
+- the helper's `base64` dependency.
+
+The "account not confirmed" line no longer appears in the log on every connection.
+
+What stays is the hint: `COSMIC_EXT_DESKFEED_SIGNIN_LOGIN_HINT` and `signin/src/login_hint.rs`. Review finding U1 remains reduced, not closed: nothing checks which account signs in to the desktop, because only FreeRDP sees the token.

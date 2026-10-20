@@ -33,11 +33,6 @@ pub(super) const REPLACED_MARKER: &str = "ERRINFO_DISCONNECTED_BY_OTHER_CONNECTI
 /// FreeRDP's log line with the proxy's answer (`http_proxy_connect`).
 pub(super) const PROXY_ANSWER_MARKER: &str = "[http_proxy_connect]: HTTP Proxy: ";
 
-/// The sign-in helper refused a sign-in as another account than the app's
-/// (signin/src/freerdp.rs, `WRONG_ACCOUNT_LINE`).
-pub(super) const WRONG_ACCOUNT_MARKER: &str =
-    "cosmic-ext-deskfeed-signin: signed in as a different account";
-
 /// The session host didn't finish the logon within `/timeout`
 /// (`connection.c`, `rdp_client_wait_for_activation`). FreeRDP then exits
 /// with its generic 131 (`XF_EXIT_CONN_FAILED`). Seen on the owner's host
@@ -86,9 +81,6 @@ pub enum SessionEnd {
     /// The session host didn't finish the logon in time
     /// (`ACTIVATION_TIMEOUT_MARKER`): the server's side, not the sign-in.
     HostTimedOut,
-    /// The user signed in to the desktop as a different account than the
-    /// app's, and the sign-in helper refused it.
-    WrongAccount,
     /// FreeRDP couldn't verify the session host's certificate (ADR 0016).
     CertificateNotTrusted(CertificateInfo),
     Failed {
@@ -213,8 +205,6 @@ pub(super) struct Log {
     pub(super) app_refused: Option<AppRefusal>,
     /// The proxy asked for a password (`PROXY_ANSWER_MARKER`, 407).
     pub(super) proxy_auth: bool,
-    /// The sign-in helper refused another account (`WRONG_ACCOUNT_MARKER`).
-    pub(super) wrong_account: bool,
     /// The host didn't finish the logon in time (`ACTIVATION_TIMEOUT_MARKER`).
     pub(super) activation_timeout: bool,
     /// The certificate FreeRDP is describing (`Certificate details for`).
@@ -296,8 +286,6 @@ impl Log {
         match (self.refused_certificate(), self.app_refused) {
             (Some(cert), _) => SessionEnd::CertificateNotTrusted(cert),
             (None, Some(why)) => SessionEnd::AppRefused(why),
-            // Only before connecting: a later end is about that session.
-            _ if self.wrong_account && !self.connected => SessionEnd::WrongAccount,
             _ if self.proxy_auth => SessionEnd::ProxyAuthRefused,
             _ if self.replaced && code.is_some() => SessionEnd::Replaced,
             _ if self.activation_timeout && !self.connected && !self.logon_failure => {
@@ -352,9 +340,6 @@ impl Log {
             .is_some_and(|(_, answer)| answer.split_whitespace().nth(1) == Some("407"))
         {
             self.proxy_auth = true;
-        }
-        if line.starts_with(WRONG_ACCOUNT_MARKER) {
-            self.wrong_account = true;
         }
         if line.contains(ACTIVATION_TIMEOUT_MARKER) {
             self.activation_timeout = true;

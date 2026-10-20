@@ -92,11 +92,7 @@ impl AppModel {
             settings,
             window_title: window_title.clone(),
             app_id: <Self as cosmic::Application>::APP_ID.to_owned(),
-            account: Some(crate::sessions::launcher::HelperAccount {
-                object_id: signed_in.identity.object_id.clone(),
-                tenant_id: signed_in.identity.tenant_id.clone(),
-                username: signed_in.identity.username.clone(),
-            }),
+            login_hint: signed_in.identity.username.clone(),
         };
         // The kind of setting only; a custom domain's name is tenant data.
         crate::app_log!(

@@ -100,7 +100,7 @@ pub(super) fn spawn_freerdp(
     output: OwnedFd,
     proxy: &FreeRdpProxy,
     proxy_file: Option<&Path>,
-    account: Option<&HelperAccount>,
+    login_hint: Option<&str>,
 ) -> Result<Child, LaunchError> {
     let read_fd = args_pipe.as_raw_fd();
     let mut cmd = Command::new(freerdp);
@@ -119,18 +119,10 @@ pub(super) fn spawn_freerdp(
         cmd.env(PROXY_FILE_ENV, file);
     }
     cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_PROFILE", profile);
-    // Identifiers from the verified ID token; plain text only, since a
-    // NUL would stop the launch (the helper checks the format again).
-    let plain = |s: &str| !s.is_empty() && !s.chars().any(char::is_control);
-    // Entra IDs are GUIDs (checked in id_token.rs); no dot, which separates them here.
-    let id = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
-    if let Some(a) = account {
-        if id(&a.object_id) && id(&a.tenant_id) {
-            cmd.env(ACCOUNT_ENV, format!("{}.{}", a.object_id, a.tenant_id));
-        }
-        if let Some(name) = a.username.as_deref().filter(|n| plain(n)) {
-            cmd.env(LOGIN_HINT_ENV, name);
-        }
+    // The account's user name for Microsoft's page (ADR 0026). Plain
+    // text only: a NUL would stop the launch.
+    if let Some(name) = login_hint.filter(|n| !n.is_empty() && !n.chars().any(char::is_control)) {
+        cmd.env(LOGIN_HINT_ENV, name);
     }
     // The sign-in window's title in the user's language; the helper has no
     // translations of its own (signin/src/freerdp.rs, `TITLE_ENV`).

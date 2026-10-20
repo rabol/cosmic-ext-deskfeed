@@ -17,9 +17,8 @@ pub(super) const MAX_PASSWORD: usize = 1024;
 /// The variable that tells the sign-in helper where its proxy file is
 /// (`signin/src/proxy.rs`); it holds only the path.
 pub(super) const PROXY_FILE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_PROXY_FILE";
-/// The expected account for the helper, `<object ID>.<tenant ID>`, and
-/// its user name (signin/src/account.rs, same names).
-pub(super) const ACCOUNT_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_ACCOUNT";
+/// The account's user name for the helper's `login_hint`
+/// (`signin/src/login_hint.rs`, same name).
 pub(super) const LOGIN_HINT_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_LOGIN_HINT";
 
 /// The proxy the app's own HTTP client uses: the first set of these, in

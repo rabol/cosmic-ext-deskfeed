@@ -238,10 +238,6 @@ pub enum Reply {
     Ok {
         code: String,
         state: String,
-        /// The account Entra named (`client_info`), for the helper's own
-        /// check (`account.rs`); never sent on.
-        #[serde(skip)]
-        account: Option<crate::account::Account>,
     },
     /// The identity provider returned an error. Only short codes.
     Error {
@@ -273,14 +269,12 @@ fn reply_from_redirect(url: &Url) -> Reply {
     let mut state = None;
     let mut error = None;
     let mut error_codes = None;
-    let mut client_info = None;
     for (k, v) in url.query_pairs() {
         let slot = match k.as_ref() {
             "code" => &mut code,
             "state" => &mut state,
             "error" => &mut error,
             "error_codes" => &mut error_codes,
-            "client_info" => &mut client_info,
             _ => continue,
         };
         if slot.is_some() {
@@ -298,13 +292,7 @@ fn reply_from_redirect(url: &Url) -> Reply {
         };
     }
     match (code, state) {
-        (Some(code), Some(state)) if !code.is_empty() => Reply::Ok {
-            code,
-            state,
-            account: client_info
-                .as_deref()
-                .and_then(crate::account::from_client_info),
-        },
+        (Some(code), Some(state)) if !code.is_empty() => Reply::Ok { code, state },
         _ => Reply::Failed {
             reason: "missing_code_or_state".into(),
         },
@@ -353,7 +341,6 @@ mod silent_tests {
         assert!(!needs_interaction(&Reply::Ok {
             code: "c".into(),
             state: String::new(),
-            account: None,
         }));
     }
 }
@@ -466,7 +453,6 @@ mod tests {
             Navigation::Finished(Reply::Ok {
                 code: "abc".into(),
                 state: "s1".into(),
-                account: None,
             })
         );
         let Navigation::Finished(reply) = nav else {
@@ -474,48 +460,6 @@ mod tests {
         };
         let json = serde_json::to_string(&reply).unwrap();
         assert_eq!(json, r#"{"status":"ok","code":"abc","state":"s1"}"#);
-    }
-
-    #[test]
-    fn redirect_keeps_the_named_account_but_never_sends_it() {
-        use base64::Engine as _;
-        let info = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(r#"{"uid":"oid-1","utid":"tid-1"}"#);
-        let nav = decide(&format!(
-            "{NATIVE_CLIENT}?code=abc&state=s1&client_info={info}"
-        ));
-        let Navigation::Finished(reply) = nav else {
-            panic!("{nav:?}")
-        };
-        let Reply::Ok { account, .. } = &reply else {
-            panic!("{reply:?}")
-        };
-        assert_eq!(
-            account.as_ref(),
-            Some(&crate::account::Account {
-                oid: "oid-1".into(),
-                tid: "tid-1".into()
-            })
-        );
-        let json = serde_json::to_string(&reply).unwrap();
-        assert_eq!(json, r#"{"status":"ok","code":"abc","state":"s1"}"#);
-        // Two accounts in one answer: refused, not either one.
-        let twice = decide(&format!(
-            "{NATIVE_CLIENT}?code=abc&state=s1&client_info={info}&client_info={info}"
-        ));
-        assert!(
-            matches!(twice, Navigation::Finished(Reply::Failed { .. })),
-            "{twice:?}"
-        );
-        // An oversized one names no account (and the code still counts).
-        let huge = "A".repeat(4000);
-        let nav = decide(&format!(
-            "{NATIVE_CLIENT}?code=abc&state=s1&client_info={huge}"
-        ));
-        assert!(
-            matches!(nav, Navigation::Finished(Reply::Ok { account: None, .. })),
-            "{nav:?}"
-        );
     }
 
     #[test]
@@ -617,7 +561,6 @@ mod tests {
             Navigation::Finished(Reply::Ok {
                 code: "c1".into(),
                 state: "s1".into(),
-                account: None,
             })
         );
         // Another broker client ID is not ours.
@@ -678,7 +621,7 @@ mod tests {
                     match decide_for(&text, target) {
                         // Only a bounded redirect carries a code back, and
                         // only a non-empty one.
-                        Navigation::Finished(Reply::Ok { code, state, .. }) => {
+                        Navigation::Finished(Reply::Ok { code, state }) => {
                             assert!(text.len() <= MAX_REDIRECT_LEN);
                             assert_ne!(code, "");
                             let _ = state;

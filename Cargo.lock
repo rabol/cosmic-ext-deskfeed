@@ -989,7 +989,6 @@ version = "0.1.0"
 name = "cosmic-ext-deskfeed-signin"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "cosmic-ext-deskfeed-lines",
  "cosmic-ext-deskfeed-testkit",
  "gtk4",

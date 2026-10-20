@@ -40,6 +40,6 @@ Dated, because these are Microsoft interfaces without documentation, and they ca
 - **Sign-in frequency.** The tenant's Conditional Access asks for a full sign-in "every time" (AADSTS70043, "maximum allowed lifetime … 300" seconds, 2026-10-17).
   - A saved sign-in is then refused when renewed. The app deletes it and asks to sign in again, saying why.
   - Microsoft can also refuse a remembered web session at that point, so the sign-in page asks for the password again.
-- **The account check from ADR 0026 can't run** (2026-10-20): Entra doesn't return `client_info` on the sign-in redirect the helper sees.
+- **Entra doesn't return `client_info` on the sign-in redirect the helper sees** (2026-10-20), so the helper can't tell which account signed in; the check built on it was removed (ADR 0026).
 - **Microsoft's `nativeclient` page** (2026-10-17) shows an anti-phishing warning and redirects to `/common/wrongplace`. So FreeRDP's own terminal sign-in (copy a URL, paste the answer) can't be used by people. Hence the sign-in window ([ADR 0007](adr/0007-sign-in-web-view.md)).
 - **Without `login_hint`**, a browser already signed in to another Microsoft account picks that account. The app's per-account sign-in profiles, and since 2026-10-20 the hint, prevent this.
