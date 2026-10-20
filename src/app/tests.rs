@@ -409,10 +409,10 @@ mod settings_pages {
         let s = &app.config.app_settings;
         assert_eq!(s.fullscreen, Some(true));
         assert_eq!(s.timeout_secs, Some(10), "clamped to the smallest");
-        assert_eq!(s.clipboard_mode, Some(clipboard::BOTH));
+        assert_eq!(s.clipboard, Some(clipboard::BOTH));
         // A position past the options unsets it.
         edit(&mut app, &Level::App, Edit::Choice(c, app_choice(c, 99)));
-        assert_eq!(app.config.app_settings.clipboard_mode, None);
+        assert_eq!(app.config.app_settings.clipboard, None);
     }
 
     #[test]
@@ -460,7 +460,7 @@ mod settings_pages {
         let d = &app.config.desktop_settings;
         assert_eq!(d["k1"].camera, Some(true));
         assert_eq!(d["k1"].timeout_secs, Some(600), "clamped to the largest");
-        assert_eq!(d["k2"].clipboard_mode, Some(clipboard::TO_DESKTOP));
+        assert_eq!(d["k2"].clipboard, Some(clipboard::TO_DESKTOP));
         assert_eq!(d["k2"].camera, None);
     }
 

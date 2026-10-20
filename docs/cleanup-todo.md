@@ -58,7 +58,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - It holds profile folders, concurrency bookkeeping, keyring orchestration, token renewal, and user-facing text (`fl!` returned as `Err(String)`).
   - *Simpler:* split into `accounts/{profiles,state,renew}.rs`, return typed errors and let `app/errors.rs` word them.
   - Effort M, risk low.
-- [ ] **Settings listed in ~7 places** (`src/settings.rs`).
+- [x] **Settings listed in ~7 places** (`src/settings.rs`). (Done 2026-10-20: `settings!` declares each setting once, with its doc, default and range or options; one container-level `#[serde(default)]`; the saved keys are unchanged and pinned by a test. Kept: the clipboard as `u32` values with a constants module, because the settings pages offer every choice as `u32` options; an enum would need converting both ways for this one setting.)
   - Each setting appears in: `ConnectionSettings` fields, `Effective` fields, `DEFAULTS`, `toggle`/`set_toggle`, `Effective::toggle`, `with()` and `ALL`.
   - The Toggle/Number/Choice enums themselves are justified (the settings pages are built from them).
   - *Simpler:* one `macro_rules!` that declares each setting once.

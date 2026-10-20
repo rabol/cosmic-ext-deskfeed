@@ -12,64 +12,196 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One level of settings; unset fields inherit from the level above.
-/// The field names are the keys stored in the config.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ConnectionSettings {
-    #[serde(default)]
-    pub timeout_secs: Option<u32>,
-    #[serde(default)]
-    pub fullscreen: Option<bool>,
-    #[serde(default)]
-    pub all_monitors: Option<bool>,
-    #[serde(default)]
-    pub new_workspace: Option<bool>,
-    #[serde(default)]
-    pub sound: Option<bool>,
-    #[serde(default)]
-    pub microphone: Option<bool>,
-    #[serde(default)]
-    pub camera: Option<bool>,
-    /// One of the `clipboard::*` values (`Choice::Clipboard`).
-    #[serde(default)]
-    pub clipboard_mode: Option<u32>,
-    #[serde(default)]
-    pub clipboard_files: Option<bool>,
-    /// Super, Alt+Tab and the like go to the desktop (ADR 0018).
-    #[serde(default)]
-    pub system_shortcuts: Option<bool>,
-    /// No screen blanking, lock or suspend while a full-screen session
-    /// has focus (ADR 0019).
-    #[serde(default)]
-    pub keep_awake: Option<bool>,
-    /// FreeRDP's Ctrl+Alt+Enter (full screen on and off).
-    #[serde(default)]
-    pub fullscreen_key: Option<bool>,
-    /// App and account levels only.
-    #[serde(default)]
-    pub refresh_mins: Option<u32>,
-    /// App and account levels only.
-    #[serde(default)]
-    pub sign_in_mins: Option<u32>,
-    /// App and account levels only.
-    #[serde(default)]
-    pub offline_days: Option<u32>,
-    #[serde(default)]
-    pub reconnect: Option<bool>,
-    #[serde(default)]
-    pub reconnect_attempts: Option<u32>,
-    /// Windows' display scaling in percent; `Some(0)` follows the monitor.
-    #[serde(default)]
-    pub scale: Option<u32>,
+/// Declares every setting once: its doc, its name in the saved settings,
+/// its built-in default, and its range (numbers) or options (choices).
+/// From that come the saved struct ([`ConnectionSettings`]), the resolved
+/// one ([`Effective`]) with [`DEFAULTS`], the [`Toggle`], [`Number`] and
+/// [`Choice`] enums the settings pages are built from, and the code
+/// between them.
+macro_rules! settings {
+    (
+        toggles { $( $(#[$td:meta])* $tv:ident $tf:ident = $tdef:expr, )* }
+        numbers { $( $(#[$nd:meta])* $nv:ident $nf:ident = $ndef:expr, range $nrange:expr, )* }
+        choices {
+            $( $(#[$cd:meta])* $cv:ident $cf:ident $(as $ckey:literal)? = $cdef:expr,
+               options $copts:expr, )*
+        }
+    ) => {
+        /// One level of settings; unset fields inherit from the level
+        /// above. The field names are the keys stored in the config.
+        #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+        #[serde(default)]
+        pub struct ConnectionSettings {
+            $( $(#[$td])* pub $tf: Option<bool>, )*
+            $( $(#[$nd])* pub $nf: Option<u32>, )*
+            $( $(#[$cd])* $(#[serde(rename = $ckey)])? pub $cf: Option<u32>, )*
+        }
+
+        /// The settings a connection actually uses.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        // Each setting really is on or off; a bitflag type would only hide
+        // that.
+        #[allow(clippy::struct_excessive_bools)]
+        pub struct Effective {
+            $( $(#[$td])* pub $tf: bool, )*
+            $( $(#[$nd])* pub $nf: u32, )*
+            $( $(#[$cd])* pub $cf: u32, )*
+        }
+
+        /// Built-in defaults: each setting's value in `settings!` below.
+        pub const DEFAULTS: Effective = Effective {
+            $( $tf: $tdef, )*
+            $( $nf: $ndef, )*
+            $( $cf: $cdef, )*
+        };
+
+        /// The on/off settings.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Toggle { $( $(#[$td])* $tv, )* }
+
+        /// The number settings.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Number { $( $(#[$nd])* $nv, )* }
+
+        /// Settings chosen from a list.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Choice { $( $(#[$cd])* $cv, )* }
+
+        impl Toggle {
+            #[cfg(test)]
+            pub const ALL: &[Self] = &[ $( Self::$tv, )* ];
+        }
+
+        impl Number {
+            #[cfg(test)]
+            pub const ALL: &[Self] = &[ $( Self::$nv, )* ];
+
+            /// Smallest value, largest value, step.
+            pub fn range(self) -> (u32, u32, u32) {
+                match self { $( Self::$nv => $nrange, )* }
+            }
+        }
+
+        impl Choice {
+            #[cfg(test)]
+            pub const ALL: &[Self] = &[ $( Self::$cv, )* ];
+
+            /// The values offered.
+            pub fn options(self) -> &'static [u32] {
+                match self { $( Self::$cv => &$copts, )* }
+            }
+        }
+
+        impl ConnectionSettings {
+            pub fn toggle(&self, t: Toggle) -> Option<bool> {
+                match t { $( Toggle::$tv => self.$tf, )* }
+            }
+
+            pub fn set_toggle(&mut self, t: Toggle, value: Option<bool>) {
+                match t { $( Toggle::$tv => self.$tf = value, )* }
+            }
+
+            pub fn number(&self, n: Number) -> Option<u32> {
+                match n { $( Number::$nv => self.$nf, )* }
+            }
+
+            /// Sets a number, clamped to its range; `None` inherits.
+            pub fn set_number(&mut self, n: Number, value: Option<u32>) {
+                let value = value.map(|v| n.clamp(v));
+                match n { $( Number::$nv => self.$nf = value, )* }
+            }
+
+            pub fn choice(&self, c: Choice) -> Option<u32> {
+                match c { $( Choice::$cv => self.$cf, )* }
+            }
+
+            /// Sets a choice; `None` inherits, a value that isn't offered
+            /// too.
+            pub fn set_choice(&mut self, c: Choice, value: Option<u32>) {
+                let value = value.and_then(|v| c.valid(v));
+                match c { $( Choice::$cv => self.$cf = value, )* }
+            }
+        }
+
+        impl Effective {
+            /// This level with `s` on top. Hand-edited values are clamped,
+            /// and ones that aren't offered ignored.
+            pub fn with(self, s: Option<&ConnectionSettings>) -> Self {
+                let Some(s) = s else { return self };
+                Self {
+                    $( $tf: s.$tf.unwrap_or(self.$tf), )*
+                    $( $nf: s.$nf.map_or(self.$nf, |v| Number::$nv.clamp(v)), )*
+                    $( $cf: s.$cf.and_then(|v| Choice::$cv.valid(v)).unwrap_or(self.$cf), )*
+                }
+            }
+
+            pub fn toggle(&self, t: Toggle) -> bool {
+                match t { $( Toggle::$tv => self.$tf, )* }
+            }
+
+            pub fn number(&self, n: Number) -> u32 {
+                match n { $( Number::$nv => self.$nf, )* }
+            }
+
+            pub fn choice(&self, c: Choice) -> u32 {
+                match c { $( Choice::$cv => self.$cf, )* }
+            }
+        }
+    };
 }
 
-/// Settings chosen from a list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Choice {
-    /// Windows' display scaling (ADR 0015).
-    Scale,
-    /// Which way copy and paste works (`clipboard_mode` values).
-    Clipboard,
+// Built-in defaults: microphone, camera and clipboard off (spec §9).
+settings! {
+    toggles {
+        Fullscreen fullscreen = false,
+        AllMonitors all_monitors = false,
+        NewWorkspace new_workspace = false,
+        Sound sound = true,
+        Microphone microphone = false,
+        Camera camera = false,
+        /// Files through the clipboard, in the clipboard's direction.
+        ClipboardFiles clipboard_files = false,
+        /// Super, Alt+Tab and the like go to the desktop (ADR 0018).
+        /// FreeRDP's own default: the desktop gets the keyboard while the
+        /// pointer is over its focused window.
+        SystemShortcuts system_shortcuts = true,
+        /// No screen blanking, lock or suspend while a full-screen session
+        /// has focus (ADR 0019); spec §9: only when the user turns it on.
+        KeepAwake keep_awake = false,
+        /// FreeRDP's Ctrl+Alt+Enter (full screen on and off); on by
+        /// default, as in FreeRDP.
+        FullscreenKey fullscreen_key = true,
+        /// A lost connection is retried.
+        Reconnect reconnect = true,
+    }
+    numbers {
+        /// Time to wait for the desktop, in seconds. 120 s: measured Entra
+        /// exchanges took up to 54.9 s (docs/compatibility.md).
+        Timeout timeout_secs = 120, range (10, 600, 10),
+        /// How often the desktop lists refresh, in minutes (app and account
+        /// levels only). An hour is enough for a list that rarely changes;
+        /// a day at most, so new assignments still show up.
+        Refresh refresh_mins = 60, range (15, 24 * 60, 15),
+        /// Time allowed for signing in, MFA included, in minutes (app and
+        /// account levels only). The sign-in window takes at most 15 min
+        /// (`signin/src/protocol.rs` `MAX_TIMEOUT_MS`).
+        SignIn sign_in_mins = 5, range (2, 15, 1),
+        /// How long the offline desktop list is kept, in days (app and
+        /// account levels only; spec §10: cached metadata has an age
+        /// limit).
+        OfflineDays offline_days = 30, range (1, 90, 1),
+        /// How many times a lost connection is retried.
+        ReconnectAttempts reconnect_attempts = 5, range (1, 10, 1),
+    }
+    choices {
+        /// Windows' display scaling in percent (ADR 0015); 0 follows the
+        /// monitor (`display::x11_scale`; spec §3: derived, not fixed).
+        /// The options after 0 are Windows' own steps.
+        Scale scale = 0, options [0, 100, 125, 150, 175, 200, 250, 300],
+        /// Which way copy and paste works: one of `clipboard::*`.
+        Clipboard clipboard as "clipboard_mode" = clipboard::OFF,
+            options [clipboard::OFF, clipboard::BOTH, clipboard::TO_DESKTOP, clipboard::TO_COMPUTER],
+    }
 }
 
 /// `Choice::Clipboard` values.
@@ -83,193 +215,16 @@ pub mod clipboard {
 }
 
 impl Choice {
-    /// The values offered. For `Scale`, 0 is "follow the monitor", the
-    /// rest are Windows' own steps.
-    pub fn options(self) -> &'static [u32] {
-        match self {
-            Self::Scale => &[0, 100, 125, 150, 175, 200, 250, 300],
-            Self::Clipboard => &[
-                clipboard::OFF,
-                clipboard::BOTH,
-                clipboard::TO_DESKTOP,
-                clipboard::TO_COMPUTER,
-            ],
-        }
-    }
-
     /// A value from the config, if it is one of the options.
     pub fn valid(self, value: u32) -> Option<u32> {
         self.options().contains(&value).then_some(value)
     }
 }
 
-/// The on/off settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Toggle {
-    Fullscreen,
-    AllMonitors,
-    NewWorkspace,
-    Sound,
-    Microphone,
-    Camera,
-    /// Files through the clipboard, in the clipboard's direction.
-    ClipboardFiles,
-    /// Super, Alt+Tab and the like go to the desktop (ADR 0018).
-    SystemShortcuts,
-    /// Keep the screen on while a full-screen session has focus.
-    KeepAwake,
-    /// FreeRDP's Ctrl+Alt+Enter.
-    FullscreenKey,
-    Reconnect,
-}
-
-impl Toggle {
-    #[cfg(test)]
-    pub const ALL: [Self; 11] = [
-        Self::Fullscreen,
-        Self::AllMonitors,
-        Self::NewWorkspace,
-        Self::Sound,
-        Self::Microphone,
-        Self::Camera,
-        Self::ClipboardFiles,
-        Self::SystemShortcuts,
-        Self::KeepAwake,
-        Self::FullscreenKey,
-        Self::Reconnect,
-    ];
-}
-
-/// The number settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Number {
-    /// Time to wait for the desktop, in seconds.
-    Timeout,
-    /// How often the desktop lists refresh, in minutes.
-    Refresh,
-    /// Time allowed for signing in, in minutes.
-    SignIn,
-    /// How long the offline desktop list is kept, in days.
-    OfflineDays,
-    /// How many times a lost connection is retried.
-    ReconnectAttempts,
-}
-
 impl Number {
-    #[cfg(test)]
-    pub const ALL: [Self; 5] = [
-        Self::Timeout,
-        Self::ReconnectAttempts,
-        Self::Refresh,
-        Self::SignIn,
-        Self::OfflineDays,
-    ];
-
-    /// Smallest value, largest value, step.
-    pub fn range(self) -> (u32, u32, u32) {
-        match self {
-            Self::Timeout => (10, 600, 10),
-            // An hour is enough for a list that rarely changes; a day at
-            // most, so new assignments still show up.
-            Self::Refresh => (15, 24 * 60, 15),
-            // The sign-in window takes at most 15 min (`signin/src/protocol.rs`
-            // `MAX_TIMEOUT_MS`).
-            Self::SignIn => (2, 15, 1),
-            // Spec §10: cached metadata has an age limit.
-            Self::OfflineDays => (1, 90, 1),
-            Self::ReconnectAttempts => (1, 10, 1),
-        }
-    }
-
     pub fn clamp(self, value: u32) -> u32 {
         let (min, max, _) = self.range();
         value.clamp(min, max)
-    }
-}
-
-impl ConnectionSettings {
-    pub fn toggle(&self, t: Toggle) -> Option<bool> {
-        match t {
-            Toggle::Fullscreen => self.fullscreen,
-            Toggle::AllMonitors => self.all_monitors,
-            Toggle::NewWorkspace => self.new_workspace,
-            Toggle::Sound => self.sound,
-            Toggle::Microphone => self.microphone,
-            Toggle::Camera => self.camera,
-            Toggle::ClipboardFiles => self.clipboard_files,
-            Toggle::SystemShortcuts => self.system_shortcuts,
-            Toggle::KeepAwake => self.keep_awake,
-            Toggle::FullscreenKey => self.fullscreen_key,
-            Toggle::Reconnect => self.reconnect,
-        }
-    }
-
-    pub fn set_toggle(&mut self, t: Toggle, value: Option<bool>) {
-        let slot = match t {
-            Toggle::Fullscreen => &mut self.fullscreen,
-            Toggle::AllMonitors => &mut self.all_monitors,
-            Toggle::NewWorkspace => &mut self.new_workspace,
-            Toggle::Sound => &mut self.sound,
-            Toggle::Microphone => &mut self.microphone,
-            Toggle::Camera => &mut self.camera,
-            Toggle::ClipboardFiles => &mut self.clipboard_files,
-            Toggle::SystemShortcuts => &mut self.system_shortcuts,
-            Toggle::KeepAwake => &mut self.keep_awake,
-            Toggle::FullscreenKey => &mut self.fullscreen_key,
-            Toggle::Reconnect => &mut self.reconnect,
-        };
-        *slot = value;
-    }
-
-    pub fn number(&self, n: Number) -> Option<u32> {
-        match n {
-            Number::Timeout => self.timeout_secs,
-            Number::Refresh => self.refresh_mins,
-            Number::SignIn => self.sign_in_mins,
-            Number::OfflineDays => self.offline_days,
-            Number::ReconnectAttempts => self.reconnect_attempts,
-        }
-    }
-
-    /// Sets a number, clamped to its range; `None` inherits.
-    pub fn set_number(&mut self, n: Number, value: Option<u32>) {
-        let slot = match n {
-            Number::Timeout => &mut self.timeout_secs,
-            Number::Refresh => &mut self.refresh_mins,
-            Number::SignIn => &mut self.sign_in_mins,
-            Number::OfflineDays => &mut self.offline_days,
-            Number::ReconnectAttempts => &mut self.reconnect_attempts,
-        };
-        *slot = value.map(|v| n.clamp(v));
-    }
-
-    pub fn choice(&self, c: Choice) -> Option<u32> {
-        match c {
-            Choice::Scale => self.scale,
-            Choice::Clipboard => self.clipboard_mode,
-        }
-    }
-
-    /// Sets a choice; `None` inherits, a value that isn't offered too.
-    pub fn set_choice(&mut self, c: Choice, value: Option<u32>) {
-        let slot = match c {
-            Choice::Scale => &mut self.scale,
-            Choice::Clipboard => &mut self.clipboard_mode,
-        };
-        *slot = value.and_then(|v| c.valid(v));
-    }
-
-    /// Applies one change from a settings page.
-    pub fn edit(&mut self, edit: Edit) {
-        match edit {
-            Edit::Toggle(t, value) => self.set_toggle(t, value),
-            Edit::Number(n, value) => self.set_number(n, value),
-            Edit::Choice(c, value) => self.set_choice(c, value),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        *self == Self::default()
     }
 }
 
@@ -284,62 +239,20 @@ pub enum Edit {
     Choice(Choice, Option<u32>),
 }
 
-/// The settings a connection actually uses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Each setting really is on or off; a bitflag type would only hide that.
-#[allow(clippy::struct_excessive_bools)]
-pub struct Effective {
-    pub timeout_secs: u32,
-    pub fullscreen: bool,
-    pub all_monitors: bool,
-    pub new_workspace: bool,
-    pub sound: bool,
-    pub microphone: bool,
-    pub camera: bool,
-    /// `clipboard::*`.
-    pub clipboard: u32,
-    pub clipboard_files: bool,
-    pub system_shortcuts: bool,
-    pub keep_awake: bool,
-    pub fullscreen_key: bool,
-    pub refresh_mins: u32,
-    pub sign_in_mins: u32,
-    pub offline_days: u32,
-    pub reconnect: bool,
-    pub reconnect_attempts: u32,
-    /// Percent, or 0 to follow the monitor (`display::x11_scale`).
-    pub scale: u32,
-}
+impl ConnectionSettings {
+    /// Applies one change from a settings page.
+    pub fn edit(&mut self, edit: Edit) {
+        match edit {
+            Edit::Toggle(t, value) => self.set_toggle(t, value),
+            Edit::Number(n, value) => self.set_number(n, value),
+            Edit::Choice(c, value) => self.set_choice(c, value),
+        }
+    }
 
-/// Built-in defaults. 120 s: measured Entra exchanges took up to 54.9 s
-/// (docs/compatibility.md). Microphone, camera and clipboard off (spec §9).
-/// Lists refresh hourly; signing in may take 5 min (MFA included); the
-/// offline list is kept 30 days; a lost connection is retried 5 times;
-/// Windows' scaling follows the monitor (spec §3: derived, not fixed).
-pub const DEFAULTS: Effective = Effective {
-    timeout_secs: 120,
-    fullscreen: false,
-    all_monitors: false,
-    new_workspace: false,
-    sound: true,
-    microphone: false,
-    camera: false,
-    clipboard: clipboard::OFF,
-    clipboard_files: false,
-    // FreeRDP's own default: the desktop gets the keyboard while the
-    // pointer is over its focused window.
-    system_shortcuts: true,
-    // Spec §9: only when the user turns it on.
-    keep_awake: false,
-    // FreeRDP's default.
-    fullscreen_key: true,
-    refresh_mins: 60,
-    sign_in_mins: 5,
-    offline_days: 30,
-    reconnect: true,
-    reconnect_attempts: 5,
-    scale: 0,
-};
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
 
 /// A device setting the administrator's policy turned off for a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,71 +282,6 @@ impl Effective {
             limited.push(Limited::Sound);
         }
         limited
-    }
-
-    /// This level with `s` on top. Hand-edited values are clamped too.
-    pub fn with(self, s: Option<&ConnectionSettings>) -> Self {
-        let Some(s) = s else { return self };
-        let number = |n: Number, own: u32| s.number(n).map_or(own, |v| n.clamp(v));
-        Self {
-            timeout_secs: number(Number::Timeout, self.timeout_secs),
-            fullscreen: s.fullscreen.unwrap_or(self.fullscreen),
-            all_monitors: s.all_monitors.unwrap_or(self.all_monitors),
-            new_workspace: s.new_workspace.unwrap_or(self.new_workspace),
-            sound: s.sound.unwrap_or(self.sound),
-            microphone: s.microphone.unwrap_or(self.microphone),
-            camera: s.camera.unwrap_or(self.camera),
-            clipboard: s
-                .choice(Choice::Clipboard)
-                .and_then(|v| Choice::Clipboard.valid(v))
-                .unwrap_or(self.clipboard),
-            clipboard_files: s.clipboard_files.unwrap_or(self.clipboard_files),
-            system_shortcuts: s.system_shortcuts.unwrap_or(self.system_shortcuts),
-            keep_awake: s.keep_awake.unwrap_or(self.keep_awake),
-            fullscreen_key: s.fullscreen_key.unwrap_or(self.fullscreen_key),
-            refresh_mins: number(Number::Refresh, self.refresh_mins),
-            sign_in_mins: number(Number::SignIn, self.sign_in_mins),
-            offline_days: number(Number::OfflineDays, self.offline_days),
-            reconnect: s.reconnect.unwrap_or(self.reconnect),
-            reconnect_attempts: number(Number::ReconnectAttempts, self.reconnect_attempts),
-            scale: s
-                .scale
-                .and_then(|v| Choice::Scale.valid(v))
-                .unwrap_or(self.scale),
-        }
-    }
-
-    pub fn choice(&self, c: Choice) -> u32 {
-        match c {
-            Choice::Scale => self.scale,
-            Choice::Clipboard => self.clipboard,
-        }
-    }
-
-    pub fn number(&self, n: Number) -> u32 {
-        match n {
-            Number::Timeout => self.timeout_secs,
-            Number::Refresh => self.refresh_mins,
-            Number::SignIn => self.sign_in_mins,
-            Number::OfflineDays => self.offline_days,
-            Number::ReconnectAttempts => self.reconnect_attempts,
-        }
-    }
-
-    pub fn toggle(&self, t: Toggle) -> bool {
-        match t {
-            Toggle::Fullscreen => self.fullscreen,
-            Toggle::AllMonitors => self.all_monitors,
-            Toggle::NewWorkspace => self.new_workspace,
-            Toggle::Sound => self.sound,
-            Toggle::Microphone => self.microphone,
-            Toggle::Camera => self.camera,
-            Toggle::ClipboardFiles => self.clipboard_files,
-            Toggle::SystemShortcuts => self.system_shortcuts,
-            Toggle::KeepAwake => self.keep_awake,
-            Toggle::FullscreenKey => self.fullscreen_key,
-            Toggle::Reconnect => self.reconnect,
-        }
     }
 
     /// FreeRDP arguments for these settings, for a desktop. "Open on a new
@@ -574,7 +422,7 @@ mod tests {
         let first = &map["z06as8n1B0WLUh_L01y7Ix3x"];
         assert_eq!(first.fullscreen, Some(true));
         assert_eq!(first.new_workspace, Some(true));
-        assert_eq!(first.clipboard_mode, Some(1));
+        assert_eq!(first.clipboard, Some(1));
         assert_eq!(first.clipboard_files, Some(true));
         assert_eq!(map["older"].fullscreen, Some(false));
     }
@@ -593,7 +441,7 @@ mod tests {
         };
         let app = ConnectionSettings {
             fullscreen: Some(false),
-            clipboard_mode: Some(clipboard::BOTH),
+            clipboard: Some(clipboard::BOTH),
             timeout_secs: Some(30),
             ..Default::default()
         };
@@ -622,7 +470,7 @@ mod tests {
     #[test]
     fn numbers_are_clamped() {
         let mut s = ConnectionSettings::default();
-        for n in Number::ALL {
+        for &n in Number::ALL {
             let (min, max, _) = n.range();
             s.set_number(n, Some(0));
             assert_eq!(s.number(n), Some(min));
@@ -763,10 +611,153 @@ mod tests {
         assert!(a.contains(&"/clipboard:direction-to:all,files-to:off".into()));
     }
 
+    /// The keys a settings file holds, by setting. Changing one loses
+    /// what users saved under the old key.
+    const SAVED_KEYS: [&str; 18] = [
+        "timeout_secs",
+        "fullscreen",
+        "all_monitors",
+        "new_workspace",
+        "sound",
+        "microphone",
+        "camera",
+        "clipboard_mode",
+        "clipboard_files",
+        "system_shortcuts",
+        "keep_awake",
+        "fullscreen_key",
+        "refresh_mins",
+        "sign_in_mins",
+        "offline_days",
+        "reconnect",
+        "reconnect_attempts",
+        "scale",
+    ];
+
+    /// Every key, read the way cosmic-config reads it, lands in its own
+    /// setting; written, a settings value has exactly these keys.
+    #[test]
+    fn the_saved_format_is_fixed() {
+        let saved = r"(
+            timeout_secs: Some(130),
+            fullscreen: Some(true),
+            all_monitors: Some(false),
+            new_workspace: Some(true),
+            sound: Some(false),
+            microphone: Some(true),
+            camera: Some(false),
+            clipboard_mode: Some(2),
+            clipboard_files: Some(true),
+            system_shortcuts: Some(false),
+            keep_awake: Some(true),
+            fullscreen_key: Some(false),
+            refresh_mins: Some(45),
+            sign_in_mins: Some(7),
+            offline_days: Some(12),
+            reconnect: Some(true),
+            reconnect_attempts: Some(3),
+            scale: Some(175),
+        )";
+        let s: ConnectionSettings = ron::from_str(saved).unwrap();
+        let toggles = [
+            (Toggle::Fullscreen, true),
+            (Toggle::AllMonitors, false),
+            (Toggle::NewWorkspace, true),
+            (Toggle::Sound, false),
+            (Toggle::Microphone, true),
+            (Toggle::Camera, false),
+            (Toggle::ClipboardFiles, true),
+            (Toggle::SystemShortcuts, false),
+            (Toggle::KeepAwake, true),
+            (Toggle::FullscreenKey, false),
+            (Toggle::Reconnect, true),
+        ];
+        for (t, on) in toggles {
+            assert_eq!(s.toggle(t), Some(on), "{t:?}");
+        }
+        let numbers = [
+            (Number::Timeout, 130),
+            (Number::Refresh, 45),
+            (Number::SignIn, 7),
+            (Number::OfflineDays, 12),
+            (Number::ReconnectAttempts, 3),
+        ];
+        for (n, v) in numbers {
+            assert_eq!(s.number(n), Some(v), "{n:?}");
+        }
+        assert_eq!(s.choice(Choice::Clipboard), Some(clipboard::TO_DESKTOP));
+        assert_eq!(s.choice(Choice::Scale), Some(175));
+        // Written: exactly the saved keys.
+        let written = ron::to_string(&s).unwrap();
+        let mut keys: Vec<&str> = written
+            .trim_matches(|c| c == '(' || c == ')')
+            .split(',')
+            .filter_map(|kv| kv.split(':').next())
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .collect();
+        keys.sort_unstable();
+        let mut expected = SAVED_KEYS.to_vec();
+        expected.sort_unstable();
+        assert_eq!(keys, expected, "{written}");
+    }
+
+    /// Each setting, set on a level, reaches the settings a connection
+    /// uses; and each level's getter returns what its setter set.
+    #[test]
+    fn every_setting_flows_through_the_levels() {
+        for &t in Toggle::ALL {
+            let mut s = ConnectionSettings::default();
+            let flipped = !DEFAULTS.toggle(t);
+            s.set_toggle(t, Some(flipped));
+            assert_eq!(s.toggle(t), Some(flipped), "{t:?}");
+            let e = DEFAULTS.with(Some(&s));
+            assert_eq!(e.toggle(t), flipped, "{t:?}");
+            for other in Toggle::ALL.iter().copied().filter(|&o| o != t) {
+                assert_eq!(
+                    e.toggle(other),
+                    DEFAULTS.toggle(other),
+                    "{t:?} moved {other:?}"
+                );
+            }
+        }
+        for &n in Number::ALL {
+            let mut s = ConnectionSettings::default();
+            let (min, _, _) = n.range();
+            let value = if DEFAULTS.number(n) == min {
+                min + 1
+            } else {
+                min
+            };
+            s.set_number(n, Some(value));
+            assert_eq!(s.number(n), Some(value), "{n:?}");
+            let e = DEFAULTS.with(Some(&s));
+            assert_eq!(e.number(n), value, "{n:?}");
+            for other in Number::ALL.iter().copied().filter(|&o| o != n) {
+                assert_eq!(
+                    e.number(other),
+                    DEFAULTS.number(other),
+                    "{n:?} moved {other:?}"
+                );
+            }
+        }
+        for &c in Choice::ALL {
+            let mut s = ConnectionSettings::default();
+            let value = *c
+                .options()
+                .iter()
+                .find(|&&v| v != DEFAULTS.choice(c))
+                .unwrap();
+            s.set_choice(c, Some(value));
+            assert_eq!(s.choice(c), Some(value), "{c:?}");
+            assert_eq!(DEFAULTS.with(Some(&s)).choice(c), value, "{c:?}");
+        }
+    }
+
     #[test]
     fn toggles_round_trip() {
         let mut s = ConnectionSettings::default();
-        for t in Toggle::ALL {
+        for &t in Toggle::ALL {
             s.set_toggle(t, Some(true));
             assert_eq!(s.toggle(t), Some(true));
             s.set_toggle(t, None);
