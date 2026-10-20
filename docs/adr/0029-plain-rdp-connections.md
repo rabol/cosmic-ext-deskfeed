@@ -1,6 +1,6 @@
 # 0029. Plain RDP connections ("Add connection")
 
-- Status: Accepted (the owner's answers below, 2026-10-20); being built: steps 1–2 of 5 done. Spec §1 and §13 changed to match.
+- Status: Accepted (the owner's answers below, 2026-10-20); being built: steps 1–3 of 5 done. Spec §1 and §13 changed to match.
 - Date: 2026-10-20
 
 ## Context

@@ -38,6 +38,8 @@ const PROMPT: &str = "org.freedesktop.Secret.Prompt";
 const APPLICATION: &str = "io.github.rabol.cosmic-ext-deskfeed";
 const KIND: &str = "refresh-token";
 const PASSWORD_KIND: &str = "windows-password";
+/// A plain RDP connection's remembered password (ADR 0029).
+const CONNECTION_PASSWORD_KIND: &str = "rdp-password";
 /// Longer passwords aren't stored (Windows allows 256 characters).
 const MAX_PASSWORD: usize = 1024;
 const PAYLOAD_VERSION: u32 = 1;
@@ -453,29 +455,83 @@ pub fn save_password(
     desktop_title: &str,
     password: &Secret,
 ) -> Result<(), SecretsError> {
-    if password.expose().len() > MAX_PASSWORD {
-        return Err(SecretsError::Malformed);
-    }
-    let title: String = desktop_title
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(80)
-        .collect();
-    Keyring::open()?.create_item(
-        format!("Deskfeed Windows password ({title})"),
+    save_text(
+        "Deskfeed Windows password",
+        desktop_title,
         &password_attributes(identity, Some(desktop)),
-        password.expose().as_bytes().to_vec(),
+        password,
     )
 }
 
 /// A desktop's remembered password, if there is one.
 pub fn load_password(identity: &Identity, desktop: &str) -> Result<Option<Secret>, SecretsError> {
+    load_text(&password_attributes(identity, Some(desktop)))
+}
+
+/// Attributes of a plain RDP connection's remembered password (ADR 0029;
+/// `connection` is its opaque ID). Its own `type`, so neither an account's
+/// searches nor these ever match the other's items.
+fn connection_password_attributes(connection: &str) -> HashMap<&str, &str> {
+    HashMap::from([
+        ("application", APPLICATION),
+        ("type", CONNECTION_PASSWORD_KIND),
+        ("connection", connection),
+    ])
+}
+
+/// Remembers a plain RDP connection's password, replacing an earlier one.
+// Used from the screens in step 4 of ADR 0029; until then by the tests.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn save_connection_password(
+    connection: &str,
+    title: &str,
+    password: &Secret,
+) -> Result<(), SecretsError> {
+    save_text(
+        "Deskfeed RDP password",
+        title,
+        &connection_password_attributes(connection),
+        password,
+    )
+}
+
+/// A plain RDP connection's remembered password, if there is one.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn load_connection_password(connection: &str) -> Result<Option<Secret>, SecretsError> {
+    load_text(&connection_password_attributes(connection))
+}
+
+/// Forgets a plain RDP connection's password (Forget, or removing it).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn delete_connection_password(connection: &str) -> Result<(), SecretsError> {
+    Keyring::open()?.delete_matching(&connection_password_attributes(connection))
+}
+
+/// Stores `password` under `attributes`, replacing an item with the same
+/// ones, labelled "`kind` (`title`)" so the user recognises it in a
+/// keyring manager.
+fn save_text(
+    kind: &str,
+    title: &str,
+    attributes: &HashMap<&str, &str>,
+    password: &Secret,
+) -> Result<(), SecretsError> {
+    if password.expose().len() > MAX_PASSWORD {
+        return Err(SecretsError::Malformed);
+    }
+    let title: String = title.chars().filter(|c| !c.is_control()).take(80).collect();
+    Keyring::open()?.create_item(
+        format!("{kind} ({title})"),
+        attributes,
+        password.expose().as_bytes().to_vec(),
+    )
+}
+
+/// The password stored under `attributes`, if any; one that isn't a
+/// password (too long, a NUL, not UTF-8) is `Malformed`.
+fn load_text(attributes: &HashMap<&str, &str>) -> Result<Option<Secret>, SecretsError> {
     let keyring = Keyring::open()?;
-    let Some(item) = keyring
-        .search(&password_attributes(identity, Some(desktop)))?
-        .into_iter()
-        .next()
-    else {
+    let Some(item) = keyring.search(attributes)?.into_iter().next() else {
         return Ok(None);
     };
     let value = keyring.read_secret(&item)?;
@@ -721,6 +777,72 @@ mod tests {
         assert_eq!(
             save_password(&id, "desk-3", "Three", &long).unwrap_err(),
             SecretsError::Malformed
+        );
+    }
+
+    /// A plain RDP connection's password (ADR 0029): saved, replaced, read
+    /// and forgotten, labelled for people, and apart from an account's
+    /// items, so a sign-out never deletes it and removing it never deletes
+    /// those.
+    #[test]
+    fn connection_passwords_are_their_own_items() {
+        let keyring = FakeKeyring::start(Answer::Unlock);
+        let config = ClientConfig::public_remote_desktop();
+        let id = identity();
+        save(&config, &id, &Secret::new("rt".into())).unwrap();
+        save_password(&id, "desk-1", "One", &Secret::new("pw-desk".into())).unwrap();
+        assert!(load_connection_password("rdp-1").unwrap().is_none());
+        save_connection_password("rdp-1", "Office\nPC", &Secret::new("pw-a".into())).unwrap();
+        save_connection_password("rdp-1", "Office PC", &Secret::new("pw-b".into())).unwrap();
+        save_connection_password("rdp-2", "Lab", &Secret::new("pw-c".into())).unwrap();
+        assert_eq!(
+            load_connection_password("rdp-1").unwrap().unwrap().expose(),
+            "pw-b"
+        );
+        assert_eq!(keyring.items().len(), 4, "replaced, not added");
+        assert!(
+            keyring
+                .items()
+                .iter()
+                .any(|i| i.label == "Deskfeed RDP password (Office PC)")
+        );
+        // The account's sign-out leaves the connections' passwords.
+        delete_passwords(&id, None).unwrap();
+        assert!(load_connection_password("rdp-1").unwrap().is_some());
+        // Forgetting one connection's leaves the other's and the sign-in.
+        save_password(&id, "desk-1", "One", &Secret::new("pw-desk".into())).unwrap();
+        delete_connection_password("rdp-1").unwrap();
+        assert!(load_connection_password("rdp-1").unwrap().is_none());
+        assert!(load_connection_password("rdp-2").unwrap().is_some());
+        assert!(load_password(&id, "desk-1").unwrap().is_some());
+        assert_eq!(load_all(&config).unwrap().len(), 1);
+        // Too long for any Windows password: not stored.
+        let long = Secret::new("x".repeat(MAX_PASSWORD + 1));
+        assert_eq!(
+            save_connection_password("rdp-3", "Long", &long).unwrap_err(),
+            SecretsError::Malformed
+        );
+    }
+
+    #[test]
+    fn connection_password_attributes_match_no_account_search() {
+        let id = identity();
+        let config = ClientConfig::public_remote_desktop();
+        let connection = connection_password_attributes("rdp-1");
+        for search in [
+            account_attributes(&config, &id),
+            password_attributes(&id, None),
+        ] {
+            assert!(
+                !search.iter().all(|(k, v)| connection.get(k) == Some(v)),
+                "{search:?} would match a connection's password"
+            );
+        }
+        // And a connection's search never matches an account's items.
+        assert!(
+            !connection
+                .iter()
+                .all(|(k, v)| password_attributes(&id, Some("rdp-1")).get(k) == Some(v))
         );
     }
 
