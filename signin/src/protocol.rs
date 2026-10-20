@@ -73,18 +73,23 @@ pub fn parse_request(line: &str) -> Result<ValidRequest, RequestError> {
         0 => 5 * 60 * 1000,
         t => t.min(MAX_TIMEOUT_MS),
     };
-    let title: String = req
-        .title
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(100)
-        .collect();
     Ok(ValidRequest {
         url,
-        title,
+        title: clean_title(&req.title),
         silent_first: req.silent_first,
         timeout_ms,
     })
+}
+
+/// A window title from outside: one line, printable, at most 120
+/// characters (the app's `launcher::safe_title` follows the same rule).
+pub fn clean_title(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 /// The same authorize URL with `prompt=none`, or `None` if it already has

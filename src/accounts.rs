@@ -81,15 +81,7 @@ pub fn new_profile_dir() -> Option<PathBuf> {
 
 /// Creates `profile` and its RAM cookie folder, private to the user.
 fn prepare(profile: &Path) -> bool {
-    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-    let private = |dir: &Path| {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)
-            .and_then(|()| fs::set_permissions(dir, fs::Permissions::from_mode(0o700)))
-            .is_ok()
-    };
+    let private = |dir: &Path| crate::files::private_dir(dir).is_ok();
     let jar = profile
         .file_name()
         .and_then(|name| Some(jars_root()?.join(name)));

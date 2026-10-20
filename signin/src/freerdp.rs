@@ -29,13 +29,8 @@ const TITLE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_TITLE";
 /// The title from `TITLE_ENV`: one line, printable, bounded; English
 /// without it.
 fn window_title() -> String {
-    let title: String = std::env::var(TITLE_ENV)
-        .unwrap_or_default()
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(120)
-        .collect();
-    if title.trim().is_empty() {
+    let title = protocol::clean_title(&std::env::var(TITLE_ENV).unwrap_or_default());
+    if title.is_empty() {
         "Sign in".to_owned()
     } else {
         title

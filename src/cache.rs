@@ -17,7 +17,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -106,12 +106,7 @@ impl Store {
             let _ = self.remove(account);
             return Err("list too large to keep offline".into());
         }
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&dir)
-            .map_err(|e| e.kind().to_string())?;
-        let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+        crate::files::private_dir(&dir).map_err(|e| e.kind().to_string())?;
         let tmp = dir.join(format!(".{FILE}.{}", std::process::id()));
         let result = (|| {
             let mut f = OpenOptions::new()
@@ -200,6 +195,7 @@ fn valid(c: &Cached) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     /// A store in a fresh temporary folder.
     fn with_store(f: impl FnOnce(&Store)) {

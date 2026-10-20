@@ -210,7 +210,9 @@ fn verify(
     })
 }
 
-fn is_guid(s: &str) -> bool {
+/// `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` in hex: tenant and object IDs
+/// (also how the log spots them).
+pub(crate) fn is_guid(s: &str) -> bool {
     s.len() == 36
         && s.chars().enumerate().all(|(i, c)| match i {
             8 | 13 | 18 | 23 => c == '-',

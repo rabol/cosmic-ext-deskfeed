@@ -134,12 +134,10 @@ pub(super) fn spawn_freerdp(
     }
     // The sign-in window's title in the user's language; the helper has no
     // translations of its own (signin/src/freerdp.rs, `TITLE_ENV`).
-    let title: String = crate::fl!("sign-in-window-title")
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(120)
-        .collect();
-    cmd.env("COSMIC_EXT_DESKFEED_SIGNIN_TITLE", title);
+    cmd.env(
+        "COSMIC_EXT_DESKFEED_SIGNIN_TITLE",
+        safe_title(&crate::fl!("sign-in-window-title")),
+    );
     // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it
     // stopped. This logger prints no names, passwords or tokens (FreeRDP
     // 3.32.2 `libfreerdp/core/rdp.c`). An environment variable, because

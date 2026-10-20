@@ -14,7 +14,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -80,12 +80,7 @@ pub fn write(message: &str) {
 /// Opens (creating if needed) the log file in `dir`: folder 0700, file
 /// 0600.
 fn open_in(dir: &Path) -> Option<File> {
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)
-        .ok()?;
-    let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+    crate::files::private_dir(dir).ok()?;
     OpenOptions::new()
         .create(true)
         .append(true)
@@ -142,7 +137,7 @@ fn replace_word(word: &str) -> Option<&'static str> {
     if looks_like_jwt(word) {
         return Some("<redacted>");
     }
-    if is_guid(word) {
+    if crate::auth::id_token::is_guid(word) {
         return Some("<id>");
     }
     // `DOMAIN\\user`, `user@domain.example`, and `user@DOMAIN`.
@@ -218,15 +213,6 @@ fn redact_ipv6(line: &str) -> String {
     }
     out.push_str(rest);
     out
-}
-
-fn is_guid(word: &str) -> bool {
-    let parts: Vec<&str> = word.split('-').collect();
-    parts.len() == 5
-        && parts
-            .iter()
-            .zip([8, 4, 4, 4, 12])
-            .all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 fn is_ipv4(word: &str) -> bool {
@@ -313,6 +299,7 @@ fn timestamp(t: SystemTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
     #[test]
