@@ -43,7 +43,7 @@ pub use process::*;
 /// client. It sends the window's size as soon as the display channel is
 /// ready; the SDL client didn't under COSMIC tiling (ADR 0004, client
 /// comparison). Some distributions name FreeRDP 3's client `xfreerdp`; the
-/// dependency check requires version 3.32.2 either way.
+/// dependency check requires at least version 3.32.2 either way.
 const FREERDP_BINARIES: &[&str] = &["xfreerdp3", "xfreerdp"];
 
 /// How to log on to a host pool without Entra single sign-on

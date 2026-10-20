@@ -7,7 +7,7 @@
 use super::*;
 
 impl AppModel {
-    /// Connection messages: connecting, the password dialog, sessions, the workspace move. Routed here by `update`.
+    /// Connection messages: connecting, the password dialog, sessions, the workspace move. Routed here by `route`.
     // One `match` over this handler's messages; splitting it would only
     // spread the routing out.
     #[allow(clippy::too_many_lines)]

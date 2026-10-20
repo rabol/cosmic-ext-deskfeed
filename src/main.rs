@@ -30,7 +30,7 @@ fn main() -> cosmic::iced::Result {
 
     // Settings for configuring the application window and iced runtime.
     // Closing the window doesn't end the app by itself: with desktops open
-    // it asks first, then ends their FreeRDP processes (app/connect.rs).
+    // it asks first, then ends their FreeRDP processes (app/quit.rs).
     let settings = cosmic::app::Settings::default()
         .size_limits(
             cosmic::iced::Limits::NONE

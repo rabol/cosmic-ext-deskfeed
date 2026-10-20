@@ -49,10 +49,10 @@ fn fetch_text(
     Ok(text)
 }
 
-/// Discovery and all tenant feeds. `Err` only when discovery itself fails.
-/// The account's workspaces. `wanted` is asked before every request; once
-/// it says no (the account signed out), no more requests are made (review
-/// F08).
+/// The account's workspaces: discovery, then every tenant's feed. `Err`
+/// only when discovery itself fails. `wanted` is asked before every
+/// request; once it says no (the account signed out), no more requests are
+/// made.
 pub fn discover(
     http: &Http,
     token: &BearerToken,

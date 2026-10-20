@@ -6,7 +6,7 @@
 use super::*;
 
 impl AppModel {
-    /// Account messages: saved sign-ins, sign-in, desktop lists, sign-out. Routed here by `update`.
+    /// Account messages: saved sign-ins, sign-in, desktop lists, sign-out. Routed here by `route`.
     // One `match` over this handler's messages; splitting it would only
     // spread the routing out.
     #[allow(clippy::too_many_lines)]

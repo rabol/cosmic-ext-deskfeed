@@ -148,8 +148,9 @@ pub struct AppModel {
     follow_account_off: Vec<String>,
 }
 
-/// Desktop lists are refreshed this often (spec §7: hourly)...
-/// ...checked this often.
+/// How often to check whether a desktop list is due for its refresh
+/// (hourly by default, spec §7; the "Refresh lists" setting). Checking the
+/// wall clock this often also catches a resume from sleep soon.
 const REFRESH_CHECK: Duration = Duration::from_mins(5);
 
 /// A page in the sidebar.
@@ -686,7 +687,7 @@ impl AppModel {
         }
     }
 
-    /// App-wide messages: dependencies, the context drawer, links, notices, the log. Routed here by `update`.
+    /// App-wide messages: dependencies, the context drawer, links, notices, the log. Routed here by `route`.
     // One `match` over this handler's messages; splitting it would only
     // spread the routing out.
     #[allow(clippy::too_many_lines)]

@@ -7,7 +7,6 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
-/// Log line FreeRDP writes once the session is set up.
 /// The session is active: FreeRDP's last connection step
 /// (`libfreerdp/core/connection.c`), logged by `STATE_LOGGER`.
 pub(super) const ACTIVE_MARKER: &str = "--> CONNECTION_STATE_ACTIVE";

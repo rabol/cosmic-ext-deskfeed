@@ -286,7 +286,6 @@ pub enum Message {
     /// The sign-out question: disconnect its sessions and sign out.
     SignOutConfirm,
     SignOutCancel,
-    /// The keyring item of a signed-out account is gone (or not).
     /// The keyring part of a sign-out: the account ID, its identity (to
     /// try again), and how it went.
     SignOutFinished(
@@ -334,7 +333,6 @@ pub enum Message {
         Arc<ConnectionFile>,
         Result<Option<Secret>, String>,
     ),
-    /// Resource key; whether its password was remembered.
     /// A remembered password's save: resource key, account ID, the ticket
     /// it was scheduled under, and whether it was stored.
     PasswordSaved(
@@ -406,7 +404,6 @@ pub enum Message {
     DesktopToggle(String, Toggle, usize),
     /// `None`: follow the account.
     DesktopNumber(String, Number, Option<u32>),
-    /// Resource key; outcome of "open on a new workspace" (log text).
     /// "Open on a new workspace" finished: resource key, that wait's stop
     /// flag (to tell it from a newer wait), and how it went.
     WorkspaceMoved(
@@ -462,10 +459,6 @@ pub(super) fn logon_index(setting: &LogonSetting) -> (usize, String) {
     }
 }
 
-/// Opaque key for a resource: hash of account, tenant and resource ID.
-/// Opaque key for a resource (spec §7): account, tenant, workspace (the
-/// feed's publisher ID) and resource ID, so the same resource ID in two
-/// workspaces gets two keys.
 /// The part of a desktop list the offline cache keeps: names, titles,
 /// kinds and keys; no URLs (spec §7, `cache.rs`).
 pub(super) fn to_cached(list: &[WorkspaceView]) -> Vec<crate::cache::CachedWorkspace> {
@@ -519,6 +512,9 @@ pub(super) fn from_cached(c: crate::cache::Cached) -> (SystemTime, Vec<Workspace
     (c.saved, list)
 }
 
+/// Opaque key for a resource (spec §7): account, tenant, workspace (the
+/// feed's publisher ID) and resource ID, so the same resource ID in two
+/// workspaces gets two keys.
 pub(super) fn resource_key(
     account: &SignedIn,
     tenant: &str,

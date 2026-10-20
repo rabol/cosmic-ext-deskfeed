@@ -34,7 +34,7 @@ pub struct ConnectionSettings {
     /// (`Effective::with`); new values go to `clipboard_mode`.
     #[serde(default)]
     pub clipboard: Option<bool>,
-    /// `ClipboardMode` as a number (`Choice::Clipboard`).
+    /// One of the `clipboard::*` values (`Choice::Clipboard`).
     #[serde(default)]
     pub clipboard_mode: Option<u32>,
     #[serde(default)]

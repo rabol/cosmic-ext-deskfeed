@@ -285,7 +285,7 @@ pub fn check() -> Result<(), SecretsError> {
 }
 
 /// Loads every saved sign-in for this client identity, one per account.
-/// Items that can't be read are skipped (and reported on stderr without
+/// Items that can't be read are skipped (and noted in the log without
 /// contents); the user signs in to that account again.
 pub fn load_all(config: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
     let keyring = Keyring::open()?;

@@ -26,7 +26,7 @@ fn choice_value(choice: usize) -> Option<bool> {
 
 impl AppModel {
     /// Settings messages: opening and changing app, account and desktop
-    /// settings. Routed here by `update`.
+    /// settings. Routed here by `route`.
     pub(super) fn settings_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
             Message::OpenAccountSettings(id) => {

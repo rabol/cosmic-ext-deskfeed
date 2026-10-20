@@ -167,7 +167,6 @@ impl Attempt {
     }
 
     /// True if `url` is the registered redirect URI (ignoring the query).
-    /// The web view uses this to stop navigation and hand the URL over.
     pub fn is_redirect(&self, url: &Url) -> bool {
         same_endpoint(url, &self.config.redirect_uri)
     }
