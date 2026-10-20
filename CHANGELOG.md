@@ -4,6 +4,10 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ## [Unreleased]
 
+### Fixed
+
+- The clipboard never worked in a desktop since clipboard directions were added, whatever the setting said: FreeRDP turned it off from the connection file and the direction setting didn't turn it back on. It now follows the setting.
+
 ### Added
 
 - The sign-in for a desktop now has your account filled in (ADR 0026, review U1).

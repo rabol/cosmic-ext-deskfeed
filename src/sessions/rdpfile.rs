@@ -349,8 +349,24 @@ impl ConnectionFile {
         file
     }
 
-    /// Serialized for FreeRDP: kept properties, then device defaults.
+    /// Serialized for FreeRDP with every device off (tests).
+    #[cfg(test)]
     pub fn to_freerdp_text(&self) -> String {
+        self.to_freerdp_text_with(false)
+    }
+
+    /// Serialized for FreeRDP: kept properties, then device defaults, with
+    /// the clipboard on when the user's effective setting has it (and the
+    /// policy allowed it, `Effective::limit_to`).
+    ///
+    /// The clipboard has to be switched on here. FreeRDP 3.32.2 reads this
+    /// file before the arguments, and `/clipboard:direction-to:…` only sets
+    /// directions: it doesn't turn redirection back on after
+    /// `redirectclipboard:i:0` (`client/common/cmdline.c`,
+    /// `parse_clipboard_options`; only the plain `+clipboard` and
+    /// `use-selection:` do). Found 2026-10-20: the clipboard stayed off
+    /// whatever the setting said.
+    pub fn to_freerdp_text_with(&self, clipboard: bool) -> String {
         let mut out = String::new();
         for (key, value) in &self.props {
             // Writing to a String can't fail.
@@ -360,6 +376,11 @@ impl ConnectionFile {
             };
         }
         for line in DEVICE_DEFAULTS {
+            let line = if clipboard && *line == "redirectclipboard:i:0" {
+                "redirectclipboard:i:1"
+            } else {
+                line
+            };
             out.push_str(line);
             out.push_str("\r\n");
         }
@@ -414,6 +435,19 @@ mod tests {
         signature:s:AAAA\r\n\
         diagnosticserviceurl:s:https://diag.example\r\n\
         audiomode:i:0\r\n";
+
+    #[test]
+    fn the_clipboard_is_switched_on_in_the_file_when_wanted() {
+        let f = ConnectionFile::parse(SAMPLE.as_bytes()).unwrap();
+        let on = f.to_freerdp_text_with(true);
+        assert_eq!(on.matches("redirectclipboard:").count(), 1, "{on}");
+        assert!(on.contains("redirectclipboard:i:1\r\n"));
+        // Only the clipboard: every other device stays off.
+        assert!(on.contains("redirectprinters:i:0") && on.contains("audiocapturemode:i:0"));
+        let off = f.to_freerdp_text_with(false);
+        assert!(off.contains("redirectclipboard:i:0") && !off.contains("redirectclipboard:i:1"));
+        assert_eq!(off, f.to_freerdp_text());
+    }
 
     #[test]
     fn keeps_connection_properties_and_drops_devices() {

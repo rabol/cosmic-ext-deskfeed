@@ -297,7 +297,9 @@ fn launch_with(
     events: impl Fn(SessionEvent) + Send + Sync + 'static,
 ) -> Result<Session, LaunchError> {
     let dir = RuntimeDir::create(runtime)?;
-    let rdp_path = write_connection_file(&dir, &spec.connection)?;
+    // The clipboard is switched on in the file (`to_freerdp_text_with`).
+    let clipboard = spec.settings.clipboard != crate::settings::clipboard::OFF;
+    let rdp_path = write_connection_file(&dir, &spec.connection, clipboard)?;
     let mut args = build_args(spec, &rdp_path)?;
     args.extend(proxy.arg());
     let proxy_file = proxy.write_file(&dir.0)?;
@@ -328,6 +330,7 @@ fn io_err(e: &std::io::Error) -> LaunchError {
 fn write_connection_file(
     dir: &RuntimeDir,
     connection: &ConnectionFile,
+    clipboard: bool,
 ) -> Result<PathBuf, LaunchError> {
     let path = dir.0.join("connection.rdp");
     let mut f = fs::OpenOptions::new()
@@ -336,7 +339,7 @@ fn write_connection_file(
         .mode(0o600)
         .open(&path)
         .map_err(|e| io_err(&e))?;
-    f.write_all(connection.to_freerdp_text().as_bytes())
+    f.write_all(connection.to_freerdp_text_with(clipboard).as_bytes())
         .map_err(|e| io_err(&e))?;
     Ok(path)
 }

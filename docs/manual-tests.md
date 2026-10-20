@@ -35,7 +35,7 @@ Install the current build first (`just install`, or the package).
 
 ### Administrator policy (ADR 0021)
 
-15. **Clipboard and microphone still work where allowed.** With the clipboard on in Settings, connect your usual desktop and copy text both ways. *Expected:* it works. If it doesn't, the desktop's row says "Clipboard off: your organization doesn't allow it", and the log has a line "Device policy from the connection file" showing what the feed allows. Tell me what it says.
+15. **Clipboard** (fix 2026-10-20: it never switched on before). Install the new build. On a desktop, set Clipboard to "Both ways" (any level), connect, and copy text both ways. *Expected:* it works. Then set it to "Only to the desktop", reconnect: copying into the desktop works, copying out doesn't. If the clipboard is off although you set it on, the desktop's row says "Clipboard off: your organization doesn't allow it" when that's the reason.
 
 ### Lists
 

@@ -651,6 +651,63 @@ fn log_lines_arrive_while_freerdp_runs() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+/// The clipboard setting reaches FreeRDP through the connection file
+/// (`to_freerdp_text_with`): a `/clipboard:direction-to:` argument alone
+/// leaves it off (found 2026-10-20).
+#[test]
+fn the_clipboard_setting_reaches_the_connection_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("avd-launch-clip-{}", std::process::id()));
+    fs::create_dir_all(dir.join("run")).unwrap();
+    for (mode, want) in [
+        (crate::settings::clipboard::BOTH, "redirectclipboard:i:1"),
+        (
+            crate::settings::clipboard::TO_DESKTOP,
+            "redirectclipboard:i:1",
+        ),
+        (crate::settings::clipboard::OFF, "redirectclipboard:i:0"),
+    ] {
+        let out = dir.join("out.txt");
+        let _ = fs::remove_file(&out);
+        let fake = dir.join("fake");
+        fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nfirst=''\n\
+                 while IFS= read -r line <&3; do [ -z \"$line\" ] && break; [ -z \"$first\" ] && first=\"$line\"; echo \"ARG:$line\" >> '{out}'; done\n\
+                 grep redirectclipboard \"$first\" >> '{out}'\nexit 0\n",
+                out = out.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut s = spec(LogonSetting::EntraSignIn, None, true);
+        s.settings.clipboard = mode;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _session = launch_with(
+            &fake,
+            &dir.join("run"),
+            &s,
+            &FreeRdpProxy::default(),
+            move |e| tx.send(e).unwrap(),
+        )
+        .unwrap();
+        loop {
+            if let SessionEvent::Ended { .. } = rx.recv_timeout(Duration::from_secs(10)).unwrap() {
+                break;
+            }
+        }
+        let got = fs::read_to_string(&out).unwrap();
+        assert!(got.lines().any(|l| l.trim_end() == want), "{mode}: {got}");
+        assert_eq!(got.matches("redirectclipboard:").count(), 1, "{got}");
+        // The direction still comes from the argument.
+        if mode == crate::settings::clipboard::TO_DESKTOP {
+            assert!(got.contains("ARG:/clipboard:direction-to:remote"), "{got}");
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn reports_crash_and_failure_codes() {
     use std::os::unix::fs::PermissionsExt;
@@ -772,7 +829,7 @@ fn start_without_gateway(
     let (tx, rx) = std::sync::mpsc::channel();
     let freerdp = find_freerdp().expect("xfreerdp3 installed");
     let rundir = RuntimeDir::create(&dir.join("run")).unwrap();
-    let rdp_path = write_connection_file(&rundir, &s.connection).unwrap();
+    let rdp_path = write_connection_file(&rundir, &s.connection, false).unwrap();
     let args = build_args(s, &rdp_path)
         .unwrap()
         .into_iter()
