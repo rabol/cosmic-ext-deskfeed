@@ -259,11 +259,18 @@ impl Keyring {
         Ok(unlocked)
     }
 
-    fn default_collection(&self) -> Result<OwnedObjectPath, SecretsError> {
+    /// The default keyring's path; an error when there is none.
+    fn default_alias(&self) -> Result<OwnedObjectPath, SecretsError> {
         let path: OwnedObjectPath = self.service()?.call("ReadAlias", &("default",))?;
         if path.as_str() == "/" {
             return Err(SecretsError::Unavailable("no default keyring".into()));
         }
+        Ok(path)
+    }
+
+    /// The default keyring, unlocked.
+    fn default_collection(&self) -> Result<OwnedObjectPath, SecretsError> {
+        let path = self.default_alias()?;
         let locked: bool = self
             .proxy(path.as_str(), COLLECTION)?
             .get_property("Locked")?;
@@ -274,10 +281,10 @@ impl Keyring {
     }
 
     fn read(&self, item: &OwnedObjectPath) -> Result<Stored, SecretsError> {
-        let proxy = self.proxy(item.as_str(), ITEM)?;
-        let attributes: HashMap<String, String> = proxy.get_property("Attributes")?;
-        let (_, _, value, _): SecretStruct = proxy.call("GetSecret", &(&self.session,))?;
-        decode(&attributes, &value)
+        let attributes: HashMap<String, String> = self
+            .proxy(item.as_str(), ITEM)?
+            .get_property("Attributes")?;
+        decode(&attributes, &self.read_secret(item)?)
     }
 
     /// An item's raw secret.
@@ -295,16 +302,52 @@ impl Keyring {
         }
         Ok(())
     }
+
+    /// Deletes every item matching `attributes`.
+    fn delete_matching(&self, attributes: &HashMap<&str, &str>) -> Result<(), SecretsError> {
+        for item in self.search(attributes)? {
+            self.delete(&item)?;
+        }
+        Ok(())
+    }
+
+    /// Stores `secret` in the default keyring, replacing an item with the
+    /// same attributes.
+    fn create_item(
+        &self,
+        label: String,
+        attributes: &HashMap<&str, &str>,
+        secret: Vec<u8>,
+    ) -> Result<(), SecretsError> {
+        let collection = self.default_collection()?;
+        let properties: HashMap<&str, Value<'_>> = HashMap::from([
+            ("org.freedesktop.Secret.Item.Label", Value::from(label)),
+            (
+                "org.freedesktop.Secret.Item.Attributes",
+                Value::from(attributes.clone()),
+            ),
+        ]);
+        let secret = (
+            self.session.as_ref(),
+            Vec::<u8>::new(),
+            secret,
+            // `text/plain`: oo7 0.6 rejects other types such as
+            // `application/json` (newer oo7 and gnome-keyring accept any).
+            "text/plain",
+        );
+        let (item, prompt): (OwnedObjectPath, OwnedObjectPath) = self
+            .proxy(collection.as_str(), COLLECTION)?
+            .call("CreateItem", &(properties, secret, true))?;
+        if item.as_str() == "/" && prompt.as_str() != "/" {
+            self.prompt(&prompt)?;
+        }
+        Ok(())
+    }
 }
 
 /// Whether a Secret Service answers and has a default keyring.
 pub fn check() -> Result<(), SecretsError> {
-    let keyring = Keyring::open()?;
-    let path: OwnedObjectPath = keyring.service()?.call("ReadAlias", &("default",))?;
-    if path.as_str() == "/" {
-        return Err(SecretsError::Unavailable("no default keyring".into()));
-    }
-    Ok(())
+    Keyring::open()?.default_alias().map(drop)
 }
 
 /// Loads every saved sign-in for this client identity, one per account.
@@ -344,44 +387,20 @@ pub fn save(
     identity: &Identity,
     refresh_token: &Secret,
 ) -> Result<(), SecretsError> {
-    let keyring = Keyring::open()?;
-    let collection = keyring.default_collection()?;
-    let attributes = account_attributes(config, identity);
     let label = match identity.username.as_deref() {
         Some(user) => format!("Deskfeed sign-in ({user})"),
         None => "Deskfeed sign-in".to_owned(),
     };
-    let properties: HashMap<&str, Value<'_>> = HashMap::from([
-        ("org.freedesktop.Secret.Item.Label", Value::from(label)),
-        (
-            "org.freedesktop.Secret.Item.Attributes",
-            Value::from(attributes.clone()),
-        ),
-    ]);
-    let secret = (
-        keyring.session.as_ref(),
-        Vec::<u8>::new(),
+    Keyring::open()?.create_item(
+        label,
+        &account_attributes(config, identity),
         encode(identity, refresh_token),
-        // `text/plain`: oo7 0.6 rejects other types such as
-        // `application/json` (newer oo7 and gnome-keyring accept any).
-        "text/plain",
-    );
-    let (item, prompt): (OwnedObjectPath, OwnedObjectPath) = keyring
-        .proxy(collection.as_str(), COLLECTION)?
-        .call("CreateItem", &(properties, secret, true))?;
-    if item.as_str() == "/" && prompt.as_str() != "/" {
-        keyring.prompt(&prompt)?;
-    }
-    Ok(())
+    )
 }
 
 /// Deletes one account's saved sign-in (sign-out of that account).
 pub fn delete(config: &ClientConfig, identity: &Identity) -> Result<(), SecretsError> {
-    let keyring = Keyring::open()?;
-    for item in keyring.search(&account_attributes(config, identity))? {
-        keyring.delete(&item)?;
-    }
-    Ok(())
+    Keyring::open()?.delete_matching(&account_attributes(config, identity))
 }
 
 /// Attributes of an account's remembered passwords; with `desktop`, of
@@ -414,37 +433,16 @@ pub fn save_password(
     if password.expose().len() > MAX_PASSWORD {
         return Err(SecretsError::Malformed);
     }
-    let keyring = Keyring::open()?;
-    let collection = keyring.default_collection()?;
-    let attributes = password_attributes(identity, Some(desktop));
     let title: String = desktop_title
         .chars()
         .filter(|c| !c.is_control())
         .take(80)
         .collect();
-    let properties: HashMap<&str, Value<'_>> = HashMap::from([
-        (
-            "org.freedesktop.Secret.Item.Label",
-            Value::from(format!("Deskfeed Windows password ({title})")),
-        ),
-        (
-            "org.freedesktop.Secret.Item.Attributes",
-            Value::from(attributes.clone()),
-        ),
-    ]);
-    let secret = (
-        keyring.session.as_ref(),
-        Vec::<u8>::new(),
+    Keyring::open()?.create_item(
+        format!("Deskfeed Windows password ({title})"),
+        &password_attributes(identity, Some(desktop)),
         password.expose().as_bytes().to_vec(),
-        "text/plain",
-    );
-    let (item, prompt): (OwnedObjectPath, OwnedObjectPath) = keyring
-        .proxy(collection.as_str(), COLLECTION)?
-        .call("CreateItem", &(properties, secret, true))?;
-    if item.as_str() == "/" && prompt.as_str() != "/" {
-        keyring.prompt(&prompt)?;
-    }
-    Ok(())
+    )
 }
 
 /// A desktop's remembered password, if there is one.
@@ -468,21 +466,13 @@ pub fn load_password(identity: &Identity, desktop: &str) -> Result<Option<Secret
 /// Forgets a desktop's password, or with `None` all of the account's
 /// (sign-out).
 pub fn delete_passwords(identity: &Identity, desktop: Option<&str>) -> Result<(), SecretsError> {
-    let keyring = Keyring::open()?;
-    for item in keyring.search(&password_attributes(identity, desktop))? {
-        keyring.delete(&item)?;
-    }
-    Ok(())
+    Keyring::open()?.delete_matching(&password_attributes(identity, desktop))
 }
 
 /// Deletes all of the app's saved sign-ins for this client identity.
 #[cfg(test)]
 pub fn delete_all(config: &ClientConfig) -> Result<(), SecretsError> {
-    let keyring = Keyring::open()?;
-    for item in keyring.search(&app_attributes(config))? {
-        keyring.delete(&item)?;
-    }
-    Ok(())
+    Keyring::open()?.delete_matching(&app_attributes(config))
 }
 
 #[cfg(test)]

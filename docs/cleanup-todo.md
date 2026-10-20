@@ -25,6 +25,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 
 ## 1. Bugs found along the way (fix first)
 
+- [ ] **An unidentified test failed once** (2026-10-20, one run of the full suite during the keyring clean-up; 21 runs afterwards, also under CPU load, all passed). Its name wasn't captured; the gate now keeps the full test output, so the next failure names it.
 - [x] **A crashed dependency check counts as "everything present"** (fixed 2026-10-20: `required_ok` needs every required dependency checked and OK; a crashed check reports each one as unusable) ✓ checked. `src/app/mod.rs:890-892`: `spawn_blocking(deps::check_all)…unwrap_or_default()` gives an empty list on a panic, and `deps::required_ok(&[])` is `true`. *Fix:* treat a failed check as failed, with its own message. Effort S, risk low.
 - [x] **The fuzz setup no longer compiles** (fixed 2026-10-20: the target uses `to_freerdp_text_with`, clipboard off and on; compiles, not run, since the nightly toolchain is gone; removing `fuzz/` stays in §6 for the owner) ✓ checked. `fuzz/fuzz_targets/rdpfile.rs:16` calls `to_freerdp_text`, which became test-only in the clipboard fix (`9cd5e5c`). CI doesn't build `fuzz/`, so nothing noticed. *Fix:* see §6, remove `fuzz/`. Effort S, risk low.
 - [ ] **Dependency-check output over ~64 KiB would hang until the timeout.** `src/deps.rs:183-209`: stdout is read only after the child exits, but the limit (`MAX_OUTPUT`) is 256 KiB. Harmless for FreeRDP's `/version`. *Fix:* read on a thread, or cap below the pipe size. Effort S, risk low.
@@ -104,7 +105,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - The "private folder 0700" code appears three times (`log.rs`, `cache.rs`, `accounts.rs`).
   - Window-title cleanup appears three times in the helper and once in the launcher.
   - Effort S, risk low.
-- [ ] **Keyring code copy-paste** (`src/secrets.rs:303-420`): `save`/`save_password` repeat CreateItem; `read`/`read_secret` both call GetSecret; three delete loops are the same. *Simpler:* `create_item` and `delete_matching`. Effort S, risk low.
+- [x] **Keyring code copy-paste** (Done 2026-10-20, after adding tests on a fake keyring) (`src/secrets.rs:303-420`): `save`/`save_password` repeat CreateItem; `read`/`read_secret` both call GetSecret; three delete loops are the same. *Simpler:* `create_item` and `delete_matching`. Effort S, risk low.
 - [ ] **A round trip through a URL** (`src/auth/signin.rs:319-359`): the helper's JSON reply is turned back into a URL only so `Attempt::complete` can parse it again. Effort S, risk low.
 - [ ] **Errors as magic strings.** `HelperFailed(String)` with `"random"`, `"proxy"`, `"no reply"`… is matched by string in `app/errors.rs`. *Simpler:* own variants. Effort S, risk low.
 - [ ] **Hand-written string conversion for the cache's resource kind** (`cache.rs`, `model.rs`). *Simpler:* serde `rename_all = "lowercase"` on the enum. Effort S, risk low.
