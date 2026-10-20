@@ -50,6 +50,10 @@ Install the current build first (`just install`, or the package).
    - Add an account and close Microsoft's sign-in window without signing in. *Expected:* the Add page says nothing went wrong and Sign in works again.
    - Start adding an account, and while Microsoft's page is open, quit Deskfeed (Ctrl+Q). *Expected:* the sign-in window closes with it.
 
+4e. **The offline list while a sign-in has ended** (how it looks; the owner's tenant ends sign-ins often, AADSTS70043). Start Deskfeed when it asks you to sign in again.
+   - *Expected:* "Sign in", then "Remove account" (no "Sign out"); under them "The desktops below are from …. Sign in to connect to them."; the desktops below say "Offline" and have no Connect button.
+   - Sign in. *Expected:* the live list replaces it, with Connect buttons.
+
 4. **Start when you log in** (COSMIC's autostart). Turn on Settings → Background → Start when you log in. Log out and back in. *Expected:* only the tray icon appears, no window.
 
 ### Desktop sessions

@@ -46,12 +46,26 @@ impl AppModel {
     pub(super) fn account_view<'a>(&'a self, account: &'a Account) -> Element<'a, Message> {
         let space = cosmic::theme::spacing();
         // Without a live list, the offline one (if any) shows under the
-        // account's state.
-        let with_offline = |state: Element<'a, Message>| match &account.cached {
-            Some((saved, list)) => {
-                self.resources_view(account, false, list, None, Some(*saved), Some(state))
+        // account's state, with a line (`note`, given the time the list was
+        // saved) saying it can't connect.
+        let with_offline = |state: widget::Column<'a, Message, cosmic::Theme, cosmic::Renderer>,
+                            note: fn(String) -> String| {
+            match &account.cached {
+                Some((saved, list)) => {
+                    let state = state.push(
+                        widget::text::body(note(clock_label(*saved))).width(Length::Fixed(420.0)),
+                    );
+                    self.resources_view(
+                        account,
+                        false,
+                        list,
+                        None,
+                        Some(*saved),
+                        Some(state.into()),
+                    )
+                }
+                None => centered(state.into()),
             }
-            None => centered(state),
         };
         match &account.state {
             AccountState::Restoring => with_offline(
@@ -59,8 +73,8 @@ impl AppModel {
                     .push(widget::text::title3(fl!("restoring")))
                     .push(widget::text::body(fl!("restoring-hint")))
                     .spacing(space.space_s)
-                    .align_x(Alignment::Center)
-                    .into(),
+                    .align_x(Alignment::Center),
+                |when| fl!("offline-list-from", when = when),
             ),
             AccountState::NeedsSignIn { error } => {
                 let mut col = widget::column::with_capacity(5)
@@ -87,7 +101,7 @@ impl AppModel {
                 col = col.push(widget::button::text(fl!("remove-account")).on_press(
                     Message::Account(AccountMessage::SignOut(account.id.clone())),
                 ));
-                with_offline(col.into())
+                with_offline(col, |when| fl!("offline-list-sign-in", when = when))
             }
             AccountState::SigningIn { .. } => waiting_view(Message::Account(
                 AccountMessage::CancelSignIn(Some(account.id.clone())),
@@ -233,10 +247,12 @@ impl AppModel {
         };
         let progress = conn.and_then(Connection::progress_label);
         let (status, control): (Option<String>, Element<'a, Message>) = match conn {
+            // An offline entry never connects (spec §7, §137): no button,
+            // so it doesn't look like a desktop that could.
+            None if !live => (Some(fl!("status-offline")), widget::Space::new().into()),
             None => {
                 let mut b = widget::button::suggested(fl!("connect"));
-                // An offline entry never connects (spec §7).
-                if live && r.kind != ResourceKind::Other {
+                if r.kind != ResourceKind::Other {
                     b = b.on_press(Message::Connection(ConnectionMessage::Connect(
                         r.key.clone(),
                     )));
@@ -403,6 +419,7 @@ impl AppModel {
     ) -> Element<'a, Message> {
         let space = cosmic::theme::spacing();
         let live = offline.is_none();
+        let has_header = header.is_some();
         let mut col = widget::column::with_capacity(workspaces.len() + 8).spacing(space.space_m);
         if let Some(header) = header {
             col = col.push(
@@ -437,12 +454,13 @@ impl AppModel {
         if let Some(error) = error {
             col = col.push(widget::text::body(error.to_owned()));
         }
-        if let Some(saved) = offline {
+        // With a header, the header says it (`account_view`).
+        if let Some(saved) = offline.filter(|_| !has_header) {
             col = col.push(widget::text::body(fl!(
                 "offline-list-from",
                 when = clock_label(saved)
             )));
-        } else if let Some(t) = account.last_refreshed {
+        } else if let Some(t) = account.last_refreshed.filter(|_| live) {
             let when = clock_label(t);
             col = col.push(widget::text::caption(if error.is_some() {
                 fl!("showing-list-from", when = when)

@@ -79,6 +79,8 @@ status-authenticating = Signing in to Windows…
 status-awaiting-user = Waiting for your password
 status-disconnecting = Disconnecting…
 status-connected = Connected
+# A desktop from the offline list: it can't be connected from there.
+status-offline = Offline
 status-connected-shortcuts = Connected · Right Ctrl gives COSMIC its shortcuts back
 error-certificate-untrusted = The desktop's certificate couldn't be verified. Nothing was sent to it.
 error-certificate-changed = The desktop's certificate changed since you approved it. Deskfeed didn't connect.
@@ -270,6 +272,8 @@ days = { $value ->
 setting-offline = Keep the offline desktop list for
 setting-offline-desc = The last loaded list is shown, marked as offline, while the live one can't be loaded. It never lets you connect by itself. Signing out deletes it.
 offline-list-from = Offline list from { $when }. Connecting needs the live list.
+# Under "Sign in" when the account's sign-in has ended.
+offline-list-sign-in = The desktops below are from { $when }. Sign in to connect to them.
 use-account-setting = Use account setting
 use-app-setting = Use app setting
 setting-scale = Display scaling
