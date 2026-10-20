@@ -24,8 +24,6 @@ use std::io::{BufRead, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use gtk::glib;
@@ -133,24 +131,20 @@ fn read_request() -> Option<ValidRequest> {
 }
 
 /// The app closing our stdin (or exiting) cancels the sign-in, so this
-/// process never outlives it. A thread blocks on stdin; the main loop checks
-/// its flag.
+/// process never outlives it. A thread blocks on stdin and says when it
+/// closed; the main loop waits for that.
 fn cancel_when_app_closes_pipe(view: &SignInView) {
-    let closed = Arc::new(AtomicBool::new(false));
-    let flag = closed.clone();
+    let (closed, on_close) = futures_channel::oneshot::channel::<()>();
     std::thread::spawn(move || {
         let mut buf = [0u8; 256];
         let mut stdin = std::io::stdin().lock();
         while matches!(stdin.read(&mut buf), Ok(n) if n > 0) {}
-        flag.store(true, Ordering::SeqCst);
+        let _ = closed.send(());
     });
     let view = view.clone();
-    glib::timeout_add_local(Duration::from_millis(200), move || {
-        if closed.load(Ordering::SeqCst) {
-            view.finish(Reply::Cancelled);
-            glib::ControlFlow::Break
-        } else {
-            glib::ControlFlow::Continue
-        }
+    glib::spawn_future_local(async move {
+        // Sent, or the thread gone: either way stdin has closed.
+        let _ = on_close.await;
+        view.finish(Reply::Cancelled);
     });
 }

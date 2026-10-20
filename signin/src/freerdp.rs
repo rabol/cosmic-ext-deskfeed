@@ -13,8 +13,11 @@ use std::fs::File;
 use std::io::{BufReader, Write};
 use std::os::fd::{FromRawFd, RawFd};
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::rc::Rc;
 use std::time::Duration;
+
+use futures_channel::mpsc;
+use futures_util::StreamExt as _;
 
 use gtk::glib;
 use serde_json::{Value, json};
@@ -173,9 +176,9 @@ pub fn run(args: &[String]) -> ExitCode {
     };
     // SAFETY: FreeRDP passes us the two pipe ends for our exclusive use.
     let (cmd_in, cmd_out) = unsafe { (File::from_raw_fd(in_fd), File::from_raw_fd(out_fd)) };
-    let out = Arc::new(Mutex::new(cmd_out));
+    // Everything runs on the main loop: no lock needed.
     let send = move |line: String| {
-        let mut out = out.lock().expect("not poisoned");
+        let mut out = &cmd_out;
         let _ = writeln!(out, "{line}");
         let _ = out.flush();
     };
@@ -194,57 +197,58 @@ pub fn run(args: &[String]) -> ExitCode {
     }
     let profile = profile.expect("checked above");
 
-    // A reader thread queues lines; the main loop handles them. Lines and
-    // queue are bounded: the reader waits while the queue is full.
-    let (queue_in, queue) = std::sync::mpsc::sync_channel::<Option<String>>(MAX_QUEUED);
-    std::thread::spawn(move || {
-        for line in common::lines::lines(BufReader::new(cmd_in), MAX_LINE) {
-            // An oversized message can't be a valid request: dropped.
-            if !line.too_long && queue_in.send(Some(line.text)).is_err() {
-                return;
-            }
-        }
-        let _ = queue_in.send(None);
-    });
-
+    let mut messages = messages(cmd_in);
     let main_loop = glib::MainLoop::new(None, false);
     let view = SignInView::new(&profile, &window_title(), proxy.ok().flatten().as_ref());
-    let send = Arc::new(send);
+    let send = Rc::new(send);
     // The account's name for Microsoft's page (`login_hint.rs`).
-    let login_hint: Arc<Option<String>> = Arc::new(crate::login_hint::from_env());
+    let login_hint: Rc<Option<String>> = Rc::new(crate::login_hint::from_env());
     {
         let main_loop = main_loop.clone();
-        glib::timeout_add_local(Duration::from_millis(50), move || {
-            loop {
-                let next = queue.try_recv();
-                match next.ok() {
-                    None => return glib::ControlFlow::Continue,
-                    // FreeRDP closed the pipe: stop.
-                    Some(None) => {
-                        view.finish(Reply::Cancelled);
-                        main_loop.quit();
-                        return glib::ControlFlow::Break;
-                    }
-                    Some(Some(line)) => {
-                        if !handle(&parse_incoming(&line), &view, &send, &login_hint) {
-                            main_loop.quit();
-                            return glib::ControlFlow::Break;
-                        }
-                    }
+        glib::spawn_future_local(async move {
+            while let Some(line) = messages.next().await {
+                if !handle(&parse_incoming(&line), &view, &send, &login_hint) {
+                    main_loop.quit();
+                    return;
                 }
             }
+            // FreeRDP closed the pipe: stop.
+            view.finish(Reply::Cancelled);
+            main_loop.quit();
         });
     }
     main_loop.run();
     ExitCode::SUCCESS
 }
 
+/// FreeRDP's messages as they arrive. A thread reads the pipe, in lines of
+/// at most `MAX_LINE` bytes (an oversized one can't be a valid request and
+/// is dropped), and queues them; at most `MAX_QUEUED` wait, the thread
+/// waiting while the queue is full. The stream ends when FreeRDP closes the
+/// pipe.
+fn messages(cmd_in: impl std::io::Read + Send + 'static) -> mpsc::Receiver<String> {
+    let (mut queue, messages) = mpsc::channel(MAX_QUEUED);
+    std::thread::spawn(move || {
+        for line in common::lines::lines(BufReader::new(cmd_in), MAX_LINE) {
+            if line.too_long {
+                continue;
+            }
+            let room = futures_executor::block_on(std::future::poll_fn(|cx| queue.poll_ready(cx)));
+            // The main loop has stopped.
+            if room.is_err() || queue.start_send(line.text).is_err() {
+                return;
+            }
+        }
+    });
+    messages
+}
+
 /// Handles one message. Returns `false` when the helper should exit.
 fn handle(
     msg: &Incoming,
     view: &SignInView,
-    send: &Arc<impl Fn(String) + 'static>,
-    login_hint: &Arc<Option<String>>,
+    send: &Rc<impl Fn(String) + 'static>,
+    login_hint: &Rc<Option<String>>,
 ) -> bool {
     match msg {
         Incoming::Hello { id } => send(result(
@@ -340,6 +344,52 @@ fn serve_errors(cmd_in: File, send: &impl Fn(String)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn next(messages: &mut mpsc::Receiver<String>) -> Option<String> {
+        futures_executor::block_on(messages.next())
+    }
+
+    #[test]
+    fn messages_arrive_in_order_without_oversized_ones_and_end_with_the_pipe() {
+        let (read, mut write) = std::io::pipe().unwrap();
+        let mut messages = messages(read);
+        let long = "x".repeat(MAX_LINE + 1);
+        writeln!(write, "one\n{long}\ntwo").unwrap();
+        drop(write);
+        assert_eq!(next(&mut messages).as_deref(), Some("one"));
+        assert_eq!(next(&mut messages).as_deref(), Some("two"));
+        assert_eq!(next(&mut messages), None, "the pipe closed");
+    }
+
+    #[test]
+    fn a_full_queue_waits_and_loses_nothing() {
+        let (read, mut write) = std::io::pipe().unwrap();
+        let mut messages = messages(read);
+        // Many more than MAX_QUEUED, with nobody reading yet.
+        for i in 0..100 {
+            writeln!(write, "{i}").unwrap();
+        }
+        drop(write);
+        std::thread::sleep(Duration::from_millis(100));
+        for i in 0..100 {
+            assert_eq!(next(&mut messages), Some(i.to_string()));
+        }
+        assert_eq!(next(&mut messages), None);
+    }
+
+    #[test]
+    fn the_reader_ends_when_the_main_loop_has_stopped() {
+        let (read, mut write) = std::io::pipe().unwrap();
+        drop(messages(read));
+        // The thread stops and closes the pipe: writing fails soon.
+        let started = std::time::Instant::now();
+        while writeln!(write, "hello").is_ok() {
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "reader still running"
+            );
+        }
+    }
 
     const AUTH: &str = "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=a85cf173-4192-42f8-81fa-777a763e6e2c&response_type=code";
     const BROKER: &str =

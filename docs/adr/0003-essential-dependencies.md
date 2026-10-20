@@ -87,6 +87,12 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
 
     Our own engine had no shrinking: a failure showed the first mangled input, often kilobytes long.
   - Chosen: proptest. The mangling rules, the pieces that upset parsers, the one-second limit and the `DESKFEED_RANDOM_*` variables stay as before; the callers didn't change.
+- **`futures-channel`, `futures-executor`, `futures-util` in the sign-in helper (2026-10-20):** the helper's main loop awaits its reader threads instead of checking on a timer (every 50 ms for FreeRDP's messages, every 200 ms for the app closing stdin).
+  - Options compared:
+    - `glib-unix` fd watches: no threads either, but a new crate, non-blocking reads, and a second, incremental copy of the bounded line splitter;
+    - `async-channel`: the simplest calls (`send_blocking`, `recv().await`), but 6 crates new to the helper (already in `Cargo.lock` for the app);
+    - the `futures` crates: already compiled into the helper through glib, so nothing new; the reader thread waits for room with `poll_ready`.
+  - Chosen: the `futures` crates.
 
 ### Suggestions from an outside review, not taken (2026-10-20)
 

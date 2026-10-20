@@ -1044,6 +1044,9 @@ name = "cosmic-ext-deskfeed-signin"
 version = "0.1.0"
 dependencies = [
  "cosmic-ext-deskfeed-common",
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
  "gtk4",
  "serde",
  "serde_json",

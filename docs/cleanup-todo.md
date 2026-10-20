@@ -111,7 +111,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 - [x] **Hand-written string conversion for the cache's resource kind** (Done 2026-10-20; same file format, tested) (`cache.rs`, `model.rs`). *Simpler:* serde `rename_all = "lowercase"` on the enum. Effort S, risk low.
 - [x] **The signing-keys address is hard-coded** (Done 2026-10-20) ✓ checked (`id_token.rs:21` `JWKS_URL`), unlike the other endpoints, which come from `EndpointPolicy`. Two tests pass only because the test policy refuses that address. Effort S, risk low.
 - [x] **Tray events mirror tray actions one to one** (Kept, 2026-10-20: a Show comes from the icon and from the menu and must carry COSMIC's activation token either way, so the event needs its own Show; the two menu walkers number lines in the same depth-first order, and a test pins the numbering, including submenus and disabled lines.) (`src/tray.rs` `TrayEvent` vs `TrayAction`, plus `Menu::clicked`). Two walkers must number menu IDs identically. *Simpler:* `TrayEvent::Action(TrayAction)` and one flat list built in `set_menu`. Effort S–M, risk low.
-- [ ] **Polling instead of glib fd watches** in the helper.
+- [x] **Polling instead of glib fd watches** in the helper. (Done 2026-10-20 with awaited channels instead of fd watches, ADR 0003: no timers; the reader thread stays, with the tested bounded line reader; the output pipe is a plain `Rc`, no `Arc<Mutex<File>>`.)
   - `freerdp.rs:214-253` uses a reader thread, a channel and a 50 ms poll; `main.rs:138-156` uses a thread, a flag and a 200 ms poll.
   - `Arc<Mutex<File>>` is used although everything runs on one loop.
   - *Simpler:* `glib::unix_fd_add_local`.

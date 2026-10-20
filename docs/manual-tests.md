@@ -45,6 +45,11 @@ Install the current build first (`just install`, or the package).
    - App settings: switch Full screen, change Time to connect, and pick a Clipboard direction. Account settings: set Sound to off, then back to "Use app setting". Desktop settings: set Camera on.
    - Restart Deskfeed. *Expected:* every change is still there, and Sound on the account follows the app again.
 
+4d. **The sign-in helper after it stopped polling** (the real web view and FreeRDP; cleanup-todo §3).
+   - Connect a desktop that uses Entra sign-in. *Expected:* it connects as before (silently, or after Microsoft's page).
+   - Add an account and close Microsoft's sign-in window without signing in. *Expected:* the Add page says nothing went wrong and Sign in works again.
+   - Start adding an account, and while Microsoft's page is open, quit Deskfeed (Ctrl+Q). *Expected:* the sign-in window closes with it.
+
 4. **Start when you log in** (COSMIC's autostart). Turn on Settings → Background → Start when you log in. Log out and back in. *Expected:* only the tray icon appears, no window.
 
 ### Desktop sessions
