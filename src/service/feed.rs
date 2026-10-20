@@ -62,11 +62,15 @@ pub struct TenantFeed {
     pub consent_status: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Stored in the offline list as "desktop", "remoteapp" or "other"
+/// (`cache.rs`); an unknown word reads as `Other`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ResourceKind {
     Desktop,
     RemoteApp,
     /// A type we don't know; shown but not connectable until supported.
+    #[serde(other)]
     Other,
 }
 

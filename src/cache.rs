@@ -34,8 +34,7 @@ const MAX_TEXT: usize = 256;
 pub struct CachedResource {
     pub key: String,
     pub title: String,
-    /// "desktop", "remoteapp" or "other".
-    pub kind: String,
+    pub kind: crate::service::feed::ResourceKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,7 +213,7 @@ mod tests {
             resources: vec![CachedResource {
                 key: "aB3-_x".into(),
                 title: "Windows 11".into(),
-                kind: "desktop".into(),
+                kind: crate::service::feed::ResourceKind::Desktop,
             }],
         }]
     }
@@ -235,6 +234,26 @@ mod tests {
             assert!(st.load("cd34", DAY).is_none());
             st.remove("ab12").unwrap();
             assert!(st.load("ab12", DAY).is_none());
+        });
+    }
+
+    #[test]
+    fn the_kind_is_stored_as_a_word_and_unknown_ones_read_as_other() {
+        use crate::service::feed::ResourceKind;
+        with_store(|st| {
+            st.save("ab12", &sample()).unwrap();
+            let file = st.dir("ab12").unwrap().join(FILE);
+            let text = fs::read_to_string(&file).unwrap();
+            // The format lists written by earlier versions use.
+            assert!(text.contains(r#""kind":"desktop""#), "{text}");
+            // A kind from a newer version: the list still loads.
+            fs::write(
+                &file,
+                text.replace(r#""kind":"desktop""#, r#""kind":"cloudpc""#),
+            )
+            .unwrap();
+            let c = st.load("ab12", DAY).unwrap();
+            assert_eq!(c.workspaces[0].resources[0].kind, ResourceKind::Other);
         });
     }
 

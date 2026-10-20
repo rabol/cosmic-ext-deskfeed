@@ -471,12 +471,7 @@ pub(super) fn to_cached(list: &[WorkspaceView]) -> Vec<crate::cache::CachedWorks
                 .map(|r| crate::cache::CachedResource {
                     key: r.key.clone(),
                     title: r.title.clone(),
-                    kind: match r.kind {
-                        ResourceKind::Desktop => "desktop",
-                        ResourceKind::RemoteApp => "remoteapp",
-                        ResourceKind::Other => "other",
-                    }
-                    .to_owned(),
+                    kind: r.kind,
                 })
                 .collect(),
         })
@@ -496,11 +491,7 @@ pub(super) fn from_cached(c: crate::cache::Cached) -> (SystemTime, Vec<Workspace
                 .into_iter()
                 .map(|r| ResourceView {
                     legacy_key: String::new(),
-                    kind: match r.kind.as_str() {
-                        "desktop" => ResourceKind::Desktop,
-                        "remoteapp" => ResourceKind::RemoteApp,
-                        _ => ResourceKind::Other,
-                    },
+                    kind: r.kind,
                     key: r.key,
                     title: r.title,
                     connection_file: None,
