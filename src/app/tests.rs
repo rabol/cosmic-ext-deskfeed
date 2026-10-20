@@ -193,12 +193,14 @@ fn cancel_while_preparing_starts_nothing_later() {
         connection_file(),
         signed_in("00000000-0000-0000-0000-0000000003d0"),
     ));
-    let _ = app.update(Message::Connection(ConnectionMessage::ConnectionFileReady(
-        "acct-3d".into(),
-        epoch,
-        "k1".into(),
-        file,
-    )));
+    let _ = app.update(Message::Connection(
+        ConnectionMessage::ConnectionFileReady {
+            account: "acct-3d".into(),
+            epoch,
+            key: "k1".into(),
+            result: file,
+        },
+    ));
     assert_eq!(app.desks.conn("k1"), None);
     assert!(app.dialogs.shown().is_none(), "no password dialog");
     assert!(app.desks.launching("k1").is_none());
@@ -220,12 +222,14 @@ fn cancel_while_waiting_for_the_password_closes_the_dialog() {
         connection_file(),
         signed_in("00000000-0000-0000-0000-0000000003d1"),
     ));
-    let _ = app.update(Message::Connection(ConnectionMessage::ConnectionFileReady(
-        "acct-3e".into(),
-        epoch,
-        "k1".into(),
-        file,
-    )));
+    let _ = app.update(Message::Connection(
+        ConnectionMessage::ConnectionFileReady {
+            account: "acct-3e".into(),
+            epoch,
+            key: "k1".into(),
+            result: file,
+        },
+    ));
     assert_eq!(app.desks.conn("k1"), Some(&Connection::AwaitingUser));
     assert!(app.dialogs.shown().is_some_and(|d| d.key == "k1"));
 

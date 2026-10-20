@@ -304,41 +304,50 @@ pub enum Message {
 pub enum AccountMessage {
     /// The saved sign-ins, or why they couldn't be read.
     SavedLoaded(Result<Vec<Stored>, String>),
-    /// Account ID, generation, outcome.
-    Restored(
-        String,
-        u64,
-        Result<(Arc<SignedIn>, Option<String>), StepError>,
-    ),
+    /// A saved sign-in was restored at start, or why not.
+    Restored {
+        account: String,
+        generation: u64,
+        outcome: Result<(Arc<SignedIn>, Option<String>), StepError>,
+    },
     RetryRestore(String),
     AddAccount,
     /// Sign in again to an account in the list.
     SignInAccount(String),
     /// `None`: the sign-in for a new account.
     CancelSignIn(Option<String>),
-    /// Account it was for (`None`: a new one), generation, profile used.
-    SignInFinished(
-        Option<String>,
-        u64,
-        PathBuf,
-        Result<Arc<SignedIn>, SignInFailure>,
-    ),
-    /// The keyring saved (or failed to save) the sign-in: account ID, the
-    /// sign-in's generation, result.
-    Saved(String, u64, Result<(), String>),
+    /// A sign-in window finished.
+    SignInFinished {
+        /// The account it was for; `None`: a new one.
+        account: Option<String>,
+        generation: u64,
+        /// The web view profile it used.
+        profile: PathBuf,
+        result: Result<Arc<SignedIn>, SignInFailure>,
+    },
+    /// The keyring saved (or failed to save) the sign-in.
+    Saved {
+        account: String,
+        /// The sign-in's generation.
+        generation: u64,
+        result: Result<(), String>,
+    },
     Refresh(String),
     /// Periodic check: refresh the desktop lists that are due.
     RefreshDue,
-    /// Account ID, epoch, generation; the desktops with the account's
-    /// tokens (renewed first if needed).
-    Discovered(
-        String,
-        u64,
-        u64,
-        Result<(Vec<WorkspaceView>, Arc<SignedIn>), StepError>,
-    ),
-    /// Icons fetched for an account (account, epoch, URL and PNG bytes).
-    IconsLoaded(String, u64, Vec<(Url, Vec<u8>)>),
+    /// The account's desktops, with its tokens (renewed first if needed).
+    Discovered {
+        account: String,
+        epoch: u64,
+        generation: u64,
+        result: Result<(Vec<WorkspaceView>, Arc<SignedIn>), StepError>,
+    },
+    /// Icons fetched for an account: URL and PNG bytes.
+    IconsLoaded {
+        account: String,
+        epoch: u64,
+        icons: Vec<(Url, Vec<u8>)>,
+    },
     /// Saves an account's sign-in to the keyring again.
     RetrySave(String),
     SignOut(String),
@@ -346,68 +355,87 @@ pub enum AccountMessage {
     /// The sign-out question: disconnect its sessions and sign out.
     SignOutConfirm,
     SignOutCancel,
-    /// The keyring part of a sign-out: the account ID, its identity (to
-    /// try again), and how it went.
-    SignOutFinished(
-        String,
-        Box<crate::auth::id_token::Identity>,
-        Result<(), String>,
-    ),
+    /// The keyring part of a sign-out, with the identity to try again.
+    SignOutFinished {
+        account: String,
+        identity: Box<crate::auth::id_token::Identity>,
+        result: Result<(), String>,
+    },
     /// Sign-out's "Try again": removes what was left (`CleanupRetry`).
     RetrySignOutCleanup,
     DismissSignOutCleanup,
-    /// Account ID: its sign-in window and sessions have ended and its
-    /// files are deleted (`Err`: some couldn't be).
-    SignOutFilesRemoved(String, Result<(), ()>),
-    /// An account's offline list was read (account, epoch, list).
-    CacheLoaded(String, u64, Option<crate::cache::Cached>),
+    /// The account's sign-in window and sessions have ended and its files
+    /// are deleted (`Err`: some couldn't be).
+    SignOutFilesRemoved {
+        account: String,
+        result: Result<(), ()>,
+    },
+    /// An account's offline list was read.
+    CacheLoaded {
+        account: String,
+        epoch: u64,
+        cached: Option<crate::cache::Cached>,
+    },
 }
 
 /// Connecting desktops, their dialogs and sessions (`connect.rs`).
 #[derive(Debug, Clone)]
 pub enum ConnectionMessage {
     Connect(String),
-    /// Account ID, epoch, resource key, and the connection file with the
-    /// account (tokens renewed first if needed).
-    ConnectionFileReady(
-        String,
-        u64,
-        String,
-        Result<(Arc<ConnectionFile>, Arc<SignedIn>), StepError>,
-    ),
+    /// The connection file, with the account's tokens (renewed first if
+    /// needed).
+    ConnectionFileReady {
+        account: String,
+        epoch: u64,
+        key: String,
+        result: Result<(Arc<ConnectionFile>, Arc<SignedIn>), StepError>,
+    },
     PasswordInput(PasswordText),
     TogglePasswordVisible,
     LogonSelected(usize),
     CustomDomainInput(String),
     DialogConnect,
     DialogCancel,
-    /// Account ID, epoch, resource key, attempt; FreeRDP started, or why
-    /// not.
-    Launched(String, u64, String, u64, Result<launcher::Session, String>),
-    /// Account ID, epoch, resource key, attempt, event.
-    Session(String, u64, String, u64, SessionEvent),
-    /// Resource key, attempt: the time to connect is up.
-    ConnectDeadline(String, u64),
+    /// FreeRDP started, or why not.
+    Launched {
+        account: String,
+        epoch: u64,
+        key: String,
+        attempt: u64,
+        result: Result<launcher::Session, String>,
+    },
+    /// An event from a running session.
+    Session {
+        account: String,
+        epoch: u64,
+        key: String,
+        attempt: u64,
+        event: SessionEvent,
+    },
+    /// The time to connect is up.
+    ConnectDeadline {
+        key: String,
+        attempt: u64,
+    },
     /// The password dialog's "Remember this password".
     ToggleRememberPassword(bool),
-    /// A remembered password was read (account, epoch, key, logon
-    /// setting, connection file, result).
-    SavedPasswordLoaded(
-        String,
-        u64,
-        String,
-        LogonSetting,
-        Arc<ConnectionFile>,
-        Result<Option<Secret>, String>,
-    ),
-    /// A remembered password's save: resource key, account ID, the ticket
-    /// it was scheduled under, and whether it was stored.
-    PasswordSaved(
-        String,
-        String,
-        crate::accounts::PasswordTicket,
-        Result<bool, String>,
-    ),
+    /// A remembered password was read.
+    SavedPasswordLoaded {
+        account: String,
+        epoch: u64,
+        key: String,
+        logon: LogonSetting,
+        connection: Arc<ConnectionFile>,
+        result: Result<Option<Secret>, String>,
+    },
+    /// A remembered password's save, with the ticket it was scheduled
+    /// under, and whether it was stored.
+    PasswordSaved {
+        key: String,
+        account: String,
+        ticket: crate::accounts::PasswordTicket,
+        result: Result<bool, String>,
+    },
     /// Resource key: forget its remembered password.
     ForgetPassword(String),
     /// Trust the certificate in the certificate dialog and connect.
@@ -420,16 +448,19 @@ pub enum ConnectionMessage {
     ShowSession(String),
     /// Outcome of Show (log text).
     SessionShown(Result<(), String>),
-    /// Resource key, wait: time for the next reconnect attempt.
-    ReconnectDue(String, u64),
+    /// Time for the next reconnect attempt, if `wait` is still current.
+    ReconnectDue {
+        key: String,
+        wait: u64,
+    },
     Disconnect(String),
-    /// "Open on a new workspace" finished: resource key, that wait's stop
-    /// flag (to tell it from a newer wait), and how it went.
-    WorkspaceMoved(
-        String,
-        Arc<std::sync::atomic::AtomicBool>,
-        Result<(), String>,
-    ),
+    /// "Open on a new workspace" finished. `stop`: that wait's stop flag,
+    /// to tell it from a newer wait.
+    WorkspaceMoved {
+        key: String,
+        stop: Arc<std::sync::atomic::AtomicBool>,
+        result: Result<(), String>,
+    },
 }
 
 /// The settings pages (`settings_ui.rs`).

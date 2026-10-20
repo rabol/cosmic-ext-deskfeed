@@ -17,7 +17,12 @@ impl AppModel {
     ) -> Task<cosmic::Action<Message>> {
         match message {
             ConnectionMessage::Connect(key) => return self.prepare_connection(&key),
-            ConnectionMessage::ConnectionFileReady(id, epoch, key, result) => {
+            ConnectionMessage::ConnectionFileReady {
+                account: id,
+                epoch,
+                key,
+                result,
+            } => {
                 if self.account(&id).is_none_or(|a| a.epoch != epoch) {
                     return Task::none();
                 }
@@ -68,30 +73,43 @@ impl AppModel {
                 }
             }
             ConnectionMessage::DialogConnect => return self.dialog_connect(),
-            ConnectionMessage::Launched(id, epoch, key, attempt, result) => {
+            ConnectionMessage::Launched {
+                account: id,
+                epoch,
+                key,
+                attempt,
+                result,
+            } => {
                 return self.launched(&id, epoch, key, attempt, result);
             }
-            ConnectionMessage::ConnectDeadline(key, attempt) => {
+            ConnectionMessage::ConnectDeadline { key, attempt } => {
                 self.connect_deadline(&key, attempt);
             }
-            ConnectionMessage::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
+            ConnectionMessage::ReconnectDue { key, wait: timer } => {
+                return self.reconnect_due(&key, timer);
+            }
             ConnectionMessage::ShowSession(key) => return self.show_session(&key),
             ConnectionMessage::ToggleRememberPassword(on) => {
                 if let Some(d) = self.dialogs.shown_mut() {
                     d.remember = on;
                 }
             }
-            ConnectionMessage::SavedPasswordLoaded(
+            ConnectionMessage::SavedPasswordLoaded {
                 account,
                 epoch,
                 key,
                 logon,
                 connection,
                 result,
-            ) => {
+            } => {
                 return self.saved_password_loaded(&account, epoch, key, logon, connection, result);
             }
-            ConnectionMessage::PasswordSaved(key, id, ticket, result) => match result {
+            ConnectionMessage::PasswordSaved {
+                key,
+                account: id,
+                ticket,
+                result,
+            } => match result {
                 // Only while nothing changed since: a sign-out or Forget
                 // meanwhile wins.
                 Ok(true)
@@ -137,7 +155,13 @@ impl AppModel {
                     crate::app_log!("show desktop: not brought to the front ({e})");
                 }
             }
-            ConnectionMessage::Session(id, epoch, key, attempt, event) => {
+            ConnectionMessage::Session {
+                account: id,
+                epoch,
+                key,
+                attempt,
+                event,
+            } => {
                 // Only the current attempt's events: a reader may still
                 // report after its session ended.
                 if self.account(&id).is_some_and(|a| a.epoch == epoch)
@@ -177,7 +201,11 @@ impl AppModel {
                     l.stop = true;
                 }
             }
-            ConnectionMessage::WorkspaceMoved(key, done, result) => {
+            ConnectionMessage::WorkspaceMoved {
+                key,
+                stop: done,
+                result,
+            } => {
                 // Only this wait's: a newer one keeps its handle.
                 if let Some(d) = self.desks.get_mut(&key)
                     && d.mover.as_ref().is_some_and(|m| Arc::ptr_eq(m, &done))
@@ -280,9 +308,12 @@ impl AppModel {
                 Err(StepError::Show(fl!("error-generic"))),
             )
             .await;
-            Message::Connection(ConnectionMessage::ConnectionFileReady(
-                id, epoch, key, result,
-            ))
+            Message::Connection(ConnectionMessage::ConnectionFileReady {
+                account: id,
+                epoch,
+                key,
+                result,
+            })
         })
     }
 
