@@ -60,7 +60,7 @@ If something doesn't work, **View → Dependencies** shows what's missing, and *
 
 ## Known limitations
 
-- **One Microsoft confirmation page per connection.** FreeRDP fetches the token for the remote Windows machine itself, through a sign-in page; it offers no way for the app to supply that token ([details](./docs/milestone-1.md)). The official Windows and macOS clients don't show this page.
+- **One Microsoft confirmation page per connection.** FreeRDP fetches the token for the remote Windows machine itself, through a sign-in page; it offers no way for the app to supply that token ([details](./docs/compatibility.md)). The official Windows and macOS clients don't show this page.
 - **Your organization's sign-in frequency applies.** If it requires a fresh sign-in after a set time (for example *"Every time"*, which allows reuse for five minutes), the app asks you to sign in again; it doesn't work around such policies.
 - **Unknown certificates** are rare: Azure Virtual Desktop vouches for its session hosts. When a certificate can't be verified, Deskfeed shows it and asks whether to trust it for that desktop. If it later changes to one the system doesn't trust either, Deskfeed blocks it ([ADR 0016](./docs/adr/0016-session-host-certificates.md)).
 - **RemoteApps are a preview.** They connect and open as ordinary windows, but have only been tested against a Windows host, not yet a RemoteApp from Azure Virtual Desktop. Each app gets its own connection: opening a second app from the same host pool takes over the first one's session, and that connection then shows both apps' windows ([ADR 0020](./docs/adr/0020-remoteapps.md)).

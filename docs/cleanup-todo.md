@@ -182,7 +182,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - *Fix:* `just ci` mirroring `ci.yml`, and drop the leftovers.
   - Effort S, risk low.
 - [ ] **The rust-analyzer step in CI** (ADR 0025): a pinned download kept current by hand, on top of rustc and strict clippy. Its one known catch (the `#[path]` include) would go with the shared crate. Uncertain value. Effort S, risk low.
-- [ ] **Documentation sprawl.**
+- [ ] **Documentation sprawl.** *Partly done 2026-10-20:* the roadmap lists only open items; `milestone-1.md` is replaced by `compatibility.md` (the matrix and findings); ADR 0004 and 0005 are marked Accepted in the index, ADR 0006 Historical. Still open: addenda that reverse a decision (0023, 0026) and `CODE_REVIEW.md` in the repo root.
   - 26 ADRs written in 4 days, several with addenda that reverse the decision (0023, 0026).
   - `docs/milestone-1.md` is a timestamped lab diary.
   - `docs/roadmap.md` is mostly struck-through "done" items that repeat `CHANGELOG.md`.

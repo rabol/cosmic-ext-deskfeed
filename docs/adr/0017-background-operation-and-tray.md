@@ -30,7 +30,7 @@ libcosmic closes the app when its main window closes, unless the `multi-window` 
 ## Consequences
 
 - With no status area in the panel, background operation is unavailable, not silently broken.
-- `start minimized` (roadmap) can build on this later.
+- Starting in the background at login built on this (2026-10-19).
 - The dbusmenu implementation is minimal: it always returns the whole menu, and it has no icons or submenus.
 
 ## Addendum (2026-10-19): start when you log in

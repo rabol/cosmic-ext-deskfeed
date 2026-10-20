@@ -39,4 +39,4 @@ Still needed: a real AVD session with a camera attached (device listed in Window
 ## Consequences
 
 - If FreeRDP gains device selection, the `Specific` policy and a camera picker can follow; until then Deskfeed shares all cameras or none.
-- No new dependency: the channel is part of the distro FreeRDP build the app already requires. A FreeRDP build without the channel, or without V4L2, can't load it, and then none of the session's dynamic channels start (`channels/drdynvc/client/drdynvc_main.c`: a failed `dvcman_load_addin` stops their setup). The dependency check doesn't test for the channel yet (roadmap).
+- No new dependency: the channel is part of the distro FreeRDP build the app already requires. A FreeRDP build without the channel, or without V4L2, can't load it, and then none of the session's dynamic channels start (`channels/drdynvc/client/drdynvc_main.c`: a failed `dvcman_load_addin` stops their setup). The dependency check doesn't test for the channel yet ([roadmap](../roadmap.md), "Later").

@@ -27,7 +27,7 @@ Possible causes of the `0x52E`, to be told apart by testing:
 
 ## Test (owner's account)
 
-The terminal sign-in in `research/password-login-test.sh` is blocked by Microsoft (see `docs/milestone-1.md`), so use the reference app, which reproduces FreeRDP's upstream default when given `/d:AzureAD` in **Default settings… → Advanced flags**. Type the password carefully. Success confirms the upstream default on a real host; it does not depend on which company it is.
+The terminal sign-in in `research/password-login-test.sh` is blocked by Microsoft (the `nativeclient` page, [ADR 0004](0004-freerdp-version-and-sign-in-helper.md)), so use the reference app, which reproduces FreeRDP's upstream default when given `/d:AzureAD` in **Default settings… → Advanced flags**. Type the password carefully. Success confirms the upstream default on a real host; it does not depend on which company it is.
 
 ## Decision (proposed, pending the test)
 

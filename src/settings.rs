@@ -302,8 +302,8 @@ pub struct Effective {
     pub scale: u32,
 }
 
-/// Built-in defaults. 120 s: measured Entra exchanges took up to 49.8 s
-/// (docs/milestone-1.md). Microphone, camera and clipboard off (spec §9).
+/// Built-in defaults. 120 s: measured Entra exchanges took up to 54.9 s
+/// (docs/compatibility.md). Microphone, camera and clipboard off (spec §9).
 /// Lists refresh hourly; signing in may take 5 min (MFA included); the
 /// offline list is kept 30 days; a lost connection is retried 5 times;
 /// Windows' scaling follows the monitor (spec §3: derived, not fixed).

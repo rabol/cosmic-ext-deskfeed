@@ -25,7 +25,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Ctrl+Alt+M (minimize), Ctrl+Alt+D (disconnect), Right Ctrl (release) | FreeRDP's own | — | — | No switch in FreeRDP 3.32.2; said in the setting's description (ADR 0018 addendum) |
 | Reconnect after a lost connection | on | A, Ac, C | `settings.rs` `Toggle::Reconnect` | Done |
 | Reconnect attempts | 5 (1–10) | A, Ac, C | `settings.rs` `Number::ReconnectAttempts` | Done |
-| Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | With roadmap item 5: the alternative, scaling the picture (`/smart-sizing`), gives Windows a fixed 1 024×768 desktop unless a size is set too (`client/X11/xf_client.c`), so it needs a desktop-size setting beside it |
+| Resize the desktop with the window | on (`/dynamic-resolution`) | A, Ac, C | `sessions/launcher.rs` `build_args` | With display scaling (ADR 0015): the alternative, scaling the picture (`/smart-sizing`), gives Windows a fixed 1 024×768 desktop unless a size is set too (`client/X11/xf_client.c`), so it needs a desktop-size setting beside it |
 | Refresh desktop lists every | 60 min (15–1 440, steps of 15) | A, Ac | `settings.rs` `Number::Refresh` | Done |
 | Time allowed for signing in | 5 min (2–15) | A, Ac | `settings.rs` `Number::SignIn` | Done |
 | Keep the offline desktop list for | 30 days (1–90) | A, Ac | `settings.rs` `Number::OfflineDays` | Done |
@@ -66,7 +66,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Workspace move: poll 200 ms, wait 3 s for a new workspace | `workspace.rs` | Internal timing |
 | Refresh check every 5 min (and after resume) | `app/mod.rs` `REFRESH_CHECK` | Internal; the refresh interval is a setting |
 | Log line 2 000 chars; redaction lists | `log.rs` | Internal; privacy |
-| FreeRDP log level `info` | `sessions/launcher.rs` `build_args` | Security: at `debug` FreeRDP logs every gateway HTTP header, including `Authorization: Bearer` (`libfreerdp/core/gateway/http.c`), and hex dumps of sign-in tickets (`nla.c`, `tsg.c`), which the log's redaction can't reliably catch (spec §12). Diagnostics export (roadmap item 12) is the place for more detail |
+| FreeRDP log level `info` | `sessions/launcher.rs` `build_args` | Security: at `debug` FreeRDP logs every gateway HTTP header, including `Authorization: Bearer` (`libfreerdp/core/gateway/http.c`), and hex dumps of sign-in tickets (`nla.c`, `tsg.c`), which the log's redaction can't reliably catch (spec §12). View → Diagnostics is the place for more detail |
 | Remembered passwords are an opt-in per desktop in the password dialog, not a setting | `secrets.rs`, `app/connect.rs` | Spec §8 asks for a per-desktop choice |
 | Never `/cert:ignore`; approved certificates are per desktop, not a setting | `sessions/launcher.rs`, `app/connect.rs` | Security (ADR 0016) |
 | Endpoints, client ID, `X-MS-User-Agent`, D-Bus names, app ID | `service/`, `auth/`, `secrets.rs` | Protocol facts (the cloud choice above is the setting) |

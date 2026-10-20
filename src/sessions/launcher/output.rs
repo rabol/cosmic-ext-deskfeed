@@ -13,7 +13,7 @@ use super::*;
 pub(super) const ACTIVE_MARKER: &str = "--> CONNECTION_STATE_ACTIVE";
 
 /// Entering and leaving the sign-in steps: Entra (`AAD`) or the Windows
-/// password (`NLA`), seen in real AVD logs (docs/milestone-1.md).
+/// password (`NLA`), seen in real AVD logs (docs/compatibility.md).
 pub(super) const AUTH_STATES: &[&str] = &["CONNECTION_STATE_AAD", "CONNECTION_STATE_NLA"];
 
 /// FreeRDP lost a connected session (`client/common/client.c`,

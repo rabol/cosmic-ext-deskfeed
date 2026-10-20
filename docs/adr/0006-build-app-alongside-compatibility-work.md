@@ -1,11 +1,11 @@
 # 0006. Build the app alongside the compatibility work
 
-- Status: Accepted
+- Status: Historical. How the first days were worked; it no longer guides the code. The compatibility findings are in [compatibility.md](../compatibility.md).
 - Date: 2026-10-17
 
 ## Context
 
-Spec §4 asks to prove sign-in → discovery → connection with research tools before substantial UI work. In practice this meant the owner running a series of manual scripts against the reference app, which was slow and frustrating, and several steps were blocked by Microsoft (the `nativeclient` page now prevents copying the code; see `docs/milestone-1.md`).
+Spec §4 asks to prove sign-in → discovery → connection with research tools before substantial UI work. In practice this meant the owner running a series of manual scripts against the reference app, which was slow and frustrating, and several steps were blocked by Microsoft (the `nativeclient` page now prevents copying the code; see [compatibility.md](../compatibility.md)).
 
 What we learned on 2026-10-17 is enough to design the core:
 

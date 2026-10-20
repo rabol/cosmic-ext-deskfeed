@@ -1,6 +1,6 @@
 # 0004. FreeRDP 3.32.2 and the sign-in helper protocol
 
-- Status: Proposed (needs the milestone 1 account tests below)
+- Status: Accepted (2026-10-20: the account tests below were answered on the owner's tenant)
 - Date: 2026-10-17
 
 ## Context
@@ -25,7 +25,7 @@ Spec §4 step 6 and §8: inspect the selected FreeRDP version's AVD gateway and 
 - **The helper has no OAuth logic.** FreeRDP builds the authorize URL, extracts the code, and does the token exchange itself, including the session host's proof-of-possession `req_cnf` (`client/common/client.c`). Our helper only has to show the URL and return the final redirect URL.
 - **A new helper process per token request.** `client_helper_get_access_token_va` starts and stops the helper around each request, although the protocol doc says the instance is reused. Cookies therefore cannot live in the helper process; they must live in the app (or a long-lived sign-in process the app owns), which matches spec §8.
 - **Fallback order** (`client_failsafe_get_access_token`): the SDL3 and X11 clients try the helper first and fall back to the terminal prompt. With `/azure:auth-helper:<path>` set, our helper is used.
-- **The terminal fallback is unusable for people** (observed 2026-10-17): Microsoft's `nativeclient` page warns about phishing and redirects to `/common/wrongplace` after 3 seconds, so the code can't be copied from a normal browser. A helper must catch the redirect itself (see `docs/milestone-1.md`).
+- **The terminal fallback is unusable for people** (observed 2026-10-17): Microsoft's `nativeclient` page warns about phishing and redirects to `/common/wrongplace` after 3 seconds, so the code can't be copied from a normal browser. A helper must catch the redirect itself.
 - **Gateway token request** uses `FreeRDP_GatewayAvdClientID` (default: Microsoft's public client ID) and redirect `…/oauth2/nativeclient`. `/azure:avd-scope:` changes the scope; `/azure:tenantid:` and `use-tenantid` change the authority.
 - **`/args-from:fd:<n>` cannot be combined with other arguments.** All arguments, not just secrets, must come through the fd. Fine for us: the backend builds the full argument list and writes it to a private pipe.
 - **`/from-stdin`** makes the SDL3 client read a missing password at a no-echo terminal prompt instead of its own dialog (`client/SDL/SDL3/dialogs/sdl_dialogs.cpp`). It also honours `FREERDP_ASKPASS`. The app must not use either path for passwords (spec §8: password via fd), but the research script uses `/from-stdin`.
@@ -58,9 +58,9 @@ All three clients use `client_failsafe_get_access_token`, so the sign-in helper 
 
 ## Tests needed before acceptance
 
-- [ ] A research helper that speaks the protocol completes the gateway token request (`/sec:nla`) on the owner's tenant.
-- [ ] The same helper completes the session-host token request (`/sec:aad`, proof-of-possession) on a host pool with Entra single sign-on, if one is available.
-- [ ] (`research/loopback-redirect-test.sh`; unauthenticated checks are inconclusive, see `docs/milestone-1.md`) Whether Microsoft's public client ID accepts a loopback redirect (`http://localhost:<port>`). If it does, the system browser can replace the web view and the helper needs no web engine ([ADR 0003](0003-minimal-dependencies.md)). If it is rejected (`AADSTS50011`), record that.
+- [x] The helper completes the gateway token request on the owner's tenant (2026-10-17; the app now supplies that token itself).
+- [x] The helper completes the session-host token request (`/sec:aad`, proof-of-possession) on the owner's host pool (2026-10-17), although that pool doesn't have the single sign-on property. A pool with it is still untested ([compatibility](../compatibility.md)).
+- [ ] Not tested, and not needed since the sign-in window works ([ADR 0007](0007-sign-in-web-view.md); unauthenticated checks were inconclusive): whether Microsoft's public client ID accepts a loopback redirect (`http://localhost:<port>`). If it does, the system browser can replace the web view and the helper needs no web engine ([ADR 0003](0003-minimal-dependencies.md)). If it is rejected (`AADSTS50011`), record that.
 - [x] Backend comparison on COSMIC (spec §4 step 7): `sdl-freerdp3` native Wayland, `sdl-freerdp3` on XWayland, `xfreerdp3` on XWayland, plus `wlfreerdp3` (2026-10-18, above). A real Azure connection with `xfreerdp3` (owner's tenant, Entra sign-in, 2026-10-18 08:43): opened tiled and the desktop filled the tile after logon (owner confirmed). Still open: multi-hour stability.
 
 ## Consequences

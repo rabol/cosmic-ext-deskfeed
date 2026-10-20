@@ -26,7 +26,7 @@ Candidates: the `oo7`, `secret-service` and `keyring` crates, or the D-Bus API d
 
 ## Addendum (2026-10-18): remembered Windows passwords
 
-Roadmap item 8, spec §8. For desktops that log on with a Windows password, the password dialog has "Remember this password in the keyring", off by default.
+Spec §8. For desktops that log on with a Windows password, the password dialog has "Remember this password in the keyring", off by default.
 
 - One item per account and desktop, type `windows-password` (sign-ins are `refresh-token`, so neither search sees the other), attributes app, tenant, account object ID and the desktop's opaque resource key; the secret is the password only, at most 1 024 bytes. No file fallback. The config only records which desktops have one (`saved_passwords`), never the password.
 - Stored only after the connection with it worked, so a mistyped password is never kept.
