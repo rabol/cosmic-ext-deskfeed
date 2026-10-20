@@ -98,7 +98,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 - [x] **Connection-state knowledge spread around.** (Done 2026-10-20: `Connection::progress_label` and `is_starting`; the row-note rule is a different question and stays.) The status label is mapped twice (`views.rs`, `background.rs`), and "is starting" is listed three times. *Simpler:* `Connection::label()` and `is_starting()`. Effort S, risk low.
 - [ ] **Positional tuple messages** (for example `Launched(String, u64, String, u64, Result)`; account ID and resource key are both bare `String`). *Simpler:* struct variants, or a shared `Origin { account, epoch, key }`. Effort M, risk low.
 - [ ] **Label lists cached in the model** (`logon_labels`, `follow_app_on/off`, `follow_account_on/off`); they can be built in `view`. Effort S, risk low.
-- [ ] **Small duplicate helpers.**
+- [x] **Small duplicate helpers.** (Done 2026-10-20: `is_guid`, the private folder and the title rule are one each. Kept on purpose: `BearerToken` and `Secret` stay two types, so a password can never be passed where a bearer token is expected; `account_id` (hex) and `hash_key` (base64) produce keys already saved in the settings, so merging them would need a migration for no gain.)
   - `BearerToken` and `Secret` are the same redacting newtype.
   - `is_guid` is defined twice ✓ checked (`log.rs:223`, `id_token.rs:213`).
   - `account_id` repeats `hash_key`.
