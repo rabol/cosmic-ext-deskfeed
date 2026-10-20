@@ -256,6 +256,12 @@ impl cosmic::Application for AppModel {
 
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<cosmic::Action<Self::Message>> {
         self.nav.activate(id);
+        // "Add account" (or "Sign in") reads as an action, so a click starts
+        // the sign-in, also when its page is already shown: with no
+        // account it's the only entry, and selecting it again did nothing.
+        if self.nav.data::<Page>(id) == Some(&Page::Add) {
+            return self.start_add();
+        }
         Task::none()
     }
 

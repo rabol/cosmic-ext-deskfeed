@@ -381,8 +381,13 @@ impl AppModel {
         }
         self.rebuild_nav(&Page::Add);
         let generation = self.next();
-        let profile = accounts::new_profile_dir();
-        let (Some(helper), Some(profile)) = (signin::find_helper(), profile) else {
+        // The helper first: a profile made for a sign-in that can't start
+        // would be left behind.
+        let Some(helper) = signin::find_helper() else {
+            self.adding = Some(Adding::Failed(fl!("error-helper-missing")));
+            return Task::none();
+        };
+        let Some(profile) = accounts::new_profile_dir() else {
             self.adding = Some(Adding::Failed(fl!("error-helper-missing")));
             return Task::none();
         };

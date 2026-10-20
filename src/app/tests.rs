@@ -689,3 +689,21 @@ mod signed_out_accounts {
         assert!(signed_out(&app, "acct-away"));
     }
 }
+
+/// Clicking "Add account" (or "Sign in") in the sidebar starts the sign-in,
+/// also when its page is already the one shown. (Here the helper isn't
+/// installed next to the test, so it ends as "helper missing", without
+/// making a profile folder.)
+#[test]
+fn the_add_entry_starts_the_sign_in_when_clicked() {
+    let mut app = app();
+    app.rebuild_nav(&Page::Add);
+    assert!(app.adding.is_none(), "selecting it alone starts nothing");
+    let add = app
+        .nav
+        .iter()
+        .find(|&id| app.nav.data::<Page>(id) == Some(&Page::Add))
+        .unwrap();
+    let _ = app.on_nav_select(add);
+    assert!(app.adding.is_some(), "the sign-in was started");
+}
