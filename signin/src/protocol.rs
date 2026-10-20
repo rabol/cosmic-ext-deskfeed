@@ -554,7 +554,7 @@ mod tests {
     }
 
     /// The app's request line, every URL the web view navigates to, and
-    /// FreeRDP's redirect target, with random and mangled input (ADR 0023).
+    /// FreeRDP's redirect target, with random and mangled input (ADR 0028).
     #[test]
     fn random_requests_and_navigations_never_break_the_rules() {
         let request = req(AUTH);

@@ -76,7 +76,7 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
   - Chosen: `ksni`, pinned to commit `cd9b7cc` (reviewed: the token code and the release notes), as libcosmic is pinned. Move to the 0.3.7 release when it is out.
   - COSMIC's order was checked in its source (cosmic-applets `status_menu.rs`, `app.rs`): before a click on the icon or a menu line, it sends the token and waits for the answer. ksni pairs a token that arrived up to 100 ms before the click. A test plays that order on a private bus.
   - One difference handled in our code: ksni runs a disabled line's action if a click arrives for it; ours does nothing.
-- **`proptest` 1.12, test-only (2026-10-20):** the engine under `testkit::random_inputs` (ADR 0023), which now shrinks a failing input to the fewest and smallest edits that still fail.
+- **`proptest` 1.12, test-only (2026-10-20):** the engine under `testkit::random_inputs` (ADR 0028), which now shrinks a failing input to the fewest and smallest edits that still fail.
   - Options compared:
 
     | | proptest 1.12 (`std` only) | arbtest 0.3 | quickcheck 1.1 |

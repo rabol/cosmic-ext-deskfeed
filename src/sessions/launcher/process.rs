@@ -119,7 +119,7 @@ pub(super) fn spawn_freerdp(
         cmd.env(PROXY_FILE_ENV, file);
     }
     cmd.env(helper::PROFILE_ENV, profile);
-    // The account's user name for Microsoft's page (ADR 0026). Plain
+    // The account's user name for Microsoft's page (ADR 0027). Plain
     // text only: a NUL would stop the launch.
     if let Some(name) = login_hint.filter(|n| !n.is_empty() && !n.chars().any(char::is_control)) {
         cmd.env(LOGIN_HINT_ENV, name);

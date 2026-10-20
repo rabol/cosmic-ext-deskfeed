@@ -518,7 +518,7 @@ mod tests {
     }
 
     /// FreeRDP's helper protocol lines and its command line, with random and
-    /// mangled input (ADR 0023).
+    /// mangled input (ADR 0028).
     #[test]
     fn random_freerdp_messages_never_break_the_reader() {
         let hello = r#"{"jsonrpc":"2.0","id":1,"method":"hello"}"#;

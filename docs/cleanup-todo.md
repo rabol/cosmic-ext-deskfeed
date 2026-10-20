@@ -7,7 +7,7 @@ A review of the whole codebase, done 2026-10-20 at the owner's request, without 
 - the sign-in helper, the small crates, the tooling and the docs.
 
 Their findings were checked before going on this list. Items marked **✓ checked** were confirmed again by hand. Two findings were dropped as wrong:
-- "the external review isn't in the repo": it is, at `CODE_REVIEW.md`;
+- "the external review isn't in the repo": it is, at `CODE_REVIEW.md` (since moved to `docs/reviews/`);
 - "the roxmltree comment names the wrong version": it names both.
 
 Each item gives where, what is wrong, the simpler alternative, effort (S/M/L) and risk.
@@ -190,7 +190,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - *Fix:* `just ci` mirroring `ci.yml`, and drop the leftovers.
   - Effort S, risk low.
 - [x] **The rust-analyzer step in CI** (Kept: owner's decision.) (ADR 0025): a pinned download kept current by hand, on top of rustc and strict clippy. Its one known catch (the `#[path]` include) would go with the shared crate. Uncertain value. Effort S, risk low.
-- [ ] **Documentation sprawl.** *Partly done 2026-10-20:* the roadmap lists only open items; `milestone-1.md` is replaced by `compatibility.md` (the matrix and findings); ADR 0004 and 0005 are marked Accepted in the index, ADR 0006 Historical. Still open: addenda that reverse a decision (0023, 0026) and `CODE_REVIEW.md` in the repo root.
+- [x] **Documentation sprawl.** (Done 2026-10-20: ADR 0027 supersedes 0026 and ADR 0028 supersedes 0023, stating what is in effect; the old ones stay as history. The review is at `docs/reviews/2026-10-19-code-review.md`, marked historical.) *Partly done 2026-10-20:* the roadmap lists only open items; `milestone-1.md` is replaced by `compatibility.md` (the matrix and findings); ADR 0004 and 0005 are marked Accepted in the index, ADR 0006 Historical. Still open: addenda that reverse a decision (0023, 0026) and `CODE_REVIEW.md` in the repo root.
   - 26 ADRs written in 4 days, several with addenda that reverse the decision (0023, 0026).
   - `docs/milestone-1.md` is a timestamped lab diary.
   - `docs/roadmap.md` is mostly struck-through "done" items that repeat `CHANGELOG.md`.

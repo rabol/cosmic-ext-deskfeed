@@ -87,7 +87,7 @@ mod tests {
         );
     }
 
-    /// The proxy file, with random and mangled input (ADR 0023).
+    /// The proxy file, with random and mangled input (ADR 0028).
     #[test]
     fn random_proxy_files_never_break_the_reader() {
         let sample =

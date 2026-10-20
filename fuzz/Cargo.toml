@@ -1,5 +1,5 @@
-# Coverage-guided fuzzing of Deskfeed's parsers with cargo-fuzz (ADR 0023
-# addendum). Developer-only: needs a nightly compiler and cargo-fuzz; never
+# Coverage-guided fuzzing of Deskfeed's parsers with cargo-fuzz (ADR 0028).
+# Developer-only: needs a nightly compiler and cargo-fuzz; never
 # part of the app or its package. Its own workspace, so the app's build and
 # Cargo.lock don't see it.
 

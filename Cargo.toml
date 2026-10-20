@@ -59,7 +59,7 @@ ksni = { git = "https://github.com/iovxw/ksni", rev = "cd9b7ccb3287b946ef41499ff
 x11rb = { version = "0.13", default-features = false }
 
 [dev-dependencies]
-# The shared crate's random-input tool (ADR 0023), for tests only.
+# The shared crate's random-input tool (ADR 0028), for tests only.
 common = { package = "cosmic-ext-deskfeed-common", path = "common", features = ["testkit"] }
 # Reading settings files the way cosmic-config does (`ron::from_str`), in
 # tests only; the same version libcosmic already uses.

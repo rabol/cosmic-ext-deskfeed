@@ -17,7 +17,7 @@ pub const TITLE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_TITLE";
 /// The path of the proxy file ([`ProxyFile`]); only the path, since the
 /// proxy address may carry a user name and password.
 pub const PROXY_FILE_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_PROXY_FILE";
-/// The account's user name, for Microsoft's `login_hint` (ADR 0026).
+/// The account's user name, for Microsoft's `login_hint` (ADR 0027).
 pub const LOGIN_HINT_ENV: &str = "COSMIC_EXT_DESKFEED_SIGNIN_LOGIN_HINT";
 
 /// The folder of the RAM cookie folders, under `$XDG_RUNTIME_DIR`: the

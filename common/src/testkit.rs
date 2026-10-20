@@ -11,7 +11,7 @@ use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestCaseError, TestError, TestRng, TestRunner};
 
 /// Random-input testing for parsers of untrusted input (spec §13 item 10,
-/// ADR 0023): many mangled versions of real samples, plus some pure noise.
+/// ADR 0028): many mangled versions of real samples, plus some pure noise.
 /// Each input must be handled without a panic and quickly; `check` adds
 /// the parser's own rules. Repeatable: the seed is fixed unless
 /// `DESKFEED_RANDOM_SEED` sets another; `DESKFEED_RANDOM_ROUNDS` runs more

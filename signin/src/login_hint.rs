@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 //! The account's name as a hint for FreeRDP's own sign-in for the desktop
-//! (ADR 0026).
+//! (ADR 0027).
 //!
 //! FreeRDP 3.32.2 asks for the session host's token with no hint about the
 //! account (`client/common/client.c`, the authorize URL has `client_id`,
@@ -9,7 +9,7 @@
 //! could pick another account. The helper adds `login_hint` with the
 //! account's user name, as Microsoft's own libraries do, so Microsoft's
 //! page starts with the account selected. Which account finally signs in
-//! can't be checked here: FreeRDP redeems the code itself (ADR 0026
+//! can't be checked here: FreeRDP redeems the code itself (ADR 0027
 //! addendum). The app passes the name in the environment (not a secret).
 
 use url::Url;

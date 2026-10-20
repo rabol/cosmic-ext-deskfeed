@@ -27,7 +27,7 @@ serde_json = "1"
 url = "2.5"
 
 [dev-dependencies]
-# The shared crate's random-input tool (ADR 0023), for tests only.
+# The shared crate's random-input tool (ADR 0028), for tests only.
 common = { package = "cosmic-ext-deskfeed-common", path = "../common", features = ["testkit"] }
 # Temporary folders for tests (ADR 0003); already in the tree.
 tempfile = "3"

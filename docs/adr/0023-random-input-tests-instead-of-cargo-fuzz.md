@@ -1,6 +1,6 @@
 # 0023. Random-input tests on stable Rust instead of cargo-fuzz
 
-- Status: Accepted (changes spec §13 item 10; cargo-fuzz added as an optional extra, see the addendum)
+- Status: Superseded by [0028](0028-random-input-tests-with-optional-cargo-fuzz.md) (2026-10-20): the random-input tests stay, now with proptest underneath, and cargo-fuzz is an optional extra.
 - Date: 2026-10-19
 
 ## Context

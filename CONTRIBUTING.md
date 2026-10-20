@@ -28,8 +28,8 @@ cargo fmt --all
 ```
 
 - Keep tests meaningful: test behaviour and failure cases, not the implementation. Decisions belong in small pure functions with tests (see `src/app/decide.rs`).
-- A parser of untrusted input (network data, files, FreeRDP's output) gets a random-input test with `common::testkit::random_inputs` (in the app also as `test_util::random_inputs`) and real samples (ADR 0023). For a deeper run: `DESKFEED_RANDOM_ROUNDS=200000 cargo test --release random`.
-- Optional, deeper still: coverage-guided fuzzing with cargo-fuzz (`fuzz/`, ADR 0023 addendum). It needs rustup's nightly compiler, used only for this; the app is always built with stable. Setup: `rustup toolchain install nightly` and `cargo install cargo-fuzz`, then `just fuzz feed 300` or `just fuzz rdpfile 300`. A crash is saved under `fuzz/artifacts/`; turn it into a normal test before fixing it.
+- A parser of untrusted input (network data, files, FreeRDP's output) gets a random-input test with `common::testkit::random_inputs` (in the app also as `test_util::random_inputs`) and real samples (ADR 0028). For a deeper run: `DESKFEED_RANDOM_ROUNDS=200000 cargo test --release random`.
+- Optional, deeper still: coverage-guided fuzzing with cargo-fuzz (`fuzz/`, ADR 0028). It needs rustup's nightly compiler, used only for this; the app is always built with stable. Setup: `rustup toolchain install nightly` and `cargo install cargo-fuzz`, then `just fuzz feed 300` or `just fuzz rdpfile 300`. A crash is saved under `fuzz/artifacts/`; turn it into a normal test before fixing it.
 - Tests must not need a Microsoft account. Tests that touch the real keyring or desktop are `#[ignore]`d and run on request.
 - Behaviour that depends on FreeRDP or Microsoft: cite the source (file and line, or documentation) in a comment rather than guessing.
 - User-facing text goes into `i18n/en/cosmic_ext_deskfeed.ftl`. Write plainly; say what happened and what to do.

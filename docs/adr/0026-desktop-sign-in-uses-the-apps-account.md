@@ -1,6 +1,6 @@
 # 0026. The desktop sign-in uses the app's account
 
-- Status: Accepted. The hint works; the account check was removed (addenda, 2026-10-20).
+- Status: Superseded by [0027](0027-desktop-sign-in-pre-selects-the-apps-account.md) (2026-10-20): the hint stays, the account check was removed.
 - Date: 2026-10-19
 
 ## Context

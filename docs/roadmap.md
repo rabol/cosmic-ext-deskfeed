@@ -12,7 +12,7 @@ Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md)
 
 - **"Client version not supported"** (spec §7): a specific message when the service rejects the client version. What the service sends in that case isn't known yet. It needs evidence (a real rejection, or Microsoft's documentation) before anything is built.
 - **OIDC key scope** (review U6): whether the ID token's signing key should also be checked against the tenant it was issued for.
-- **Pinning the tenant for the desktop's sign-in** (ADR 0026): `/azure:tenantid:<tid>,use-tenantid:on`. It waits for a test on the real tenant.
+- **Pinning the tenant for the desktop's sign-in** (ADR 0027): `/azure:tenantid:<tid>,use-tenantid:on`. It waits for a test on the real tenant.
 
 ## Later, when possible
 

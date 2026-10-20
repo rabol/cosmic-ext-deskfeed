@@ -73,7 +73,7 @@ ci:
     cargo deny --locked check
 
 # Developer-only: needs rustup's nightly toolchain and cargo-fuzz
-# (CONTRIBUTING.md, ADR 0023 addendum). New inputs go to
+# (CONTRIBUTING.md, ADR 0028). New inputs go to
 # fuzz/target/corpus-<target>.
 # Coverage-guided fuzzing of a parser (feed, rdpfile) for some seconds
 fuzz target="feed" seconds="300":

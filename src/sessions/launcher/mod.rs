@@ -93,7 +93,7 @@ pub struct LaunchSpec {
     pub window_title: String,
     pub app_id: String,
     /// The account's user name, so FreeRDP's own sign-in for the desktop
-    /// starts with it selected (ADR 0026).
+    /// starts with it selected (ADR 0027).
     pub login_hint: Option<String>,
 }
 
