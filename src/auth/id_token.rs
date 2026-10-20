@@ -181,12 +181,7 @@ fn verify(
     if claims.iss != format!("https://login.microsoftonline.com/{tenant_id}/v2.0") {
         return Err(IdTokenError::WrongIssuer);
     }
-    if claims.exp + SKEW_SECS < now_unix {
-        return Err(IdTokenError::Expired);
-    }
-    if claims.nbf.is_some_and(|nbf| nbf > now_unix + SKEW_SECS) {
-        return Err(IdTokenError::NotYetValid);
-    }
+    in_time(claims.exp, claims.nbf, now_unix)?;
     if let Some(nonce) = nonce
         && claims.nonce.as_deref() != Some(nonce)
     {
@@ -214,6 +209,19 @@ pub(crate) fn is_guid(s: &str) -> bool {
             8 | 13 | 18 | 23 => c == '-',
             _ => c.is_ascii_hexdigit(),
         })
+}
+
+/// Whether `now` is within the token's lifetime, allowing [`SKEW_SECS`]
+/// of clock difference either way. Saturating: values near the end of the
+/// range don't overflow.
+fn in_time(exp: u64, nbf: Option<u64>, now: u64) -> Result<(), IdTokenError> {
+    if exp.saturating_add(SKEW_SECS) < now {
+        return Err(IdTokenError::Expired);
+    }
+    if nbf.is_some_and(|nbf| nbf > now.saturating_add(SKEW_SECS)) {
+        return Err(IdTokenError::NotYetValid);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -314,6 +322,17 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn lifetime_at_the_ends_of_the_range() {
+        assert_eq!(in_time(u64::MAX, None, NOW), Ok(()));
+        assert_eq!(in_time(u64::MAX, Some(u64::MAX), u64::MAX), Ok(()));
+        assert_eq!(
+            in_time(u64::MAX, Some(u64::MAX), u64::MAX - SKEW_SECS - 1),
+            Err(IdTokenError::NotYetValid)
+        );
+        assert_eq!(in_time(0, None, u64::MAX), Err(IdTokenError::Expired));
     }
 
     #[test]
