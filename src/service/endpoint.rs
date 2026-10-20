@@ -186,13 +186,23 @@ impl EndpointPolicy {
 
     /// The feed discovery URL.
     pub fn feed_discovery_url(&self) -> Url {
+        self.fixed_url(Role::FeedDiscovery)
+    }
+
+    /// Microsoft's ID token signing keys (JWKS) for every tenant.
+    pub fn signing_keys_url(&self) -> Url {
+        self.fixed_url(Role::SigningKeys)
+    }
+
+    /// The one URL of a role whose rule names an exact host and path.
+    fn fixed_url(&self, role: Role) -> Url {
         let r = self
             .rules
             .iter()
-            .find(|r| r.role == Role::FeedDiscovery)
-            .expect("discovery rule");
+            .find(|r| r.role == role)
+            .expect("a rule for every fixed role");
         let Host::Exact(host) = &r.host else {
-            unreachable!("discovery host is exact")
+            unreachable!("fixed roles have an exact host")
         };
         let mut url = Url::parse(&format!("{}://{host}", r.scheme)).expect("valid origin");
         url.set_port(Some(r.port)).expect("port settable");
@@ -325,6 +335,19 @@ mod tests {
         assert_eq!(
             EndpointPolicy::azure_public().feed_discovery_url().as_str(),
             "https://rdweb.wvd.microsoft.com/api/arm/feeddiscovery"
+        );
+    }
+
+    #[test]
+    fn signing_keys_url_is_the_reviewed_one() {
+        // Microsoft's keys for every tenant of the public cloud.
+        assert_eq!(
+            EndpointPolicy::azure_public().signing_keys_url().as_str(),
+            "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+        );
+        assert_eq!(
+            EndpointPolicy::local_test(8080).signing_keys_url().as_str(),
+            "http://127.0.0.1:8080/common/discovery/v2.0/keys"
         );
     }
 

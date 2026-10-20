@@ -109,7 +109,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 - [ ] **A round trip through a URL** (`src/auth/signin.rs:319-359`): the helper's JSON reply is turned back into a URL only so `Attempt::complete` can parse it again. Effort S, risk low.
 - [ ] **Errors as magic strings.** `HelperFailed(String)` with `"random"`, `"proxy"`, `"no reply"`… is matched by string in `app/errors.rs`. *Simpler:* own variants. Effort S, risk low.
 - [x] **Hand-written string conversion for the cache's resource kind** (Done 2026-10-20; same file format, tested) (`cache.rs`, `model.rs`). *Simpler:* serde `rename_all = "lowercase"` on the enum. Effort S, risk low.
-- [ ] **The signing-keys address is hard-coded** ✓ checked (`id_token.rs:21` `JWKS_URL`), unlike the other endpoints, which come from `EndpointPolicy`. Two tests pass only because the test policy refuses that address. Effort S, risk low.
+- [x] **The signing-keys address is hard-coded** (Done 2026-10-20) ✓ checked (`id_token.rs:21` `JWKS_URL`), unlike the other endpoints, which come from `EndpointPolicy`. Two tests pass only because the test policy refuses that address. Effort S, risk low.
 - [ ] **Tray events mirror tray actions one to one** (`src/tray.rs` `TrayEvent` vs `TrayAction`, plus `Menu::clicked`). Two walkers must number menu IDs identically. *Simpler:* `TrayEvent::Action(TrayAction)` and one flat list built in `set_menu`. Effort S–M, risk low.
 - [ ] **Polling instead of glib fd watches** in the helper.
   - `freerdp.rs:214-253` uses a reader thread, a channel and a 50 ms poll; `main.rs:138-156` uses a thread, a flag and a 200 ms poll.

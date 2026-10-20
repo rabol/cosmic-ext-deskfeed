@@ -8,7 +8,6 @@ use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ring::signature::{RSA_PKCS1_2048_8192_SHA256, RsaPublicKeyComponents};
 use serde::Deserialize;
-use url::Url;
 
 use crate::service::endpoint::Role;
 use crate::service::http::{Http, HttpError};
@@ -16,9 +15,6 @@ use crate::service::http::{Http, HttpError};
 /// Allowed clock difference.
 const SKEW_SECS: u64 = 5 * 60;
 const MAX_TOKEN_LEN: usize = 16 * 1024;
-
-/// Microsoft's signing keys for all tenants of the public cloud.
-pub const JWKS_URL: &str = "https://login.microsoftonline.com/common/discovery/v2.0/keys";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Jwk {
@@ -95,7 +91,7 @@ struct Claims {
 
 /// Downloads Microsoft's current signing keys.
 pub fn fetch_keys(http: &Http) -> Result<Vec<Jwk>, IdTokenError> {
-    let url = Url::parse(JWKS_URL).expect("static URL");
+    let url = http.policy().signing_keys_url();
     let resp = http
         .get(&url, Role::SigningKeys, None)
         .map_err(|e: HttpError| IdTokenError::KeysUnavailable(e.to_string()))?;

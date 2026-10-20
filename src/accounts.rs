@@ -1171,7 +1171,8 @@ mod tests {
     #[test]
     fn a_renewed_id_token_is_never_taken_unchecked() {
         // Its signature must be checked against Microsoft's keys; when they
-        // can't be fetched (here: not an allowed address), retry later.
+        // can't be fetched (here the test server answers only the token
+        // request), retry later.
         let me = identity("00000000-0000-0000-0000-0000000000a8");
         let (port, _) = serve_once(
             "200 OK",
@@ -1300,9 +1301,9 @@ mod tests {
     #[test]
     fn renewal_checks_a_renewed_id_token_too() {
         // Same rule as restoring: the ID token's signature is checked
-        // against Microsoft's keys. Here they can't be fetched (not an
-        // allowed address), so the renewal is retried later and nothing is
-        // saved.
+        // against Microsoft's keys. Here they can't be fetched (the test
+        // server answers only the token request), so the renewal is
+        // retried later and nothing is saved.
         let me = identity("00000000-0000-0000-0000-0000000000b4");
         let (port, _) = serve_once(
             "200 OK",
