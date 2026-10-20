@@ -26,6 +26,9 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste: via wgpu (libcosmic's renderer)" },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz: via resvg (libcosmic's SVG icons)" },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser: via cosmic-text/fontdb (libcosmic's text)" },
+    # Build time only: i18n-embed's macros read our own i18n.toml with it.
+    # i18n-config 0.4.8, the newest (2025-07), still uses it.
+    { id = "RUSTSEC-2026-0374", reason = "basic-toml: via i18n-config, build time only (i18n-embed macros reading i18n.toml); no release without it" },
 ]
 
 [licenses]
