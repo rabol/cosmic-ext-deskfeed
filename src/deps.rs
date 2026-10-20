@@ -34,6 +34,15 @@ pub enum Dependency {
 }
 
 impl Dependency {
+    pub const ALL: [Self; 6] = [
+        Self::FreeRdp,
+        Self::FreeRdpEntra,
+        Self::SignInHelper,
+        Self::SecretService,
+        Self::RuntimeDir,
+        Self::CosmicWindows,
+    ];
+
     /// Required ones block connecting or signing in; optional ones only
     /// remove a feature.
     pub fn required(self) -> bool {
@@ -61,6 +70,18 @@ impl Status {
 pub struct Check {
     pub dependency: Dependency,
     pub status: Status,
+}
+
+/// Every dependency marked unusable for `why`: what the app shows when
+/// the checks themselves couldn't run.
+pub fn not_checked(why: &str) -> Vec<Check> {
+    Dependency::ALL
+        .into_iter()
+        .map(|dependency| Check {
+            dependency,
+            status: Status::Broken(why.to_owned()),
+        })
+        .collect()
 }
 
 /// Runs every check.
@@ -104,11 +125,14 @@ pub fn check_all() -> Vec<Check> {
     ]
 }
 
-/// True when every required dependency is usable.
+/// True when every required dependency was checked and is usable. A
+/// dependency missing from `checks` counts as not usable: an empty list
+/// (the checks didn't run) must never read as "all present".
 pub fn required_ok(checks: &[Check]) -> bool {
-    checks
-        .iter()
-        .all(|c| !c.dependency.required() || c.status.is_ok())
+    Dependency::ALL
+        .into_iter()
+        .filter(|d| d.required())
+        .all(|d| checks.iter().any(|c| c.dependency == d && c.status.is_ok()))
 }
 
 fn check_freerdp_version(bin: &Path) -> Status {
@@ -226,6 +250,30 @@ mod tests {
         assert!(!has_build_flag("WITH_AAD=OFF", "WITH_AAD"));
         assert!(!has_build_flag("WITH_AADX=ON", "WITH_AAD"));
         assert!(has_build_flag("WITH_AAD=1", "WITH_AAD"));
+    }
+
+    #[test]
+    fn unchecked_dependencies_are_never_ok() {
+        // An empty list once read as "all present": a crashed check would
+        // have let the app go on as if FreeRDP were there.
+        assert!(!required_ok(&[]));
+        assert!(!required_ok(&not_checked("the check stopped")));
+        let ok = |dependency| Check {
+            dependency,
+            status: Status::Ok(String::new()),
+        };
+        let all: Vec<Check> = Dependency::ALL.into_iter().map(ok).collect();
+        assert!(required_ok(&all));
+        // Optional ones may be missing; a required one may not.
+        let required: Vec<Check> = Dependency::ALL
+            .into_iter()
+            .filter(|d| d.required())
+            .map(ok)
+            .collect();
+        assert!(required_ok(&required));
+        assert!(!required_ok(&required[1..]));
+        // Every dependency is listed once, in check_all's order.
+        assert_eq!(not_checked("x").len(), Dependency::ALL.len());
     }
 
     /// On a complete desktop: `cargo test -- --ignored this_machine`.

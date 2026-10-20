@@ -13,8 +13,11 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let _ = file.remote_app();
-    for line in file.to_freerdp_text().split_terminator("\r\n") {
-        assert!(!line.chars().any(char::is_control), "{line:?}");
-        assert_eq!(line.splitn(3, ':').count(), 3, "{line:?}");
+    // As written for FreeRDP, with the clipboard off and on.
+    for clipboard in [false, true] {
+        for line in file.to_freerdp_text_with(clipboard).split_terminator("\r\n") {
+            assert!(!line.chars().any(char::is_control), "{line:?}");
+            assert_eq!(line.splitn(3, ':').count(), 3, "{line:?}");
+        }
     }
 });

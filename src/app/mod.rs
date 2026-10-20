@@ -887,9 +887,14 @@ impl AppModel {
     fn check_dependencies(&mut self) -> Task<cosmic::Action<Message>> {
         self.deps = None;
         cosmic::task::future(async move {
+            // A check that crashed reports every dependency as unusable,
+            // never an empty (all-clear) list.
             let checks = tokio::task::spawn_blocking(deps::check_all)
                 .await
-                .unwrap_or_default();
+                .unwrap_or_else(|e| {
+                    crate::app_log!("dependency check failed: {e}");
+                    deps::not_checked(&fl!("deps-check-failed"))
+                });
             Message::DependenciesChecked(checks)
         })
     }

@@ -185,6 +185,7 @@ stage-running = It stopped after the session had started.
 dependencies = Dependencies
 check-again = Check again
 deps-checking = Checking…
+deps-check-failed = the check itself failed; select Check again
 deps-missing = Some required software is missing or not usable, so connecting may not work. Close this message to see the details.
 deps-required = Required
 deps-optional = Optional
