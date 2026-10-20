@@ -174,10 +174,10 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - `start_without_gateway` re-implements `launch_with` step by step and can drift.
   - *Simpler:* `fake_freerdp(script)`, `launch_fake(spec, script)`, `is_gone(pid)`.
   - Effort M, risk low.
-- [ ] **Four hand-written fake HTTP servers and ~14 temp-dir naming schemes.** *HTTP part done 2026-10-20: mockito (ADR 0003, compared with wiremock and httpmock); one raw server stays for hostile cases. Temp folders still open (`tempfile`, under "Hand-written code where a mature crate fits").* *Simpler:* one configurable test server in `test_util`, and `tempfile` (already in Cargo.lock) as a dev-dependency (an ADR line per the minimal-dependencies rule). Effort S, risk low.
+- [x] **Four hand-written fake HTTP servers and ~14 temp-dir naming schemes.** (Done 2026-10-20: mockito, compared with wiremock and httpmock, with one raw server kept for hostile cases; temporary folders with `tempfile`, already in the tree. Both in ADR 0003.) *Simpler:* one configurable test server in `test_util`, and `tempfile` (already in Cargo.lock) as a dev-dependency (an ADR line per the minimal-dependencies rule). Effort S, risk low.
 - [ ] **Hand-written code where a mature crate fits** (owner, 2026-10-20: "keep minimal does not mean handcode everything"). Weigh each honestly — crate if it replaces real code or a tricky format and is widely used; record it in an ADR:
   - test HTTP fakes → `mockito` (decided; one small raw server stays for hostile cases);
-  - test temp folders → `tempfile`;
+  - test temp folders → `tempfile` (done 2026-10-20);
   - `testkit::random_inputs` → `proptest` (shrinks failing inputs);
   - the tray's StatusNotifierItem/dbusmenu code (`tray.rs`, ~470 lines) → `ksni`;
   - local time via `localtime_r` (`views.rs`) → a time crate, if one is already in the tree.

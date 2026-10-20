@@ -198,13 +198,10 @@ mod tests {
 
     /// A store in a fresh temporary folder.
     fn with_store(f: impl FnOnce(&Store)) {
-        let root = std::env::temp_dir().join(format!(
-            "deskfeed-cache-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        f(&Store { root: root.clone() });
-        let _ = fs::remove_dir_all(root);
+        let tmp = tempfile::tempdir().unwrap();
+        f(&Store {
+            root: tmp.path().to_path_buf(),
+        });
     }
 
     fn sample() -> Vec<CachedWorkspace> {

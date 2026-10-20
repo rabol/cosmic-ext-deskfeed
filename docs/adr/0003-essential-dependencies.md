@@ -55,3 +55,9 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
     All three can set status, headers and bodies, answer redirects, and check headers and bodies.
   - Chosen: mockito.
   - One small raw server (`one_connection` in `http.rs`) stays, for what a mock server can't send: a compressed bomb, a server that stalls, an answer cut off halfway.
+- **`tempfile` 3, test-only (2026-10-20):** temporary folders in the tests, replacing about 14 hand-made `temp_dir()` names.
+  - Options compared:
+    - `tempfile`: already in `Cargo.lock` through cosmic-config (its atomic writes), so nothing new; the folder is removed when the test ends, also when it fails;
+    - `temp-dir` or `testdir`: smaller, but new crates for the same job;
+    - our own guard type in `testkit`: about 20 lines that `tempfile` already does, including unique names.
+  - Chosen: `tempfile`, in the app and the sign-in helper.

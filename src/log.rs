@@ -317,8 +317,8 @@ mod tests {
 
     #[test]
     fn writes_a_private_file() {
-        let base = std::env::temp_dir().join(format!("deskfeed-log-{}", std::process::id()));
-        let dir = base.join("cosmic-ext-deskfeed");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("cosmic-ext-deskfeed");
         let mut file = open_in(&dir).unwrap();
         writeln!(file, "hello from the test").unwrap();
         let text = fs::read_to_string(dir.join(FILE)).unwrap();
@@ -347,7 +347,6 @@ mod tests {
             "after\n",
             "replaced"
         );
-        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]

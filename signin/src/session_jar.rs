@@ -166,29 +166,24 @@ mod tests {
         }
     }
 
-    fn tmp() -> PathBuf {
-        let mut b = [0u8; 8];
-        let _ = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b));
-        std::env::temp_dir().join(format!("avd-jar-{}", u64::from_ne_bytes(b)))
-    }
-
     #[test]
     fn round_trip_with_private_permissions() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tmp().join("default");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("default");
         fs::create_dir_all(&dir).unwrap();
         save(&dir, &[cookie("ESTSAUTH"), cookie("buid")]);
         assert_eq!(load(&dir), vec![cookie("ESTSAUTH"), cookie("buid")]);
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode(&dir), 0o700);
         assert_eq!(mode(&dir.join(FILE)), 0o600);
-        fs::remove_dir_all(dir.parent().unwrap()).unwrap();
     }
 
     #[test]
     fn a_removed_jar_is_not_recreated() {
         // Signed out while a helper was finishing: its save goes nowhere.
-        let dir = tmp().join("gone");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("jars/gone");
         save(&dir, &[cookie("ESTSAUTH")]);
         assert!(!dir.exists());
         assert!(!dir.parent().unwrap().exists());
@@ -196,12 +191,12 @@ mod tests {
 
     #[test]
     fn damaged_or_missing_jar_is_empty() {
-        let dir = tmp();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("default");
         assert_eq!(load(&dir), Vec::new());
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(FILE), "not json").unwrap();
         assert_eq!(load(&dir), Vec::new());
-        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

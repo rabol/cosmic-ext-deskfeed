@@ -54,6 +54,9 @@ ron = "0.12"
 # A mock HTTP server for tests (ADR 0003: compared with wiremock and
 # httpmock); tests only.
 mockito = "1"
+# Temporary folders for tests, removed even when a test fails (ADR 0003);
+# already in the tree through cosmic-config.
+tempfile = "3"
 
 [build-dependencies]
 xdgen = "0.1"

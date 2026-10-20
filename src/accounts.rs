@@ -1126,8 +1126,8 @@ mod tests {
     #[test]
     fn a_cache_save_queued_before_sign_out_writes_nothing() {
         let id = account_id(&identity("00000000-0000-0000-0000-0000000000f6"));
-        let root = std::env::temp_dir().join(format!("deskfeed-cache-race-{}", std::process::id()));
-        let store = crate::cache::Store::at(root.clone());
+        let tmp = tempfile::tempdir().unwrap();
+        let store = crate::cache::Store::at(tmp.path().to_path_buf());
         let list = vec![crate::cache::CachedWorkspace {
             name: "Workspace".into(),
             resources: Vec::new(),
@@ -1145,7 +1145,6 @@ mod tests {
             store.load(&id, Duration::from_hours(1)).is_none(),
             "the offline list came back"
         );
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

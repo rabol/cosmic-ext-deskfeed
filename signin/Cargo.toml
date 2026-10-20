@@ -24,3 +24,5 @@ url = "2.5"
 [dev-dependencies]
 # Random-input testing (ADR 0023); tests only.
 testkit = { package = "cosmic-ext-deskfeed-testkit", path = "../testkit" }
+# Temporary folders for tests (ADR 0003); already in the tree.
+tempfile = "3"

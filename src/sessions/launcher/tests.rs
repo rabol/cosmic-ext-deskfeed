@@ -123,16 +123,15 @@ fn a_remote_app_file_gets_the_app_options() {
 #[test]
 fn only_executable_files_count() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("avd-exec-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     let file = dir.join("xfreerdp3");
     fs::write(&file, "#!/bin/sh\n").unwrap();
     fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
     assert!(!is_executable(&file));
     fs::set_permissions(&file, fs::Permissions::from_mode(0o755)).unwrap();
     assert!(is_executable(&file));
-    assert!(!is_executable(&dir));
-    fs::remove_dir_all(dir).unwrap();
+    assert!(!is_executable(dir));
 }
 
 #[test]
@@ -518,8 +517,8 @@ fn log_keeps_errors_and_detects_connection() {
 #[test]
 fn launch_hands_arguments_over_privately() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("avd-launch-test-{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     let out = dir.join("out.txt");
     let fake = dir.join("xfreerdp3");
     fs::write(
@@ -608,7 +607,6 @@ fn launch_hands_arguments_over_privately() {
             .count(),
         0
     );
-    fs::remove_dir_all(dir).unwrap();
 }
 
 /// FreeRDP's log lines arrive while it runs. `sed` writes through the C
@@ -617,7 +615,8 @@ fn launch_hands_arguments_over_privately() {
 #[test]
 fn log_lines_arrive_while_freerdp_runs() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("avd-launch-live-{}", std::process::id()));
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     fs::create_dir_all(dir.join("run")).unwrap();
     let fake = dir.join("fake");
     fs::write(
@@ -642,7 +641,6 @@ fn log_lines_arrive_while_freerdp_runs() {
         SessionEvent::Connected
     );
     stop_all(&[session], STOP_GRACE);
-    fs::remove_dir_all(dir).unwrap();
 }
 
 /// The clipboard setting reaches FreeRDP through the connection file
@@ -651,7 +649,8 @@ fn log_lines_arrive_while_freerdp_runs() {
 #[test]
 fn the_clipboard_setting_reaches_the_connection_file() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("avd-launch-clip-{}", std::process::id()));
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     fs::create_dir_all(dir.join("run")).unwrap();
     for (mode, want) in [
         (crate::settings::clipboard::BOTH, "redirectclipboard:i:1"),
@@ -699,13 +698,13 @@ fn the_clipboard_setting_reaches_the_connection_file() {
             assert!(got.contains("ARG:/clipboard:direction-to:remote"), "{got}");
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
 fn reports_crash_and_failure_codes() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("avd-launch-fail-{}", std::process::id()));
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     fs::create_dir_all(dir.join("run")).unwrap();
     for (script, want) in [
         (
@@ -743,7 +742,6 @@ fn reports_crash_and_failure_codes() {
             other => panic!("unexpected {other:?}"),
         }
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 
 /// A FreeRDP that ignores SIGTERM and leaves a child behind (like the
@@ -751,7 +749,8 @@ fn reports_crash_and_failure_codes() {
 #[test]
 fn stopping_ends_the_whole_process_group() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!("avd-launch-stop-{}", std::process::id()));
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     fs::create_dir_all(dir.join("run")).unwrap();
     let out = dir.join("child.txt");
     let fake = dir.join("fake");
@@ -803,7 +802,6 @@ sleep 300
         false
     });
     assert!(gone, "child {child} still running");
-    fs::remove_dir_all(dir).unwrap();
 }
 
 /// `launch_with`'s steps for a test host without the Azure gateway:
@@ -862,7 +860,8 @@ fn windows_host_remote_app() {
     let var = |name: &str| std::env::var(format!("DESKFEED_TEST_RAIL_{name}"));
     let host = var("HOST").expect("DESKFEED_TEST_RAIL_HOST");
     let secs: u64 = var("SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(15);
-    let dir = std::env::temp_dir().join(format!("avd-rail-{}", std::process::id()));
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     fs::create_dir_all(dir.join("run")).unwrap();
     let s = LaunchSpec {
         connection: ConnectionFile::local_test_app(
@@ -890,7 +889,7 @@ fn windows_host_remote_app() {
         login_hint: None,
     };
     // A test host's self-signed certificate.
-    let (session, rx) = start_without_gateway(&s, &dir, |mut args| {
+    let (session, rx) = start_without_gateway(&s, dir, |mut args| {
         assert!(args.contains(&"/multimon".to_owned()), "{args:?}");
         assert!(!args.contains(&"+f".to_owned()), "{args:?}");
         args.push("/cert:ignore".to_owned());
@@ -944,7 +943,6 @@ fn windows_host_remote_app() {
         let rest: Vec<_> = rx.try_iter().collect();
         println!("after stopping: {rest:?}");
     }
-    fs::remove_dir_all(dir).unwrap();
 }
 
 /// Real `xfreerdp3` through Deskfeed's own launch path, against the
@@ -964,7 +962,8 @@ fn local_test_server_session() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
-    let dir = std::env::temp_dir().join(format!("avd-local-{}", std::process::id()));
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     fs::create_dir_all(dir.join("run")).unwrap();
     let s = LaunchSpec {
         connection: ConnectionFile::local_test(&socket),
@@ -998,7 +997,7 @@ fn local_test_server_session() {
     // unless `DESKFEED_TEST_CHECK_CERT=1`.
     let ignore_cert =
         s.pinned_certificate.is_none() && std::env::var("DESKFEED_TEST_CHECK_CERT").is_err();
-    let (session, rx) = start_without_gateway(&s, &dir, |args| {
+    let (session, rx) = start_without_gateway(&s, dir, |args| {
         args.into_iter()
             .map(|a| {
                 if a == "/sec:nla" {
@@ -1022,7 +1021,6 @@ fn local_test_server_session() {
         }
         assert!(matches!(end, SessionEnd::CertificateNotTrusted(_)));
         stop_all(&[session], STOP_GRACE);
-        fs::remove_dir_all(dir).unwrap();
         return;
     }
     assert_eq!(
@@ -1046,7 +1044,6 @@ fn local_test_server_session() {
         std::thread::sleep(Duration::from_secs(secs));
     }
     stop_all(&[session], STOP_GRACE);
-    fs::remove_dir_all(dir).unwrap();
 }
 
 /// Real `xfreerdp3`: every property we keep, plus our arguments, must
@@ -1100,7 +1097,8 @@ fn real_freerdp_accepts_all_kept_properties() {
         .join("\r\n");
     text.push_str("\r\n");
     let connection = ConnectionFile::parse(text.as_bytes()).unwrap();
-    let dir = std::env::temp_dir().join(format!("avd-real-freerdp-{}", std::process::id()));
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
     fs::create_dir_all(dir.join("run")).unwrap();
     let s = LaunchSpec {
         connection,
@@ -1135,7 +1133,6 @@ fn real_freerdp_accepts_all_kept_properties() {
         log.iter().any(|l| l.contains("loadBalanceInfo")),
         "{log:#?}"
     );
-    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]

@@ -183,7 +183,8 @@ mod tests {
     #[test]
     fn saved_privately() {
         use std::os::unix::fs::PermissionsExt as _;
-        let path = std::env::temp_dir().join(format!("deskfeed-diag-{}.txt", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("report.txt");
         save(&path, "report").unwrap();
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
@@ -198,7 +199,6 @@ mod tests {
             0o600
         );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "again");
-        std::fs::remove_file(path).unwrap();
     }
 
     /// A report from the real log: `cargo test --release real_report --

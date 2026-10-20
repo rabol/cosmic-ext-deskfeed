@@ -23,7 +23,8 @@ mod tests {
 
     #[test]
     fn new_and_existing_folders_end_up_private() {
-        let base = std::env::temp_dir().join(format!("deskfeed-files-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let dir = base.join("a/b");
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
         private_dir(&dir).unwrap();
@@ -36,6 +37,5 @@ mod tests {
         let file = base.join("file");
         fs::write(&file, "x").unwrap();
         assert!(private_dir(&file).is_err());
-        fs::remove_dir_all(base).unwrap();
     }
 }

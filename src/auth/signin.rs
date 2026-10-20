@@ -390,30 +390,20 @@ mod tests {
         path
     }
 
-    fn tmp() -> PathBuf {
-        let mut bytes = [0u8; 8];
-        getrandom::fill(&mut bytes).unwrap();
-        let dir =
-            std::env::temp_dir().join(format!("avd-signin-test-{:x}", u64::from_le_bytes(bytes)));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     fn run(script: &str) -> Result<SignedIn, SignInError> {
-        let dir = tmp();
-        let helper = fake_helper(&dir, script);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let helper = fake_helper(dir, script);
         let http = Http::new(EndpointPolicy::local_test(1));
-        let r = sign_in(
+        sign_in(
             &http,
             &ClientConfig::public_remote_desktop(),
             &helper,
-            &dir,
+            dir,
             None,
             Duration::from_mins(5),
             &Cancel::default(),
-        );
-        std::fs::remove_dir_all(dir).unwrap();
-        r
+        )
     }
 
     #[test]
@@ -480,10 +470,11 @@ mod tests {
 
     #[test]
     fn helper_gets_only_allowlisted_environment() {
-        let dir = tmp();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let out = dir.join("env.txt");
         let helper = fake_helper(
-            &dir,
+            dir,
             &format!(
                 r#"env > "{}"; read line; echo '{{"status":"cancelled"}}'"#,
                 out.display()
@@ -496,22 +487,22 @@ mod tests {
             &http,
             &ClientConfig::public_remote_desktop(),
             &helper,
-            &dir,
+            dir,
             None,
             Duration::from_mins(5),
             &Cancel::default(),
         );
         let env = std::fs::read_to_string(&out).unwrap();
         assert!(!env.contains("AVD_TEST_SECRET"));
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn cancel_closes_helper_stdin() {
-        let dir = tmp();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         // The fake helper waits for EOF on stdin, like the real one.
         let helper = fake_helper(
-            &dir,
+            dir,
             r#"read line; cat > /dev/null; echo '{"status":"cancelled"}'"#,
         );
         let cancel = Cancel::default();
@@ -525,24 +516,24 @@ mod tests {
             &http,
             &ClientConfig::public_remote_desktop(),
             &helper,
-            &dir,
+            dir,
             None,
             Duration::from_mins(5),
             &cancel,
         );
         assert_eq!(r.unwrap_err(), SignInError::Cancelled);
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
     fn a_helper_that_ignores_cancel_is_ended() {
         // Sign-out waits for the sign-in window before deleting cookies; a
         // window that doesn't close is ended after the grace period.
-        let dir = tmp();
-        let helper = fake_helper(&dir, "read line; exec sleep 300");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let helper = fake_helper(dir, "read line; exec sleep 300");
         let cancel = Cancel::default();
         let c2 = cancel.clone();
-        let (dir2, helper2) = (dir.clone(), helper.clone());
+        let (dir2, helper2) = (dir.to_path_buf(), helper.clone());
         let signing_in = std::thread::spawn(move || {
             let http = Http::new(EndpointPolicy::local_test(1));
             sign_in(
@@ -567,7 +558,6 @@ mod tests {
             signing_in.join().unwrap().unwrap_err(),
             SignInError::Cancelled
         );
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
