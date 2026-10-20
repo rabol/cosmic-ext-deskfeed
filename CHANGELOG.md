@@ -13,6 +13,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Added
 
+- Plain RDP connections: **Add connection** saves a Windows machine by host name (server, user name, optional domain and password), listed under **Connections** in the sidebar and in the tray. It connects directly with NLA (no gateway), asks for the password or uses the remembered one, and asks before trusting an unknown certificate. Settings follow the app's, per connection. Removing one deletes its password, certificate, settings and favorite, asking first while it's connected. No RD Gateway or `.rdp` import yet (ADR 0029).
 - Quit in the Account menu, and Ctrl+Q: quits Deskfeed even when closing the window keeps it running in the background (asking first while desktops are connected).
 - Settings pages say when a desktop they apply to is connected: changes reach it the next time it connects.
 - The sign-in for a desktop now has your account filled in (ADR 0026, review U1).

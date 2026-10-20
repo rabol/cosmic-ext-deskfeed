@@ -1108,4 +1108,46 @@ mod saved_connections {
             "connecting again: the password"
         );
     }
+
+    /// The tray lists saved connections as their own group (ADR 0029):
+    /// inline when they are all there is, a submenu next to an account's.
+    #[test]
+    fn the_tray_lists_connections() {
+        use crate::tray::{TrayAction, TrayItem};
+        let connects = |items: &[TrayItem]| -> Vec<TrayAction> {
+            items
+                .iter()
+                .filter_map(|i| match i {
+                    TrayItem::Action { action, .. } => Some(action.clone()),
+                    _ => None,
+                })
+                .filter(|a| matches!(a, TrayAction::Connect(_)))
+                .collect()
+        };
+        let mut app = app();
+        let id = saved(&mut app);
+        let items = app.tray_items();
+        assert_eq!(connects(&items), [TrayAction::Connect(id.clone())]);
+        add_account(
+            &mut app,
+            "acct-t",
+            "00000000-0000-0000-0000-0000000000d1",
+            "k1",
+        );
+        let items = app.tray_items();
+        let groups: Vec<(&str, Vec<TrayAction>)> = items
+            .iter()
+            .filter_map(|i| match i {
+                TrayItem::Submenu { label, items } => Some((label.as_str(), connects(items))),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                ("anna@example.com", vec![TrayAction::Connect("k1".into())]),
+                (&*fl!("connections"), vec![TrayAction::Connect(id)]),
+            ]
+        );
+    }
 }

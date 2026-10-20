@@ -140,9 +140,10 @@ impl AppModel {
         Task::none()
     }
 
-    /// The tray's menu, from the signed-in accounts' lists (`tray_menu`).
-    fn tray_items(&self) -> Vec<crate::tray::TrayItem> {
-        let ready: Vec<(String, Vec<&ResourceView>)> = self
+    /// The tray's menu, from the signed-in accounts' lists and the saved
+    /// connections (ADR 0029), as one more group (`tray_menu`).
+    pub(super) fn tray_items(&self) -> Vec<crate::tray::TrayItem> {
+        let mut ready: Vec<(String, Vec<&ResourceView>)> = self
             .accounts
             .iter()
             .filter_map(|account| {
@@ -153,6 +154,9 @@ impl AppModel {
                 Some((account.label(), resources))
             })
             .collect();
+        if !self.connection_rows.is_empty() {
+            ready.push((fl!("connections"), self.connection_rows.iter().collect()));
+        }
         tray_menu(&ready, &self.config.favorites, &self.desks)
     }
 
@@ -190,8 +194,8 @@ impl AppModel {
 }
 
 /// The tray's menu: how many desktops are connected, Show, every desktop
-/// of the signed-in accounts (`(label, resources)`; a submenu per account
-/// when there are several), Quit.
+/// of the signed-in accounts and the saved connections (`(label,
+/// resources)`; a submenu per group when there are several), Quit.
 fn tray_menu(
     accounts: &[(String, Vec<&ResourceView>)],
     favorites: &std::collections::BTreeSet<String>,

@@ -10,7 +10,7 @@ Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md)
 
 ## Next
 
-- **Plain RDP connections** ("Add connection", [ADR 0029](adr/0029-plain-rdp-connections.md), accepted): direct connections with NLA, one "Connections" page; five steps.
+- **Plain RDP connections, after the first version** ([ADR 0029](adr/0029-plain-rdp-connections.md#compared-with-remmina-follow-up-steps)): connection settings for window size, color depth, network type and spanning monitors. Waiting on the owner: shared folder, smartcard logon, restricted admin mode. Later decisions: RD Gateway, importing `.rdp` files.
 
 ## Open questions
 

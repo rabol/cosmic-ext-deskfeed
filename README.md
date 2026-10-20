@@ -16,6 +16,7 @@ Your work desktops on the COSMIC™ desktop. A native COSMIC app that **works wi
 - **Stays signed in** between starts: the sign-in is kept in your desktop keyring (Secret Service), never in files. Your organization's sign-in rules still apply.
 - **All your desktops** from every workspace your accounts can use.
 - **Connect with Entra sign-in** (no Windows password) by default; host pools that need a Windows password get a native dialog that allows pasting.
+- **Windows machines by host name too:** **Add connection** saves a plain RDP connection (server, user name, optional domain and remembered password) next to your accounts. It connects directly with NLA, asks before trusting the machine's certificate, and shows up in the tray like a desktop.
 - **Settings for the app, overridden per account and again per desktop:** full screen or window, all monitors, open on a new COSMIC workspace, sound, microphone, camera, clipboard, and how long to wait for the desktop.
 - **Built for COSMIC:** libcosmic UI that follows the COSMIC design, the remote desktop groups under the app in the dock, light and dark themes.
 - **Checks its dependencies** at startup and tells you what to install.
@@ -54,7 +55,8 @@ This installs the app (`/usr/bin/cosmic-ext-deskfeed`), its sign-in helper (`/us
 2. **Connect.** Your workspaces and desktops appear. Select **Connect**. Microsoft may show *"Are you trying to sign in to Azure Virtual Desktop Client?"* or ask for your password again, depending on your organization's rules; then the desktop opens.
 3. **More accounts:** **Add account** in the sidebar (or **Account → Add account**).
 4. **Settings:** **View → Settings** sets defaults for every account; the gear in the header bar overrides them for the selected account; the gear on a desktop row overrides them for that desktop.
-5. **Sign out:** **Account → Sign out**, or **Sign out** in the account settings. This removes the account's saved sign-in and cookies from this computer.
+5. **A Windows machine by host name:** **Add connection** in the sidebar. Enter the server (`pc01`, `pc01.example.lan:3390` or an IP address) and your Windows user name, optionally a domain and the password, and save. It's listed under **Connections**; its gear edits it, and its settings follow the app's.
+6. **Sign out:** **Account → Sign out**, or **Sign out** in the account settings. This removes the account's saved sign-in and cookies from this computer.
 
 If something doesn't work, **View → Dependencies** shows what's missing, and **View → Open log folder** opens the log.
 
@@ -66,6 +68,7 @@ If something doesn't work, **View → Dependencies** shows what's missing, and *
 - **RemoteApps are a preview.** They connect and open as ordinary windows, but have only been tested against a Windows host, not yet a RemoteApp from Azure Virtual Desktop. Each app gets its own connection: opening a second app from the same host pool takes over the first one's session, and that connection then shows both apps' windows ([ADR 0020](./docs/adr/0020-remoteapps.md)).
 - **Proxies:** the app takes the proxy from the usual environment variables (`all_proxy`, `https_proxy`, `http_proxy`, `no_proxy`, upper or lower case) and gives FreeRDP the same one. FreeRDP supports only `http://` and `socks5://` proxies; with another kind the app says so instead of connecting without it. Desktop-environment proxy settings that aren't exported as variables are not used.
 - **Azure public cloud only**; no sovereign clouds.
+- **Plain RDP connections are direct only, with NLA:** no RD Gateway, no importing `.rdp` files, and no Windows machines that don't support Network Level Authentication. Windows usually makes its own certificate, so the first connection asks you to approve it ([ADR 0029](./docs/adr/0029-plain-rdp-connections.md)).
 - **No Flatpak**, by design.
 
 ## Privacy and security

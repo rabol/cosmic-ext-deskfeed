@@ -4,7 +4,7 @@ Every value the app fixes in code, and where it belongs. The owner's rule (2026-
 
 Keep this list current when adding or changing a constant.
 
-Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (desktop).
+Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (desktop). A saved plain RDP connection has no account: its settings are **A → C** (ADR 0029).
 
 ## Settings
 
@@ -42,6 +42,9 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 
 | Value | Where | Why it stays fixed |
 |---|---|---|
+| Plain RDP connection: port 3389 unless the server field gives one | `connections.rs` `DEFAULT_PORT` | Windows' own default; a different one is typed as `host:port` (ADR 0029). |
+| Plain RDP connection: NLA only (`/sec:nla`) | `sessions/launcher/args.rs` | Owner's decision (ADR 0029): no logon screen on the machine without the password check first. |
+| Plain RDP connection: host up to 253 characters, name 80, user name 1024 | `connections.rs` `MAX_HOST`, `MAX_NAME`, `MAX_USER_NAME` | Input bounds: a DNS name's limit, a readable title, and far above any real Windows user name; the values go to FreeRDP one per line. |
 | Body size limits (token 64 KiB, `.rdp` and keys 256 KiB, icons 256 KiB, discovery 1 MiB, feed 4 MiB) | `service/endpoint.rs` `max_body` | Security bounds (spec §7); a setting could only weaken them |
 | HTTP connect 15 s, total 60 s, no redirects | `service/http.rs` | Security bounds; the connection wait is a setting |
 | Feed limits: 200 000 XML nodes, depth 64, 64 tenant feeds, 2 000 resources, text 256 chars, IDs 128 chars | `service/feed.rs` | Security bounds |

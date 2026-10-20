@@ -105,6 +105,11 @@ These need a real Windows machine and its certificate. Before them, in Windows (
 
 21. **Reconnect** (ADR 0014). With the connection open and its password remembered, turn the Windows machine's network off for about 30 seconds. *Expected:* "Reconnecting (1 of 5)", then back to the same Windows session.
 
+22. **Tray and favorites** (the real panel; ADR 0017). With "Keep running in the background" on and a saved connection, close the window.
+   - *Expected:* the tray menu lists the connection (under "Connections" when an account is signed in too); Connect from there asks for the password in the window, or connects with the remembered one.
+   - Once connected it has a check mark and brings its window to the front.
+   - Star it in the window: it appears under Favorites at the top of the Connections page, and first in its tray group.
+
 ### How things look
 
 16. **"Changes apply the next time you connect"**. Connect a desktop and open its settings.

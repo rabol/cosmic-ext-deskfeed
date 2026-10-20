@@ -63,7 +63,7 @@ Tray resource menus and session indicators, optional background operation, start
 
 ### Outside initial scope
 
-Generic arbitrary-host RDP connection management, RD Gateway administration, Cloud PC provisioning, host-pool management, Microsoft Graph administration, sovereign clouds, mobile clients, Teams media optimization, printer and smartcard redirection, and implementing device compliance or an identity broker ourselves are excluded. Using an installed Microsoft Identity Broker through FreeRDP is allowed (§6). A cloud profile architecture may accommodate sovereign clouds later without weakening endpoint validation.
+RD Gateway connections and importing `.rdp` files for direct connections (each a later decision, ADR 0029), RD Gateway administration, Cloud PC provisioning, host-pool management, Microsoft Graph administration, sovereign clouds, mobile clients, Teams media optimization, printer and smartcard redirection, and implementing device compliance or an identity broker ourselves are excluded. Using an installed Microsoft Identity Broker through FreeRDP is allowed (§6). A cloud profile architecture may accommodate sovereign clouds later without weakening endpoint validation.
 
 ## 4. Compatibility investigation: first implementation milestone
 

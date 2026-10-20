@@ -1,6 +1,6 @@
 # 0029. Plain RDP connections ("Add connection")
 
-- Status: Accepted (the owner's answers below, 2026-10-20); being built: steps 1–4 of 5 done; step 5 (tray, docs, spec) next. Spec §1 and §13 changed to match.
+- Status: Accepted (the owner's answers below, 2026-10-20); built (steps 1–5, 2026-10-20). Spec §1, §3 and §13 changed to match. Follow-up steps: [Compared with Remmina](#compared-with-remmina-follow-up-steps).
 - Date: 2026-10-20
 
 ## Context
@@ -81,3 +81,40 @@ A Windows machine or VM the owner sets up. In Windows: Settings → System → R
 2. **Security:** NLA only (`/sec:nla`); older machines without NLA don't connect.
 3. **Scope:** direct connections only in the first version; RD Gateway and `.rdp` import later, each its own decision.
 4. **Spec:** widened: §1 now also covers Windows machines by host name, and §13 lists a direct connection's checks.
+
+## Compared with Remmina (follow-up steps)
+
+The owner compared the form with Remmina's RDP profile (2026-10-20). The first version has Server, User name, Password and Domain. The rest of Remmina's fields, with what FreeRDP 3.32.2 offers for each and what Deskfeed would do. None of this is built; each line is its own step.
+
+**Connection settings** (on the settings levels, so for AVD desktops too, not only for saved connections):
+
+| Remmina | FreeRDP | Plan |
+|---|---|---|
+| Resolution (initial window size, client resolution, custom) | `/size:WxH`, `/dynamic-resolution` | A "window size" choice next to full screen. |
+| Color depth | `/bpp:` | A choice; the default stays FreeRDP's. |
+| Network connection type | `/network:` (`modem` … `lan`, `auto`) | A choice, default `auto`. |
+| Span, force multi monitor | `/span`, `/multimon:force` | Options of the existing "all monitors" setting. |
+| List monitor IDs | `/list:monitor`, `/monitors:` | Already on the roadmap: choosing specific monitors (needs a second monitor to test). |
+| Keyboard mapping | `/kbd:` | Only if the automatic layout turns out wrong for someone; FreeRDP takes it from the system. |
+
+**Need the owner's decision** (each widens what a connection can reach or how it logs on):
+
+| Remmina | FreeRDP | Why it needs a decision |
+|---|---|---|
+| Share folder | `/drive:name,path` | The remote machine can read and write a local folder. Off by default, a folder chosen per connection; AVD's device policy would still win for desktops. |
+| Smartcard logon (and PIN) | `/smartcard-logon`, `/smartcard` | The spec excludes smartcard redirection (§3); it would need a card and reader to test. |
+| Restricted admin mode | `+restricted-admin` | Logs on without sending the password to the machine, but only for administrators and only where the machine allows it. Safer for admins, confusing for everyone else. |
+
+**Advised against:**
+
+| Remmina | FreeRDP | Why |
+|---|---|---|
+| Password hash | `/pth:` | Pass-the-hash: an NT hash is as good as the password, and storing or typing one is an attack technique more than a logon method. |
+
+**Not needed:**
+
+| Remmina | Why |
+|---|---|
+| Server history | The Connections list is the history. |
+| Left-handed mouse, disable smooth scrolling | Remmina's own input handling. FreeRDP gets the pointer from XWayland with COSMIC's mouse settings already applied; to be checked once someone misses them. |
+

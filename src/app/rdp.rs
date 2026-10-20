@@ -218,15 +218,30 @@ impl AppModel {
         self.connection_rows = rows;
     }
 
+    /// Favorites first, as on an account's page, then every connection.
     pub(super) fn connections_view(&self) -> Element<'_, Message> {
+        let space = cosmic::theme::spacing();
+        let mut col = widget::column::with_capacity(2).spacing(space.space_m);
+        let favorites: Vec<&ResourceView> = self
+            .connection_rows
+            .iter()
+            .filter(|r| self.config.favorites.contains(&r.key))
+            .collect();
+        if !favorites.is_empty() {
+            let mut section = widget::settings::section().title(fl!("favorites"));
+            for r in favorites {
+                section = section.add(self.resource_row("", r, true));
+            }
+            col = col.push(section);
+        }
         let mut section = widget::settings::section().title(fl!("connections"));
         for r in &self.connection_rows {
             section = section.add(self.resource_row("", r, true));
         }
         widget::scrollable(
-            widget::container(section)
+            widget::container(col.push(section))
                 .max_width(800)
-                .padding(cosmic::theme::spacing().space_m),
+                .padding(space.space_m),
         )
         .into()
     }
