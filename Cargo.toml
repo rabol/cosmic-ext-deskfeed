@@ -32,6 +32,9 @@ tempfile = "3"
 # which turns on the same features.
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 libc = "0.2"
+# Ending the sign-in helper through a pidfd, safely (ADR 0003); already in
+# the tree through tempfile, with this feature on.
+rustix = { version = "1", features = ["process"] }
 sha2 = "0.11"
 url = "2.5"
 # HTTP with TLS (ADR 0008): system trust store, ring provider, no bundled roots.

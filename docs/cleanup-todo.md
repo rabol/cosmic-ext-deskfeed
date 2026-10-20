@@ -116,7 +116,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - `Arc<Mutex<File>>` is used although everything runs on one loop.
   - *Simpler:* `glib::unix_fd_add_local`.
   - Effort M, risk med (re-run the hostile-input tests).
-- [ ] **Sign-in cancellation via raw PIDs** (`src/auth/signin.rs:65-130, 216-303`): Condvar, PID in a Mutex, `waitid(WNOWAIT)` and unsafe `kill`. Keeping the `Child` in the shared mutex may remove the unsafe code. Uncertain; try it. Effort M, risk med.
+- [x] **Sign-in cancellation via raw PIDs** (Done 2026-10-20: a pidfd through `rustix` instead; keeping the `Child` in the lock would have needed polling, and std's pidfd is unstable. No `unsafe` left there. ADR 0003.) (`src/auth/signin.rs:65-130, 216-303`): Condvar, PID in a Mutex, `waitid(WNOWAIT)` and unsafe `kill`. Keeping the `Child` in the shared mutex may remove the unsafe code. Uncertain; try it. Effort M, risk med.
 - [x] **Small wrappers.** (Done 2026-10-20: `open_sessions` and `now_label` inlined, `clock_label` reuses `date_time_label`, `Account::new`. Kept: `retain_from_tray(|_, _| false)` (two uses, clear enough); `with_window` goes with the workspace item.)
   - `open_sessions` and `diagnostics::now_label`;
   - `retain_from_tray(|_,_| false)` used three times (should be `clear_from_tray`);

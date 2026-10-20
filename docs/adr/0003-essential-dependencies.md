@@ -93,6 +93,12 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
     - `async-channel`: the simplest calls (`send_blocking`, `recv().await`), but 6 crates new to the helper (already in `Cargo.lock` for the app);
     - the `futures` crates: already compiled into the helper through glib, so nothing new; the reader thread waits for room with `poll_ready`.
   - Chosen: the `futures` crates.
+- **`rustix` with `process` (2026-10-20):** ending a hung sign-in helper through a Linux pidfd, replacing our `unsafe` `kill` by process ID and the `waitid(WNOWAIT)` that kept that ID from being reused.
+  - Options compared:
+    - keep the `Child` in the shared lock (cleanup-todo's idea): the thread that waits for the helper would hold the lock while blocked, or poll with `try_wait`;
+    - std's own pidfd (`CommandExt::create_pidfd`): still unstable (`linux_pidfd`, checked on rustc 1.99);
+    - `rustix`: safe `pidfd_open` and `pidfd_send_signal`; already shipped (through `tempfile`) with `process` on, so nothing new.
+  - Chosen: `rustix`. A pidfd always refers to the helper, so a kill can't reach a reused process ID, and the helper is reaped with plain `Child::wait`. Needs Linux 5.3; without a pidfd the helper is still ended by closing its stdin, by its own timer, and with the app.
 
 ### Suggestions from an outside review, not taken (2026-10-20)
 

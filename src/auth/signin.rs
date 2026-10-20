@@ -8,12 +8,14 @@
 //! from another thread by closing the helper's stdin.
 
 use std::io::{BufRead, BufReader, Write};
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use common::helper::{Reply, Request};
+use rustix::process::{Pid, PidfdFlags, Signal, pidfd_open, pidfd_send_signal};
 use url::Url;
 
 use super::attempt::{Attempt, CallbackError, ClientConfig};
@@ -26,7 +28,11 @@ const MAX_REPLY_LEN: u64 = 16 * 1024;
 /// The sign-in window's time is a setting ("Time allowed for signing in"),
 /// sent to the helper. Its own timer should end it by then; if it hangs,
 /// the app ends it this much later (spec §8: every attempt ends).
+#[cfg(not(test))]
 const HELPER_GRACE: Duration = Duration::from_secs(30);
+/// Short in tests, so the time limit can be tested.
+#[cfg(test)]
+const HELPER_GRACE: Duration = Duration::from_millis(300);
 
 pub struct SignedIn {
     pub identity: Identity,
@@ -107,8 +113,11 @@ pub struct Cancel(Arc<(Mutex<CancelState>, Condvar)>);
 struct CancelState {
     cancelled: bool,
     stdin: Option<ChildStdin>,
-    /// The helper's process ID while it runs (not yet reaped).
-    helper: Option<u32>,
+    /// The helper runs (started, not yet reaped).
+    running: bool,
+    /// The helper's pidfd, to end it. It always refers to that process,
+    /// even once reaped, so a reused process ID is never signalled.
+    pidfd: Option<OwnedFd>,
 }
 
 impl Cancel {
@@ -143,25 +152,27 @@ impl Cancel {
         let (guard, _) = self
             .0
             .1
-            .wait_timeout_while(guard, timeout, |s| s.helper.is_some())
+            .wait_timeout_while(guard, timeout, |s| s.running)
             .expect("not poisoned");
-        guard.helper.is_none()
+        !guard.running
     }
 
     fn kill(&self) {
-        if let Some(pid) = self.state().helper.and_then(|p| i32::try_from(p).ok()) {
-            // SAFETY: plain syscall. The ID is our unreaped child's: it is
-            // cleared (under this lock) only after `wait` reaped it.
-            unsafe { libc::kill(pid, libc::SIGKILL) };
+        if let Some(pidfd) = &self.state().pidfd {
+            let _ = pidfd_send_signal(pidfd, Signal::KILL);
         }
     }
 
-    fn started(&self, pid: u32) {
-        self.state().helper = Some(pid);
+    fn started(&self, pidfd: Option<OwnedFd>) {
+        let mut state = self.state();
+        state.running = true;
+        state.pidfd = pidfd;
     }
 
     fn finished(&self) {
-        self.state().helper = None;
+        let mut state = self.state();
+        state.running = false;
+        state.pidfd = None;
         self.0.1.notify_all();
     }
 }
@@ -254,7 +265,11 @@ fn run_helper(
     proxy.apply(&mut cmd);
     let mut child = crate::sessions::launcher::spawn_tied(cmd)
         .map_err(|e| SignInError::HelperFailed(HelperProblem::Start(e.kind().to_string())))?;
-    cancel.started(child.id());
+    // Opened before anything can reap the helper, so it is this process.
+    let pidfd = pidfd_open(Pid::from_child(&child), PidfdFlags::empty())
+        .inspect_err(|e| crate::app_log!("sign-in window: no pidfd ({e}); it can't be ended early"))
+        .ok();
+    cancel.started(pidfd);
     let mut stdin = child.stdin.take().expect("piped");
     let stdout = child.stdout.take().expect("piped");
     // Ends a helper that outlives its own timer (for example a hung web
@@ -290,14 +305,8 @@ fn run_helper(
     let mut line = String::new();
     let read = BufReader::new(std::io::Read::take(stdout, MAX_REPLY_LEN)).read_line(&mut line);
     cancel.state().stdin.take();
-    // The helper exits after replying. Wait for that without reaping, then
-    // reap it under the lock, so `kill` never targets a reaped (possibly
-    // reused) process ID.
-    wait_without_reaping(child.id());
-    {
-        let _state = cancel.state();
-        let _ = child.wait();
-    }
+    // The helper exits after replying (or is ended through its pidfd).
+    let _ = child.wait();
     cancel.finished();
 
     if cancel.is_cancelled() {
@@ -308,25 +317,6 @@ fn run_helper(
     }
     serde_json::from_str(line.trim_end())
         .map_err(|_| SignInError::HelperFailed(HelperProblem::BadReply))
-}
-
-/// Blocks until the child `pid` has exited, leaving it unreaped.
-fn wait_without_reaping(pid: libc::id_t) {
-    loop {
-        // SAFETY: plain syscall with a zeroed, writable siginfo.
-        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-        let rc = unsafe {
-            libc::waitid(
-                libc::P_PID,
-                pid,
-                &raw mut info,
-                libc::WEXITED | libc::WNOWAIT,
-            )
-        };
-        if rc == 0 || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
-            return;
-        }
-    }
 }
 
 /// Rebuilds the redirect URL from the helper's reply so the attempt can
@@ -533,7 +523,7 @@ mod tests {
             )
         });
         // Until the helper runs.
-        while cancel.state().helper.is_none() {
+        while !cancel.state().running {
             std::thread::sleep(Duration::from_millis(20));
         }
         let started = std::time::Instant::now();
@@ -544,6 +534,31 @@ mod tests {
             signing_in.join().unwrap().unwrap_err(),
             SignInError::Cancelled
         );
+    }
+
+    /// A helper that outlives its own time limit (a hung web view) is
+    /// ended, and the sign-in ends with it (spec §8: every attempt ends).
+    #[test]
+    fn a_helper_past_its_time_is_ended() {
+        let tmp = tempfile::tempdir().unwrap();
+        let helper = fake_helper(tmp.path(), "read line; exec sleep 300");
+        let dir = tmp.path().to_path_buf();
+        let (done, result) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(sign_in(
+                &Http::new(EndpointPolicy::local_test(1)),
+                &ClientConfig::public_remote_desktop(),
+                &helper,
+                &dir,
+                None,
+                Duration::from_millis(100),
+                &Cancel::default(),
+            ));
+        });
+        let result = result
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the helper wasn't ended");
+        assert_eq!(result.unwrap_err(), SignInError::Cancelled);
     }
 
     #[test]
