@@ -123,15 +123,16 @@ impl AppModel {
                 epoch,
                 cached,
             } => self.cache_loaded(&id, epoch, cached),
-            AccountMessage::SignOut(id) => return self.ask_sign_out(&id),
+            AccountMessage::SignOut(id) => return self.ask_leave(&id, Leaving::SignOut),
+            AccountMessage::Remove(id) => return self.ask_leave(&id, Leaving::Remove),
             AccountMessage::SignOutSelected => {
                 if let Some(Page::Account(id)) = self.selected_page() {
-                    return self.ask_sign_out(&id);
+                    return self.ask_leave(&id, Leaving::SignOut);
                 }
             }
             AccountMessage::SignOutConfirm => {
-                if let Some(id) = self.sign_out_asking.take() {
-                    return self.sign_out(&id);
+                if let Some((id, leaving)) = self.sign_out_asking.take() {
+                    return self.sign_out(&id, leaving);
                 }
             }
             AccountMessage::SignOutCancel => self.sign_out_asking = None,
@@ -200,6 +201,8 @@ impl AppModel {
             if self.account(&id).is_some() {
                 continue;
             }
+            // Saved by a version that didn't list accounts yet.
+            self.remember_account(&id, &stored.identity);
             let epoch = self.next();
             let mut account = Account::new(
                 id.clone(),
@@ -211,6 +214,23 @@ impl AppModel {
             self.accounts.push(account);
             tasks.push(self.load_cached(&id, epoch));
             tasks.push(self.start_restore(&id));
+        }
+        // Accounts signed out earlier: listed, signed out.
+        let signed_out: Vec<(String, crate::config::KnownAccount)> = self
+            .config
+            .accounts
+            .iter()
+            .filter(|(id, _)| self.account(id).is_none())
+            .map(|(id, k)| (id.clone(), k.clone()))
+            .collect();
+        for (id, known) in signed_out {
+            let epoch = self.next();
+            self.accounts.push(Account::new(
+                id,
+                (&known).into(),
+                AccountState::NeedsSignIn { error: None },
+                epoch,
+            ));
         }
         if let (Some(store), Some(known)) = (self.cache.clone(), known) {
             tasks.push(
@@ -377,6 +397,16 @@ impl AppModel {
     /// Signs in again to an account in the list, with its own cookies and
     /// its user name preselected.
     pub(super) fn start_account_sign_in(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+        // Its sign-out is still deleting the cookie profile a new sign-in
+        // would use.
+        if self.signing_out.contains(id) {
+            if let Some(a) = self.account_mut(id) {
+                a.state = AccountState::NeedsSignIn {
+                    error: Some(fl!("error-still-signing-out")),
+                };
+            }
+            return Task::none();
+        }
         let generation = self.next();
         let (Some(helper), Some(profile)) = (signin::find_helper(), accounts::prepared_profile(id))
         else {
@@ -522,6 +552,7 @@ impl AppModel {
             account.sign_in = generation;
             self.accounts.push(account);
         }
+        self.remember_account(&id, &signed_in.identity);
         self.rebuild_nav(&Page::Account(id.clone()));
         let started = self.sign_ins.sign_out_count(&id);
         self.sign_ins.signed_in(&signed_in, started);
@@ -548,6 +579,34 @@ impl AppModel {
 
     /// A sign-in finished for an account whose sign-out is still deleting
     /// its files: adopting this profile now would lose it.
+    /// Keeps the account in the sidebar across restarts (its name and IDs).
+    pub(super) fn remember_account(
+        &mut self,
+        id: &str,
+        identity: &crate::auth::id_token::Identity,
+    ) {
+        let known = crate::config::KnownAccount::from(identity);
+        if self.config.accounts.get(id) == Some(&known) {
+            return;
+        }
+        let mut all = self.config.accounts.clone();
+        all.insert(id.to_owned(), known);
+        save_config!(self, accounts, set_accounts, all);
+    }
+
+    /// Takes a removed account off the remembered list, with its own
+    /// settings.
+    fn forget_account(&mut self, id: &str) {
+        let mut all = self.config.accounts.clone();
+        if all.remove(id).is_some() {
+            save_config!(self, accounts, set_accounts, all);
+        }
+        let mut overrides = self.config.account_settings.clone();
+        if overrides.remove(id).is_some() {
+            save_config!(self, account_settings, set_account_settings, overrides);
+        }
+    }
+
     fn refuse_while_signing_out(&mut self, origin: Option<&str>, profile: &Path) {
         accounts::remove_unused_profile(profile);
         let error = fl!("error-still-signing-out");
@@ -828,24 +887,36 @@ impl AppModel {
         Task::batch(tasks)
     }
 
-    /// Sign-out asks first while the account has desktops or apps open
-    /// (spec §6: disconnect and sign out, or cancel).
-    fn ask_sign_out(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+    /// Signing out or removing asks first while the account has desktops
+    /// or apps open (spec §6: disconnect and sign out, or cancel).
+    fn ask_leave(&mut self, id: &str, leaving: Leaving) -> Task<cosmic::Action<Message>> {
         if self.desks.open_count_for(id) == 0 {
-            return self.sign_out(id);
+            return self.sign_out(id, leaving);
         }
-        self.sign_out_asking = Some(id.to_owned());
+        self.sign_out_asking = Some((id.to_owned(), leaving));
         Task::none()
     }
 
-    pub(super) fn sign_out_dialog(&self, id: &str) -> Element<'_, Message> {
+    pub(super) fn sign_out_dialog(&self, id: &str, leaving: Leaving) -> Element<'_, Message> {
         let label = self.account(id).map(Account::label).unwrap_or_default();
         let open = u32::try_from(self.desks.open_count_for(id)).unwrap_or(u32::MAX);
+        let (title, body, confirm) = match leaving {
+            Leaving::SignOut => (
+                fl!("sign-out-title", account = label),
+                fl!("sign-out-body", count = open),
+                fl!("sign-out-disconnect"),
+            ),
+            Leaving::Remove => (
+                fl!("remove-title", account = label),
+                fl!("remove-body", count = open),
+                fl!("remove-disconnect"),
+            ),
+        };
         widget::dialog()
-            .title(fl!("sign-out-title", account = label))
-            .body(fl!("sign-out-body", count = open))
+            .title(title)
+            .body(body)
             .primary_action(
-                widget::button::destructive(fl!("sign-out-disconnect"))
+                widget::button::destructive(confirm)
                     .on_press(Message::Account(AccountMessage::SignOutConfirm)),
             )
             .secondary_action(
@@ -855,13 +926,31 @@ impl AppModel {
             .into()
     }
 
-    /// Signs one account out: ends its sessions, removes it from the list,
-    /// deletes its cookies and keyring item (spec §6).
-    pub(super) fn sign_out(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+    /// Signs one account out: ends its sessions and deletes its cookies,
+    /// keyring items and offline list (spec §6). Signed out, it stays
+    /// listed as a fresh entry, so nothing started before can bring it back
+    /// (each result checks its account's epoch or generation); removed, it
+    /// leaves the list and its own settings go.
+    pub(super) fn sign_out(&mut self, id: &str, leaving: Leaving) -> Task<cosmic::Action<Message>> {
         let Some(pos) = self.accounts.iter().position(|a| a.id == id) else {
             return Task::none();
         };
-        let account = self.accounts.remove(pos);
+        let account = match leaving {
+            Leaving::Remove => {
+                self.forget_account(id);
+                self.accounts.remove(pos)
+            }
+            Leaving::SignOut => {
+                let epoch = self.next();
+                let fresh = Account::new(
+                    id.to_owned(),
+                    self.accounts[pos].identity.clone(),
+                    AccountState::NeedsSignIn { error: None },
+                    epoch,
+                );
+                std::mem::replace(&mut self.accounts[pos], fresh)
+            }
+        };
         self.icons.retain(|(account, _), _| account != id);
         // From now on nothing started earlier saves its tokens.
         self.sign_ins.note_sign_out(id);
@@ -896,7 +985,10 @@ impl AppModel {
         }
         self.withdraw_dialogs(|d| d.account == id);
         self.signing_out.insert(id.to_owned());
-        self.select_first_account();
+        match leaving {
+            Leaving::Remove => self.select_first_account(),
+            Leaving::SignOut => self.rebuild_nav(&Page::Account(id.to_owned())),
+        }
         // Its cookies go only after everything that could still write them
         // has ended: the sign-in window and FreeRDP with its sign-in helper
         // (spec §6). Blocking, so not on the UI thread.

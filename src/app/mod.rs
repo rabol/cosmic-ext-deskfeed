@@ -121,7 +121,7 @@ pub struct AppModel {
     signing_out: HashSet<String>,
     /// The account whose sign-out waits for an answer: it has desktops or
     /// apps open (spec §6).
-    sign_out_asking: Option<String>,
+    sign_out_asking: Option<(String, Leaving)>,
     /// What the last sign-out couldn't remove.
     cleanup_retry: Option<CleanupRetry>,
     /// The last list check (monotonic and wall clock), to notice sleep.
@@ -409,8 +409,8 @@ impl cosmic::Application for AppModel {
         if self.quit == Quit::Asking {
             return Some(self.quit_dialog());
         }
-        if let Some(id) = &self.sign_out_asking {
-            return Some(self.sign_out_dialog(id));
+        if let Some((id, leaving)) = &self.sign_out_asking {
+            return Some(self.sign_out_dialog(id, *leaving));
         }
         if let Some(d) = &self.certificate_dialog {
             return Some(certificate::certificate_dialog(d));
@@ -534,7 +534,7 @@ impl cosmic::Application for AppModel {
         Subscription::batch([
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
-                .map(|update| Message::App(AppMessage::UpdateConfig(update.config))),
+                .map(|update| Message::App(AppMessage::UpdateConfig(Box::new(update.config)))),
             // Checks the wall clock, so lists are also refreshed soon after
             // a resume from suspend (the timer itself stops while
             // suspended).
@@ -769,7 +769,7 @@ impl AppModel {
                     self.core.window.show_context = true;
                 }
             }
-            AppMessage::UpdateConfig(config) => self.config = config,
+            AppMessage::UpdateConfig(config) => self.config = *config,
             AppMessage::LaunchUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
                     crate::app_log!("failed to open link: {err}");

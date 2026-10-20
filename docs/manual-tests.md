@@ -54,6 +54,11 @@ Install the current build first (`just install`, or the package).
    - *Expected:* "Sign in", then "Remove account" (no "Sign out"); under them "The desktops below are from …. Sign in to connect to them."; the desktops below say "Offline" and have no Connect button.
    - Sign in. *Expected:* the live list replaces it, with Connect buttons.
 
+4f. **Signed-out accounts stay listed** (the real keyring and settings store; owner's decision 2026-10-20). Sign out of your account.
+   - *Expected:* it stays in the sidebar; its page offers Sign in and Remove account, with no desktops.
+   - Restart Deskfeed. *Expected:* still listed, signed out. Sign in. *Expected:* the desktops come back.
+   - Sign out again, then Remove account. *Expected:* it leaves the sidebar, which then shows only "Sign in".
+
 4. **Start when you log in** (COSMIC's autostart). Turn on Settings → Background → Start when you log in. Log out and back in. *Expected:* only the tray icon appears, no window.
 
 ### Desktop sessions

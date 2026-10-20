@@ -101,6 +101,12 @@ fn connection_file() -> Arc<ConnectionFile> {
     )
 }
 
+/// Listed, and signed out.
+fn signed_out(app: &AppModel, id: &str) -> bool {
+    app.account(id)
+        .is_some_and(|a| matches!(a.state, AccountState::NeedsSignIn { .. }))
+}
+
 /// FreeRDP starting for `key` (a desktop that counts as open).
 fn launching(app: &mut AppModel, id: &str, key: &str) {
     app.desks.at(key).launching = Some(Launching {
@@ -131,7 +137,10 @@ fn sign_out_with_a_desktop_open_asks_first() {
     launching(&mut app, "acct-3a", "k1");
 
     let _ = app.update(Message::Account(AccountMessage::SignOut("acct-3a".into())));
-    assert_eq!(app.sign_out_asking.as_deref(), Some("acct-3a"));
+    assert_eq!(
+        app.sign_out_asking,
+        Some(("acct-3a".to_owned(), Leaving::SignOut))
+    );
     assert!(app.dialog().is_some(), "the sign-out question is shown");
     assert!(app.account("acct-3a").is_some());
 
@@ -146,7 +155,8 @@ fn sign_out_with_a_desktop_open_asks_first() {
     let _ = app.update(Message::Account(AccountMessage::SignOut("acct-3a".into())));
     let _ = app.update(Message::Account(AccountMessage::SignOutConfirm));
     assert!(app.sign_out_asking.is_none());
-    assert!(app.account("acct-3a").is_none());
+    // Owner's decision (2026-10-20): signed out, it stays listed.
+    assert!(signed_out(&app, "acct-3a"));
     assert!(app.signing_out.contains("acct-3a"));
     assert!(
         app.desks.launching("k1").is_none_or(|l| l.stop),
@@ -166,7 +176,7 @@ fn sign_out_with_nothing_open_doesnt_ask() {
     );
     let _ = app.update(Message::Account(AccountMessage::SignOut("acct-so".into())));
     assert!(app.sign_out_asking.is_none());
-    assert!(app.account("acct-so").is_none());
+    assert!(signed_out(&app, "acct-so"));
 }
 
 /// Manual test 3d, now automated: Cancel while the connection file is on
@@ -514,7 +524,168 @@ fn the_sidebar_offers_sign_in_until_there_is_an_account() {
         labels(&app),
         ["anna@example.com".to_owned(), fl!("add-account")]
     );
-    // Signing out of it: back to "Sign in".
+    // Signed out, it stays (owner's decision, 2026-10-20); removed, it's
+    // back to "Sign in".
     let _ = app.update(Message::Account(AccountMessage::SignOut("acct-n".into())));
+    assert_eq!(
+        labels(&app),
+        ["anna@example.com".to_owned(), fl!("add-account")]
+    );
+    let _ = app.update(Message::Account(AccountMessage::Remove("acct-n".into())));
     assert_eq!(labels(&app), [fl!("sign-in")]);
+}
+
+mod signed_out_accounts {
+    use super::*;
+
+    #[test]
+    fn signing_out_keeps_the_account_listed_and_remembered() {
+        let mut app = app();
+        add_account(
+            &mut app,
+            "acct-k",
+            "00000000-0000-0000-0000-0000000000c1",
+            "k1",
+        );
+        // As a sign-in would have remembered it.
+        app.remember_account("acct-k", &app.account("acct-k").unwrap().identity.clone());
+        let _ = app.update(Message::Account(AccountMessage::SignOut("acct-k".into())));
+        assert!(signed_out(&app, "acct-k"));
+        assert!(app.config.accounts.contains_key("acct-k"));
+        let a = app.account("acct-k").unwrap();
+        assert!(a.cached.is_none() && a.stored.is_none() && a.workspaces().is_empty());
+    }
+
+    #[test]
+    fn removing_takes_it_off_the_list_with_its_settings() {
+        let mut app = app();
+        add_account(
+            &mut app,
+            "acct-r",
+            "00000000-0000-0000-0000-0000000000c2",
+            "k1",
+        );
+        app.remember_account("acct-r", &app.account("acct-r").unwrap().identity.clone());
+        app.config.account_settings.insert(
+            "acct-r".into(),
+            crate::settings::ConnectionSettings {
+                sound: Some(false),
+                ..Default::default()
+            },
+        );
+        let _ = app.update(Message::Account(AccountMessage::Remove("acct-r".into())));
+        assert!(app.account("acct-r").is_none());
+        assert!(!app.config.accounts.contains_key("acct-r"));
+        assert!(!app.config.account_settings.contains_key("acct-r"));
+        assert!(
+            app.signing_out.contains("acct-r"),
+            "cleaned up like a sign-out"
+        );
+    }
+
+    #[test]
+    fn removing_with_a_desktop_open_asks_first() {
+        let mut app = app();
+        add_account(
+            &mut app,
+            "acct-ra",
+            "00000000-0000-0000-0000-0000000000c3",
+            "k1",
+        );
+        launching(&mut app, "acct-ra", "k1");
+        let _ = app.update(Message::Account(AccountMessage::Remove("acct-ra".into())));
+        assert_eq!(
+            app.sign_out_asking,
+            Some(("acct-ra".to_owned(), Leaving::Remove))
+        );
+        assert!(app.dialog().is_some());
+        let _ = app.update(Message::Account(AccountMessage::SignOutConfirm));
+        assert!(app.account("acct-ra").is_none());
+        assert!(app.desks.launching("k1").is_none_or(|l| l.stop));
+    }
+
+    /// Spec §6: late results from before a sign-out never bring the account
+    /// back, now that it stays listed.
+    #[test]
+    fn work_from_before_a_sign_out_never_brings_it_back() {
+        let mut app = app();
+        let epoch = add_account(
+            &mut app,
+            "acct-l",
+            "00000000-0000-0000-0000-0000000000c4",
+            "k1",
+        );
+        let generation = app.next();
+        app.account_mut("acct-l").unwrap().generation = generation;
+        let _ = app.update(Message::Account(AccountMessage::SignOut("acct-l".into())));
+        let me = signed_in("00000000-0000-0000-0000-0000000000c4");
+        let late = [
+            AccountMessage::Restored {
+                account: "acct-l".into(),
+                generation,
+                outcome: Ok((me.clone(), None)),
+            },
+            AccountMessage::SignInFinished {
+                account: Some("acct-l".into()),
+                generation,
+                profile: PathBuf::from("/nonexistent/acct-l"),
+                result: Ok(me.clone()),
+            },
+            AccountMessage::Discovered {
+                account: "acct-l".into(),
+                epoch,
+                generation,
+                result: Ok((Vec::new(), me.clone())),
+            },
+        ];
+        for m in late {
+            let _ = app.update(Message::Account(m));
+            assert!(signed_out(&app, "acct-l"));
+        }
+    }
+
+    #[test]
+    fn sign_in_waits_until_the_sign_out_has_finished() {
+        let mut app = app();
+        add_account(
+            &mut app,
+            "acct-w",
+            "00000000-0000-0000-0000-0000000000c5",
+            "k1",
+        );
+        let _ = app.update(Message::Account(AccountMessage::SignOut("acct-w".into())));
+        let _ = app.update(Message::Account(AccountMessage::SignInAccount(
+            "acct-w".into(),
+        )));
+        let a = app.account("acct-w").unwrap();
+        assert!(
+            matches!(&a.state, AccountState::NeedsSignIn { error: Some(e) } if *e == fl!("error-still-signing-out")),
+            "{:?}",
+            matches!(a.state, AccountState::SigningIn { .. })
+        );
+    }
+
+    #[test]
+    fn at_start_signed_out_accounts_are_listed_and_saved_ones_remembered() {
+        let mut app = app();
+        let away = signed_in("00000000-0000-0000-0000-0000000000c6");
+        app.config
+            .accounts
+            .insert("acct-away".into(), (&away.identity).into());
+        let saved = signed_in("00000000-0000-0000-0000-0000000000c7");
+        let saved_id = crate::accounts::account_id(&saved.identity);
+        let stored = crate::secrets::Stored {
+            identity: saved.identity.clone(),
+            refresh_token: crate::auth::token::Secret::new("rt".into()),
+        };
+        let _ = app.update(Message::Account(AccountMessage::SavedLoaded(Ok(vec![
+            stored,
+        ]))));
+        assert!(matches!(
+            app.account(&saved_id).unwrap().state,
+            AccountState::Restoring
+        ));
+        assert!(app.config.accounts.contains_key(&saved_id), "remembered");
+        assert!(signed_out(&app, "acct-away"));
+    }
 }

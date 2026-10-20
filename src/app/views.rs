@@ -95,12 +95,12 @@ impl AppModel {
                         Message::Account(AccountMessage::RetryRestore(account.id.clone())),
                     ));
                 }
-                // Already signed out as far as Microsoft is concerned: next
-                // to "Sign in", "Sign out" read as if the app were confused.
-                // It removes the account from Deskfeed (spec §6 sign-out).
-                col = col.push(widget::button::text(fl!("remove-account")).on_press(
-                    Message::Account(AccountMessage::SignOut(account.id.clone())),
-                ));
+                // Already signed out: this takes the account off the list
+                // (Sign out, elsewhere, keeps it listed like this).
+                col = col.push(
+                    widget::button::text(fl!("remove-account"))
+                        .on_press(Message::Account(AccountMessage::Remove(account.id.clone()))),
+                );
                 with_offline(col, |when| fl!("offline-list-sign-in", when = when))
             }
             AccountState::SigningIn { .. } => waiting_view(Message::Account(

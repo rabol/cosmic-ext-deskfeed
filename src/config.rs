@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
+use serde::{Deserialize, Serialize};
 
 use crate::sessions::launcher::LogonSetting;
 use crate::settings::ConnectionSettings;
@@ -40,4 +41,42 @@ pub struct Config {
     pub account_settings: BTreeMap<String, ConnectionSettings>,
     /// Per-desktop overrides (keys: resource keys, as above).
     pub desktop_settings: BTreeMap<String, ConnectionSettings>,
+    /// The accounts in the sidebar, signed in or signed out, until removed
+    /// (keys: `accounts::account_id`). Names and IDs only: what's secret
+    /// is in the keyring.
+    pub accounts: BTreeMap<String, KnownAccount>,
+}
+
+/// An account Deskfeed lists: who it is, for the sidebar and for signing
+/// in again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnownAccount {
+    pub tenant_id: String,
+    pub object_id: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+}
+
+impl From<&crate::auth::id_token::Identity> for KnownAccount {
+    fn from(i: &crate::auth::id_token::Identity) -> Self {
+        Self {
+            tenant_id: i.tenant_id.clone(),
+            object_id: i.object_id.clone(),
+            username: i.username.clone(),
+            display_name: i.display_name.clone(),
+        }
+    }
+}
+
+impl From<&KnownAccount> for crate::auth::id_token::Identity {
+    fn from(k: &KnownAccount) -> Self {
+        Self {
+            tenant_id: k.tenant_id.clone(),
+            object_id: k.object_id.clone(),
+            username: k.username.clone(),
+            display_name: k.display_name.clone(),
+        }
+    }
 }

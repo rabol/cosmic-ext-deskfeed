@@ -350,8 +350,11 @@ pub enum AccountMessage {
     },
     /// Saves an account's sign-in to the keyring again.
     RetrySave(String),
+    /// Signs the account out; it stays listed, signed out.
     SignOut(String),
     SignOutSelected,
+    /// Signs the account out and takes it off the list.
+    Remove(String),
     /// The sign-out question: disconnect its sessions and sign out.
     SignOutConfirm,
     SignOutCancel,
@@ -513,7 +516,7 @@ pub enum QuitMessage {
 pub enum AppMessage {
     LaunchUrl(String),
     ToggleContextPage(ContextPage),
-    UpdateConfig(Config),
+    UpdateConfig(Box<Config>),
     DismissNotice,
     CheckDependencies,
     DependenciesChecked(Vec<Check>),
@@ -534,6 +537,14 @@ pub enum AppMessage {
     SearchInput(String),
     /// Resource key.
     ToggleFavorite(String),
+}
+
+/// Leaving an account: signing out (it stays listed, signed out) or
+/// removing it from the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leaving {
+    SignOut,
+    Remove,
 }
 
 /// Why a background step for an account failed.
