@@ -68,6 +68,7 @@ Still open:
 
 ## Not in v1 (closed)
 
+- **Asking before logout, reboot or shutdown while desktops are connected.** Left as is (owner, 2026-10-20). COSMIC gives apps no way to object: logout ends the session directly (cosmic-osd calls cosmic-session `Exit`), and a logind block inhibitor only produces an unexplained administrator password prompt from cosmic-osd. Open upstream request: pop-os/cosmic-session#118. Connected Windows sessions survive anyway: FreeRDP is ended with Deskfeed (ADR 0022), which Windows treats as a dropped connection.
 - **F10, administrator registration / system-browser sign-in** (spec §4, optional). Closed for v1 by the owner (2026-10-19); may come in a later version. It needs a tenant where an admin can register an app to test.
 
 ## Known deviation from the spec
