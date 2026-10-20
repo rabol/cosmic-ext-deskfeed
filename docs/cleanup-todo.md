@@ -167,7 +167,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 
 ## 6. Tests, tooling and docs
 
-- [ ] **Remove `fuzz/`** (broken, see §1; nightly-only; ADR 0023 is titled "random-input tests *instead of* cargo-fuzz"). Also drop `just fuzz`, its CONTRIBUTING and .gitignore lines, and the ADR addendum. For a deep run, raise `DESKFEED_RANDOM_ROUNDS`. Effort S, risk low.
+- [x] **Remove `fuzz/`** (Kept: owner's decision; it compiles again, see §1.) (broken, see §1; nightly-only; ADR 0023 is titled "random-input tests *instead of* cargo-fuzz"). Also drop `just fuzz`, its CONTRIBUTING and .gitignore lines, and the ADR addendum. For a deep run, raise `DESKFEED_RANDOM_ROUNDS`. Effort S, risk low.
 - [ ] **Launcher test boilerplate** (`src/sessions/launcher/tests.rs:523-830`).
   - Six tests repeat the same setup: temp dir, `#!/bin/sh` fake, chmod, channel, launch, wait, clean up. Temp dirs leak when a test fails.
   - The `/proc` zombie check is written twice.
@@ -189,7 +189,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - Template leftovers: `check-json`, and `tag`, which uses an interactive `--amend` and would also bump the helper crates' versions.
   - *Fix:* `just ci` mirroring `ci.yml`, and drop the leftovers.
   - Effort S, risk low.
-- [ ] **The rust-analyzer step in CI** (ADR 0025): a pinned download kept current by hand, on top of rustc and strict clippy. Its one known catch (the `#[path]` include) would go with the shared crate. Uncertain value. Effort S, risk low.
+- [x] **The rust-analyzer step in CI** (Kept: owner's decision.) (ADR 0025): a pinned download kept current by hand, on top of rustc and strict clippy. Its one known catch (the `#[path]` include) would go with the shared crate. Uncertain value. Effort S, risk low.
 - [ ] **Documentation sprawl.** *Partly done 2026-10-20:* the roadmap lists only open items; `milestone-1.md` is replaced by `compatibility.md` (the matrix and findings); ADR 0004 and 0005 are marked Accepted in the index, ADR 0006 Historical. Still open: addenda that reverse a decision (0023, 0026) and `CODE_REVIEW.md` in the repo root.
   - 26 ADRs written in 4 days, several with addenda that reverse the decision (0023, 0026).
   - `docs/milestone-1.md` is a timestamped lab diary.
