@@ -850,10 +850,16 @@ impl AppModel {
                 entry.activate();
             }
         }
+        // With no account (first start, or after signing out of the only
+        // one) there is nothing to add to: it's how you sign in.
         let add = self
             .nav
             .insert()
-            .text(fl!("add-account"))
+            .text(if self.accounts.is_empty() {
+                fl!("sign-in")
+            } else {
+                fl!("add-account")
+            })
             .icon(widget::icon::from_name("list-add-symbolic").icon())
             .data(Page::Add);
         if select == &Page::Add || self.accounts.is_empty() {

@@ -489,3 +489,32 @@ mod settings_pages {
         );
     }
 }
+
+/// The sidebar's last entry: "Sign in" with no account (after signing out
+/// of the only one), "Add account" once there is one.
+#[test]
+fn the_sidebar_offers_sign_in_until_there_is_an_account() {
+    let labels = |app: &AppModel| -> Vec<String> {
+        app.nav
+            .iter()
+            .filter_map(|id| app.nav.text(id).map(str::to_owned))
+            .collect()
+    };
+    let mut app = app();
+    app.rebuild_nav(&Page::Add);
+    assert_eq!(labels(&app), [fl!("sign-in")]);
+    add_account(
+        &mut app,
+        "acct-n",
+        "00000000-0000-0000-0000-0000000000a9",
+        "k1",
+    );
+    app.rebuild_nav(&Page::Add);
+    assert_eq!(
+        labels(&app),
+        ["anna@example.com".to_owned(), fl!("add-account")]
+    );
+    // Signing out of it: back to "Sign in".
+    let _ = app.update(Message::Account(AccountMessage::SignOut("acct-n".into())));
+    assert_eq!(labels(&app), [fl!("sign-in")]);
+}
