@@ -718,29 +718,8 @@ mod tests {
     /// private bus (`dbus-daemon`), so the real panel isn't touched.
     #[tokio::test(flavor = "multi_thread")]
     async fn follows_the_panels_tray() {
-        /// Ends the private bus however the test ends, so a failing test
-        /// can't leave it running (and holding the test's output open).
-        struct Bus(std::process::Child);
-        impl Drop for Bus {
-            fn drop(&mut self) {
-                let _ = self.0.kill();
-                let _ = self.0.wait();
-            }
-        }
-        let mut bus = Bus(std::process::Command::new("dbus-daemon")
-            .args(["--session", "--nofork", "--print-address=1"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .expect("dbus-daemon (package dbus)"));
-        let mut address = String::new();
-        std::io::BufRead::read_line(
-            &mut std::io::BufReader::new(bus.0.stdout.take().unwrap()),
-            &mut address,
-        )
-        .unwrap();
-        let address = address.trim().to_owned();
+        let bus = crate::test_util::PrivateBus::start();
+        let address = bus.address().to_owned();
         let registered = Arc::new(Mutex::new(Vec::new()));
         let first = watcher(&address, &registered).await;
         let (tx, mut rx) = mpsc::unbounded();

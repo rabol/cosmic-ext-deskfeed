@@ -44,7 +44,30 @@ const PAYLOAD_VERSION: u32 = 1;
 const MAX_PAYLOAD: usize = 64 * 1024;
 
 /// How long an unlock prompt may stay unanswered.
+#[cfg(not(test))]
 const PROMPT_WAIT: std::time::Duration = std::time::Duration::from_mins(2);
+/// Short in tests, where an unanswered prompt is one of the cases.
+#[cfg(test)]
+const PROMPT_WAIT: std::time::Duration = std::time::Duration::from_millis(500);
+
+#[cfg(test)]
+mod fake;
+
+#[cfg(test)]
+thread_local! {
+    /// A private bus for this test thread (`fake.rs`), so tests never
+    /// touch the desktop's keyring and don't see each other's.
+    static TEST_BUS: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The session bus, or in tests this thread's private bus.
+fn session_bus() -> zbus::Result<Connection> {
+    #[cfg(test)]
+    if let Some(address) = TEST_BUS.with(|b| b.borrow().clone()) {
+        return zbus::blocking::connection::Builder::address(address.as_str())?.build();
+    }
+    Connection::session()
+}
 
 /// `(session, parameters, value, content type)` from the specification.
 type SecretStruct = (OwnedObjectPath, Vec<u8>, Vec<u8>, String);
@@ -166,7 +189,7 @@ struct Keyring {
 
 impl Keyring {
     fn open() -> Result<Self, SecretsError> {
-        let conn = Connection::session()?;
+        let conn = session_bus()?;
         let service = Proxy::new(&conn, BUS_NAME, SERVICE_PATH, SERVICE)?;
         let (_, session): (OwnedValue, OwnedObjectPath) =
             service.call("OpenSession", &("plain", Value::from("")))?;
@@ -464,6 +487,7 @@ pub fn delete_all(config: &ClientConfig) -> Result<(), SecretsError> {
 
 #[cfg(test)]
 mod tests {
+    use super::fake::{Answer, FakeKeyring};
     use super::*;
 
     fn identity() -> Identity {
@@ -542,10 +566,10 @@ mod tests {
     }
 
     /// Against the real Secret Service: `cargo test -- --ignored keyring`.
-    /// Uses a test client ID, so the app's real items are never touched.
+    /// On a fake keyring (`fake.rs`); the desktop's is never touched.
     #[test]
-    #[ignore = "uses the desktop keyring"]
     fn keyring_round_trip() {
+        let _keyring = FakeKeyring::start(Answer::Unlock);
         let mut config = ClientConfig::public_remote_desktop();
         config.client_id = "00000000-0000-0000-0000-00000000test".into();
         delete_all(&config).unwrap();
@@ -569,6 +593,123 @@ mod tests {
         assert_eq!(all[0].identity, other);
         delete_all(&config).unwrap();
         assert!(load_all(&config).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_locked_keyring_is_unlocked_through_its_prompt() {
+        let keyring = FakeKeyring::start(Answer::Unlock);
+        let config = ClientConfig::public_remote_desktop();
+        save(&config, &identity(), &Secret::new("rt".into())).unwrap();
+        keyring.set_locked(true);
+        let all = load_all(&config).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].refresh_token.expose(), "rt");
+        assert_eq!(keyring.prompts(), (1, 0));
+        assert!(!keyring.locked());
+    }
+
+    #[test]
+    fn a_cancelled_unlock_is_dismissed_not_an_empty_keyring() {
+        let keyring = FakeKeyring::start(Answer::Cancel);
+        let config = ClientConfig::public_remote_desktop();
+        save(&config, &identity(), &Secret::new("rt".into())).unwrap();
+        keyring.set_locked(true);
+        // Not "nothing saved": the caller must not treat it as signed out.
+        assert_eq!(load_all(&config).unwrap_err(), SecretsError::Dismissed);
+        assert_eq!(
+            delete(&config, &identity()).unwrap_err(),
+            SecretsError::Dismissed
+        );
+        assert_eq!(
+            save(&config, &identity(), &Secret::new("x".into())).unwrap_err(),
+            SecretsError::Dismissed
+        );
+        // Nothing was changed behind the user's back.
+        keyring.set_locked(false);
+        assert_eq!(load_all(&config).unwrap()[0].refresh_token.expose(), "rt");
+    }
+
+    #[test]
+    fn an_unanswered_prompt_is_given_up_and_dismissed() {
+        let keyring = FakeKeyring::start(Answer::Never);
+        let config = ClientConfig::public_remote_desktop();
+        save(&config, &identity(), &Secret::new("rt".into())).unwrap();
+        keyring.set_locked(true);
+        assert_eq!(load_all(&config).unwrap_err(), SecretsError::NoAnswer);
+        // The app closed the prompt itself, so it doesn't linger.
+        assert_eq!(keyring.prompts(), (1, 1));
+    }
+
+    #[test]
+    fn no_default_keyring_is_unavailable() {
+        let keyring = FakeKeyring::start(Answer::Unlock);
+        keyring.set_no_default();
+        let config = ClientConfig::public_remote_desktop();
+        assert!(matches!(check(), Err(SecretsError::Unavailable(_))));
+        assert!(matches!(
+            save(&config, &identity(), &Secret::new("rt".into())),
+            Err(SecretsError::Unavailable(_))
+        ));
+        assert!(keyring.items().is_empty());
+    }
+
+    #[test]
+    fn items_are_labelled_for_people() {
+        let keyring = FakeKeyring::start(Answer::Unlock);
+        let config = ClientConfig::public_remote_desktop();
+        save(&config, &identity(), &Secret::new("rt".into())).unwrap();
+        save_password(
+            &identity(),
+            "desk-1",
+            "My\ndesktop",
+            &Secret::new("pw".into()),
+        )
+        .unwrap();
+        let mut labels: Vec<String> = keyring.items().into_iter().map(|i| i.label).collect();
+        labels.sort();
+        assert_eq!(
+            labels,
+            [
+                // The line break in the desktop's name is dropped.
+                "Deskfeed Windows password (Mydesktop)",
+                "Deskfeed sign-in (anna@example.com)"
+            ]
+        );
+    }
+
+    #[test]
+    fn remembered_passwords_per_desktop() {
+        let keyring = FakeKeyring::start(Answer::Unlock);
+        let config = ClientConfig::public_remote_desktop();
+        let id = identity();
+        save(&config, &id, &Secret::new("rt".into())).unwrap();
+        assert!(load_password(&id, "desk-1").unwrap().is_none());
+        save_password(&id, "desk-1", "One", &Secret::new("pw-1".into())).unwrap();
+        // Replacing keeps one item per desktop.
+        save_password(&id, "desk-1", "One", &Secret::new("pw-1b".into())).unwrap();
+        save_password(&id, "desk-2", "Two", &Secret::new("pw-2".into())).unwrap();
+        assert_eq!(
+            load_password(&id, "desk-1").unwrap().unwrap().expose(),
+            "pw-1b"
+        );
+        assert_eq!(keyring.items().len(), 3);
+        // Forgetting one desktop's leaves the other and the sign-in.
+        delete_passwords(&id, Some("desk-1")).unwrap();
+        assert!(load_password(&id, "desk-1").unwrap().is_none());
+        assert_eq!(
+            load_password(&id, "desk-2").unwrap().unwrap().expose(),
+            "pw-2"
+        );
+        // Sign-out removes all of them, still not the sign-in itself.
+        delete_passwords(&id, None).unwrap();
+        assert!(load_password(&id, "desk-2").unwrap().is_none());
+        assert_eq!(load_all(&config).unwrap().len(), 1);
+        // A password longer than any Windows allows isn't stored.
+        let long = Secret::new("x".repeat(MAX_PASSWORD + 1));
+        assert_eq!(
+            save_password(&id, "desk-3", "Three", &long).unwrap_err(),
+            SecretsError::Malformed
+        );
     }
 
     #[test]

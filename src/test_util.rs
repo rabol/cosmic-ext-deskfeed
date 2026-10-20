@@ -43,3 +43,43 @@ pub fn serve_once(status: &str, body: &str) -> (u16, Arc<Mutex<String>>) {
 
 /// Random-input testing (ADR 0023), shared with the sign-in helper.
 pub use testkit::random_inputs;
+
+/// A private D-Bus session bus (`dbus-daemon`), ended when dropped,
+/// however the test ends, so a failing test can't leave it running (and
+/// holding the test's output open). Tests that need a bus service use
+/// this, never the desktop's bus.
+pub struct PrivateBus {
+    daemon: std::process::Child,
+    address: String,
+}
+
+impl PrivateBus {
+    pub fn start() -> Self {
+        let mut daemon = std::process::Command::new("dbus-daemon")
+            .args(["--session", "--nofork", "--print-address=1"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("dbus-daemon (package dbus)");
+        let mut address = String::new();
+        BufReader::new(daemon.stdout.take().expect("piped"))
+            .read_line(&mut address)
+            .expect("dbus-daemon prints its address");
+        Self {
+            daemon,
+            address: address.trim().to_owned(),
+        }
+    }
+
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+}
+
+impl Drop for PrivateBus {
+    fn drop(&mut self) {
+        let _ = self.daemon.kill();
+        let _ = self.daemon.wait();
+    }
+}
