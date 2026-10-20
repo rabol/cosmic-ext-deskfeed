@@ -1,6 +1,6 @@
 # 0026. The desktop sign-in uses the app's account
 
-- Status: Accepted
+- Status: Accepted. The hint works; the account check is inactive (addendum, 2026-10-20).
 - Date: 2026-10-19
 
 ## Context
@@ -44,3 +44,16 @@ Decoding `client_info` needs base64. The helper now depends on `base64` 0.22, wh
   - the environment reaching FreeRDP's children.
 - **Not verified yet: that FreeRDP passes the helper's error output on to Deskfeed.** FreeRDP starts the helper (ADR 0004), and the launcher reads FreeRDP's error output. If it isn't passed on, the refusal still happens, but the row shows the general "sign-in rejected" message instead of the new one. Manual test 3e shows which.
 - **Not verified yet: the real tenant.** That Entra returns `client_info` on FreeRDP's request, and that its `uid`/`utid` equal the ID token's `oid`/`tid`. Both are MSAL's documented behaviour, and the app signs in through `/organizations`, which is the home tenant. A guest account is the case to watch. If the IDs don't match there, every Entra connection is refused with the new message. That is manual test 3e (docs/manual-tests.md), and the log line "signed in as a different account" would show it.
+
+## Addendum (2026-10-20): the check never runs on the real tenant
+
+Seen on the owner's tenant: every desktop sign-in logs "account not confirmed (no client_info)". Entra returns `client_info` in the token response, when the code is redeemed. It doesn't return it on the authorize redirect, which is all the helper sees, and FreeRDP redeems the code itself. The assumption above was MSAL's behaviour applied to the wrong step, and it wasn't checked against a real redirect before it was written down.
+
+What this means:
+- **The hint works.** The user name pre-selects the account on Microsoft's page. This is the part of U1 that is in effect.
+- **The check doesn't.** Nothing compares the signed-in account with the app's, so a different account picked with "Use another account" isn't refused. U1 is reduced, not closed.
+- **The code stays, inactive** (the owner's choice). It does nothing while Entra sends no `client_info`, and it would act if Entra ever did.
+
+Also verified that day: the helper's status lines reach Deskfeed through FreeRDP's error output. They appear in the app's log. So a refusal would show its own message.
+
+A check that works would have to see the token, and only FreeRDP does. That would need a change in FreeRDP, or Deskfeed redeeming the code itself, which FreeRDP 3.32.2's helper protocol doesn't allow.
