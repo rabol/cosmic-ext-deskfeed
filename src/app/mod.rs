@@ -82,6 +82,8 @@ pub struct AppModel {
     config: Config,
     config_handler: Option<cosmic_config::Config>,
     http: Arc<Http>,
+    /// The accounts' saved sign-ins and the work on them (`accounts`).
+    sign_ins: Arc<accounts::Accounts>,
     /// Accounts in the sidebar, then "Add account".
     nav: nav_bar::Model,
     accounts: Vec<Account>,
@@ -197,15 +199,17 @@ impl cosmic::Application for AppModel {
             config,
             config_handler,
             Http::new(EndpointPolicy::azure_public()),
+            accounts::Accounts::new(ClientConfig::public_remote_desktop()),
             crate::cache::Store::user(),
             crate::autostart::enabled(),
         );
         app.rebuild_nav(&Page::Add);
         let title = app.update_title();
-        let load = cosmic::task::future(async {
+        let sign_ins = app.sign_ins.clone();
+        let load = cosmic::task::future(async move {
             let result = off_ui(
-                || {
-                    accounts::shared()
+                move || {
+                    sign_ins
                         .load_saved()
                         .map_err(|e| fl!("error-keyring-load", detail = keyring_detail(&e)))
                 },
@@ -580,6 +584,7 @@ impl AppModel {
         config: Config,
         config_handler: Option<cosmic_config::Config>,
         http: Http,
+        sign_ins: accounts::Accounts,
         cache: Option<crate::cache::Store>,
         autostart: bool,
     ) -> Self {
@@ -591,6 +596,7 @@ impl AppModel {
             config,
             config_handler,
             http: Arc::new(http),
+            sign_ins: Arc::new(sign_ins),
             nav: nav_bar::Model::default(),
             accounts: Vec::new(),
             loading_saved: true,

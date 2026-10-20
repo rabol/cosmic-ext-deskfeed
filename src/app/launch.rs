@@ -257,12 +257,13 @@ impl AppModel {
             Ok(session) if self.quit != Quit::Stopping && self.signing_out.contains(&owner) => {
                 // Its account is being signed out: stop it, then delete the
                 // files once more in case its sign-in helper wrote any.
+                let sign_ins = self.sign_ins.clone();
                 return cosmic::task::future(async move {
                     let id = owner.clone();
                     let result = off_ui(
                         move || {
                             launcher::stop_all(&[session], launcher::STOP_GRACE);
-                            accounts::shared().remove_files(&owner)
+                            sign_ins.remove_files(&owner)
                         },
                         Err(()),
                     )

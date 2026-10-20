@@ -30,6 +30,7 @@ fn app() -> AppModel {
         Config::default(),
         None,
         Http::new(EndpointPolicy::local_test(1)),
+        crate::accounts::Accounts::new(crate::auth::attempt::ClientConfig::public_remote_desktop()),
         None,
         false,
     )

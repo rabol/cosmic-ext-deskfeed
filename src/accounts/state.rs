@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 
 use super::account_id;
 use super::profiles::{jars_root, profile_dir};
@@ -61,13 +61,6 @@ pub enum NotSaved {
     /// The token response had none.
     NoRefreshToken,
     Keyring(SecretsError),
-}
-
-/// The app's accounts, with Microsoft's public Remote Desktop client.
-pub fn shared() -> &'static Accounts {
-    static SHARED: LazyLock<Accounts> =
-        LazyLock::new(|| Accounts::new(ClientConfig::public_remote_desktop()));
-    &SHARED
 }
 
 impl Accounts {

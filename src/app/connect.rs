@@ -96,7 +96,7 @@ impl AppModel {
                 // meanwhile wins.
                 Ok(true)
                     if self.account(&id).is_some()
-                        && crate::accounts::shared().password_ticket(&id, &key) == ticket =>
+                        && self.sign_ins.password_ticket(&id, &key) == ticket =>
                 {
                     crate::app_log!("Windows password remembered for a desktop");
                     self.set_saved_password(&key, true);
@@ -238,18 +238,15 @@ impl AppModel {
         let http = self.http.clone();
         let key = key.to_owned();
         // Read now: a sign-out before this runs stops it.
-        let started = accounts::shared().sign_out_count(&id);
+        let started = self.sign_ins.sign_out_count(&id);
+        let sign_ins = self.sign_ins.clone();
         cosmic::task::future(async move {
             let result = off_ui(
                 move || {
                     // The access token also goes to FreeRDP, so it must stay
                     // valid through the connection.
-                    let signed_in = accounts::shared().renew(
-                        &http,
-                        signed_in,
-                        accounts::Renewal::IfNeeded,
-                        started,
-                    )?;
+                    let signed_in =
+                        sign_ins.renew(&http, signed_in, accounts::Renewal::IfNeeded, started)?;
                     let get = |s: &SignedIn| {
                         http.get(&url, Role::ConnectionFile, Some(&s.tokens.access_token))
                     };
@@ -257,7 +254,7 @@ impl AppModel {
                         // Refused although it looked valid: renew once and retry.
                         Err(HttpError::Status { status: 401, .. }) => {
                             crate::app_log!("connection file: access token refused; renewing");
-                            let renewed = accounts::shared().renew(
+                            let renewed = sign_ins.renew(
                                 &http,
                                 signed_in,
                                 accounts::Renewal::Now,

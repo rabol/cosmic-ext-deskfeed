@@ -24,7 +24,7 @@ pub use profiles::{
     remove_unused_profile,
 };
 pub use renew::{RenewError, Renewal};
-pub use state::{Accounts, NotSaved, PasswordTicket, shared};
+pub use state::{Accounts, NotSaved, PasswordTicket};
 
 /// Opaque, stable ID for an account: a hash of tenant and object ID, in
 /// hex (so never `new-…` or `default`). Used for folder names and config

@@ -56,11 +56,12 @@ impl AppModel {
                     return Task::none();
                 };
                 let (signed_in, sign_in) = (signed_in.clone(), a.sign_in);
-                let started = accounts::shared().sign_out_count(&id);
+                let started = self.sign_ins.sign_out_count(&id);
+                let sign_ins = self.sign_ins.clone();
                 return cosmic::task::future(async move {
                     let result = off_ui(
                         move || {
-                            accounts::shared()
+                            sign_ins
                                 .save(&signed_in, started)
                                 .map_err(|e| describe_not_saved(&e))
                         },
@@ -223,10 +224,11 @@ impl AppModel {
         };
         let (id, list) = (id.to_owned(), to_cached(list));
         // Read now: a sign-out before the save runs stops it.
-        let started = accounts::shared().sign_out_count(&id);
+        let started = self.sign_ins.sign_out_count(&id);
+        let sign_ins = self.sign_ins.clone();
         Task::future(async move {
             let result = off_ui(
-                move || accounts::shared().save_cache(&store, &id, &list, started),
+                move || sign_ins.save_cache(&store, &id, &list, started),
                 Ok(()),
             )
             .await;
@@ -253,11 +255,12 @@ impl AppModel {
         let http = self.http.clone();
         let id = id.to_owned();
         // Read now: a sign-out before the restore runs stops it.
-        let started = accounts::shared().sign_out_count(&id);
+        let started = self.sign_ins.sign_out_count(&id);
+        let sign_ins = self.sign_ins.clone();
         cosmic::task::future(async move {
             let outcome = off_ui(
                 move || {
-                    accounts::shared()
+                    sign_ins
                         .restore(&http, &stored, started)
                         .map(|(account, unsaved)| {
                             (account, unsaved.as_ref().map(describe_not_saved))
@@ -475,13 +478,14 @@ impl AppModel {
             self.accounts.push(account);
         }
         self.rebuild_nav(&Page::Account(id.clone()));
-        let started = accounts::shared().sign_out_count(&id);
-        accounts::shared().signed_in(&signed_in, started);
+        let started = self.sign_ins.sign_out_count(&id);
+        self.sign_ins.signed_in(&signed_in, started);
         let save_id = id.clone();
+        let sign_ins = self.sign_ins.clone();
         let save = cosmic::task::future(async move {
             let result = off_ui(
                 move || {
-                    accounts::shared()
+                    sign_ins
                         .save(&signed_in, started)
                         .map_err(|e| describe_not_saved(&e))
                 },
@@ -528,26 +532,23 @@ impl AppModel {
         let http = self.http.clone();
         let id = id.to_owned();
         // Read now: a sign-out before this runs stops it.
-        let started = accounts::shared().sign_out_count(&id);
+        let started = self.sign_ins.sign_out_count(&id);
         let owner = id.clone();
+        let sign_ins = self.sign_ins.clone();
         cosmic::task::future(async move {
             let result = off_ui(
                 move || {
                     // No more requests once the account signed out.
-                    let wanted = || accounts::shared().sign_out_count(&owner) == started;
+                    let wanted = || sign_ins.sign_out_count(&owner) == started;
                     // An expired access token would only get "session expired".
-                    let signed_in = accounts::shared().renew(
-                        &http,
-                        signed_in,
-                        accounts::Renewal::IfNeeded,
-                        started,
-                    )?;
+                    let signed_in =
+                        sign_ins.renew(&http, signed_in, accounts::Renewal::IfNeeded, started)?;
                     let (feeds, signed_in) =
                         match discovery::discover(&http, &signed_in.tokens.access_token, &wanted) {
                             // Refused although it looked valid: renew once and retry.
                             Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
                                 crate::app_log!("desktop list: access token refused; renewing");
-                                let renewed = accounts::shared().renew(
+                                let renewed = sign_ins.renew(
                                     &http,
                                     signed_in,
                                     accounts::Renewal::Now,
@@ -676,8 +677,9 @@ impl AppModel {
         }
         let http = self.http.clone();
         let id = id.to_owned();
-        let started = accounts::shared().sign_out_count(&id);
+        let started = self.sign_ins.sign_out_count(&id);
         let owner = id.clone();
+        let sign_ins = self.sign_ins.clone();
         cosmic::task::future(async move {
             let icons = off_ui(
                 move || {
@@ -685,7 +687,7 @@ impl AppModel {
                     let mut refused = 0;
                     for url in missing {
                         // No more requests once the account signed out.
-                        if accounts::shared().sign_out_count(&owner) != started {
+                        if sign_ins.sign_out_count(&owner) != started {
                             break;
                         }
                         let fetched = http
@@ -770,14 +772,15 @@ impl AppModel {
         let mut tasks = Vec::new();
         if retry.files {
             let id = retry.id.clone();
+            let sign_ins = self.sign_ins.clone();
             tasks.push(cosmic::task::future(async move {
                 let owner = id.clone();
-                let result = off_ui(move || accounts::shared().remove_files(&owner), Err(())).await;
+                let result = off_ui(move || sign_ins.remove_files(&owner), Err(())).await;
                 Message::Account(AccountMessage::SignOutFilesRemoved(id, result))
             }));
         }
         if let Some(identity) = retry.keyring {
-            tasks.push(keyring_cleanup(retry.id, identity));
+            tasks.push(keyring_cleanup(self.sign_ins.clone(), retry.id, identity));
         }
         Task::batch(tasks)
     }
@@ -818,7 +821,7 @@ impl AppModel {
         let account = self.accounts.remove(pos);
         self.icons.retain(|(account, _), _| account != id);
         // From now on nothing started earlier saves its tokens.
-        accounts::shared().note_sign_out(id);
+        self.sign_ins.note_sign_out(id);
         let sign_in = match &account.state {
             AccountState::SigningIn { cancel } => {
                 cancel.cancel();
@@ -856,6 +859,7 @@ impl AppModel {
         // (spec §6). Blocking, so not on the UI thread.
         let files = {
             let id = id.to_owned();
+            let sign_ins = self.sign_ins.clone();
             cosmic::task::future(async move {
                 let owner = id.clone();
                 let result = off_ui(
@@ -864,7 +868,7 @@ impl AppModel {
                             cancel.cancel_and_wait(launcher::STOP_GRACE);
                         }
                         launcher::stop_all(&sessions, launcher::STOP_GRACE);
-                        accounts::shared().remove_files(&owner)
+                        sign_ins.remove_files(&owner)
                     },
                     Err(()),
                 )
@@ -872,7 +876,7 @@ impl AppModel {
                 Message::Account(AccountMessage::SignOutFilesRemoved(id, result))
             })
         };
-        let keyring = keyring_cleanup(id.to_owned(), account.identity);
+        let keyring = keyring_cleanup(self.sign_ins.clone(), id.to_owned(), account.identity);
         Task::batch([files, keyring])
     }
 }
@@ -881,6 +885,7 @@ impl AppModel {
 /// remembered Windows passwords (spec §8). The keyring may block (for
 /// example on an unlock prompt), so on its own.
 fn keyring_cleanup(
+    sign_ins: Arc<accounts::Accounts>,
     id: String,
     identity: crate::auth::id_token::Identity,
 ) -> Task<cosmic::Action<Message>> {
@@ -890,7 +895,7 @@ fn keyring_cleanup(
         // account's lock like their saves.
         let result = off_ui(
             move || {
-                accounts::shared()
+                sign_ins
                     .delete(&identity)
                     .map_err(|_| fl!("error-sign-out-incomplete"))
             },

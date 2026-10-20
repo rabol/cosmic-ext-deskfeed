@@ -51,12 +51,13 @@ impl AppModel {
                     let key = key.to_owned();
                     // Read now: a sign-out or Forget before the save runs
                     // stops it.
-                    let ticket = crate::accounts::shared().password_ticket(&id, &key);
+                    let ticket = self.sign_ins.password_ticket(&id, &key);
+                    let sign_ins = self.sign_ins.clone();
                     save_task = cosmic::task::future(async move {
                         let owner = key.clone();
                         let result = off_ui(
                             move || {
-                                crate::accounts::shared()
+                                sign_ins
                                     .save_password(&identity, &owner, &title, &password, ticket)
                                     .map_err(|e| keyring_detail(&e))
                             },
