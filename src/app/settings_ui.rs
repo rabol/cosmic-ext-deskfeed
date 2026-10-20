@@ -46,6 +46,12 @@ impl AppModel {
                 self.context_page = ContextPage::AccountSettings;
                 self.core.window.show_context = true;
             }
+            // A saved connection's own page is its form (ADR 0029).
+            SettingsMessage::OpenDesktopSettings(key)
+                if self.config.connections.contains_key(&key) =>
+            {
+                return self.rdp_message(RdpMessage::Edit(key));
+            }
             SettingsMessage::OpenDesktopSettings(key) => {
                 self.settings_target = Some(key);
                 self.context_page = ContextPage::DesktopSettings;

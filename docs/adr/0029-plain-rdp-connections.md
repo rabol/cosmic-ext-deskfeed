@@ -1,6 +1,6 @@
 # 0029. Plain RDP connections ("Add connection")
 
-- Status: Accepted (the owner's answers below, 2026-10-20); being built: steps 1–3 of 5 done. Spec §1 and §13 changed to match.
+- Status: Accepted (the owner's answers below, 2026-10-20); being built: steps 1–3 of 5 and step 4a done; 4b (connecting) next. Spec §1 and §13 changed to match.
 - Date: 2026-10-20
 
 ## Context
@@ -62,7 +62,9 @@ One commit per step, `just ci` before each, tests before restructuring, each new
 1. **Data and checks:** the saved connection, its checks, `config.connections`. Unit tests, including random input for host and user name.
 2. **Launch target:** Azure vs Direct in `LaunchSpec`/`build_args`. Fake-FreeRDP tests: no gateway or auth-helper arguments, password only through the pipe, the pin used, bad host or user refused. An ignored test against the local test server.
 3. **Keyring item kind:** save, read, delete on the fake keyring; apart from AVD items.
-4. **Screens:** the sidebar entries, the Connections page, the Add/edit form, Remove connection. App tests driving messages: add → listed and saved; invalid input refused with a message; connect → password dialog without Entra; remove → password, pin, settings and favorite gone; remove while connected asks first.
+4. **Screens,** in two commits:
+   - 4a: the sidebar entries, the Connections page, the Add/edit form (one Server field, `host`, `host:port` or `[IPv6]:port`; user name; an optional password straight to the keyring; domain, empty for automatic), Remove connection. App tests: add → listed and saved; invalid input refused with a message; edit keeps the ID; remove → password, pin, settings and favorite gone; removed elsewhere → the open form closes.
+   - 4b: connecting: the password dialog without Entra, or the remembered password; the Direct launch target; settings app → connection; certificate texts without Azure; remove while connected asks first.
 5. **Tray, docs, spec:** connections in the tray menu; README, CHANGELOG, this ADR to Accepted; spec §1 and §13; manual tests.
 
 Size: about the accounts rework plus the settings pages together, a few thousand lines with tests. RD Gateway or `.rdp` import would add about half again, each.

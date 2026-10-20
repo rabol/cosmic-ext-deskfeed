@@ -65,6 +65,7 @@ mod launch;
 mod model;
 mod password;
 mod quit;
+mod rdp;
 mod session;
 mod settings_ui;
 mod views;
@@ -128,6 +129,11 @@ pub struct AppModel {
     last_check: Option<(Instant, SystemTime)>,
     /// The search field's text; filters the desktop list.
     search: String,
+    /// The "Add connection" form (`rdp.rs`).
+    connection_form: ConnectionForm,
+    /// The saved connections as list rows, in title order; rebuilt when
+    /// they change (`rdp.rs`).
+    connection_rows: Vec<ResourceView>,
     /// The tray, while background operation is on and a tray answers.
     tray: Option<crate::tray::Handle>,
     /// Why there is no tray, when background operation is on.
@@ -172,6 +178,10 @@ const REFRESH_CHECK: Duration = Duration::from_mins(5);
 enum Page {
     Account(String),
     Add,
+    /// The saved plain RDP connections (ADR 0029).
+    Connections,
+    /// The "Add connection" form, or editing one.
+    AddConnection,
 }
 
 /// Adding an account (the Add page).
@@ -256,6 +266,9 @@ impl cosmic::Application for AppModel {
 
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<cosmic::Action<Self::Message>> {
         self.nav.activate(id);
+        if self.nav.data::<Page>(id) == Some(&Page::AddConnection) {
+            self.connection_form = ConnectionForm::default();
+        }
         // "Add account" (or "Sign in") reads as an action, so a click starts
         // the sign-in, also when its page is already shown: with no
         // account it's the only entry, and selecting it again did nothing.
@@ -612,7 +625,7 @@ impl AppModel {
         cache: Option<crate::cache::Store>,
         autostart: bool,
     ) -> Self {
-        AppModel {
+        let mut app = AppModel {
             core,
             context_page: ContextPage::default(),
             about: about(),
@@ -633,6 +646,8 @@ impl AppModel {
             cleanup_retry: None,
             last_check: None,
             search: String::new(),
+            connection_form: ConnectionForm::default(),
+            connection_rows: Vec::new(),
             tray: None,
             tray_unavailable: None,
             tray_menu: None,
@@ -656,7 +671,9 @@ impl AppModel {
             follow_app_off: vec![fl!("follow-app-off"), fl!("on"), fl!("off")],
             follow_account_on: vec![fl!("follow-account-on"), fl!("on"), fl!("off")],
             follow_account_off: vec![fl!("follow-account-off"), fl!("on"), fl!("off")],
-        }
+        };
+        app.refresh_connection_rows();
+        app
     }
 
     /// Hands each message to the part of the app it belongs to.
@@ -667,6 +684,7 @@ impl AppModel {
             Message::Settings(m) => self.settings_message(m),
             Message::Quit(m) => self.quit_message(m),
             Message::App(m) => self.app_message(m),
+            Message::Rdp(m) => self.rdp_message(m),
         }
     }
 
@@ -775,7 +793,24 @@ impl AppModel {
                     self.core.window.show_context = true;
                 }
             }
-            AppMessage::UpdateConfig(config) => self.config = *config,
+            AppMessage::UpdateConfig(config) => {
+                // Saved connections changed elsewhere (another instance, or
+                // the settings file edited): the list and sidebar follow.
+                let connections_changed = config.connections != self.config.connections;
+                self.config = *config;
+                if connections_changed {
+                    // Saving a form for a connection removed elsewhere
+                    // would bring it back.
+                    if let Some(id) = &self.connection_form.editing
+                        && !self.config.connections.contains_key(id)
+                    {
+                        self.connection_form = ConnectionForm::default();
+                    }
+                    self.refresh_connection_rows();
+                    let page = self.selected_page().unwrap_or(Page::Add);
+                    self.rebuild_nav(&page);
+                }
+            }
             AppMessage::LaunchUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
                     crate::app_log!("failed to open link: {err}");
@@ -823,7 +858,7 @@ impl AppModel {
     fn selected_account(&self) -> Option<&Account> {
         match self.selected_page()? {
             Page::Account(id) => self.account(&id),
-            Page::Add => None,
+            Page::Add | Page::Connections | Page::AddConnection => None,
         }
     }
 
@@ -841,35 +876,57 @@ impl AppModel {
         self.rebuild_nav(&select);
     }
 
-    /// Rebuilds the sidebar: accounts in order, then "Add account".
+    /// Rebuilds the sidebar: accounts in order, the saved connections'
+    /// page (when there are some), then "Add account" and "Add connection".
+    /// `select` is shown, or the first entry when it isn't there.
     fn rebuild_nav(&mut self, select: &Page) {
         self.nav.clear();
-        for a in &self.accounts {
-            let page = Page::Account(a.id.clone());
+        let mut entries: Vec<(String, &str, Page, bool)> = self
+            .accounts
+            .iter()
+            .map(|a| {
+                let page = Page::Account(a.id.clone());
+                (a.label(), "avatar-default-symbolic", page, false)
+            })
+            .collect();
+        if !self.config.connections.is_empty() {
+            entries.push((
+                fl!("connections"),
+                "network-server-symbolic",
+                Page::Connections,
+                !self.accounts.is_empty(),
+            ));
+        }
+        // With no account (first start, or after removing the only one)
+        // there is nothing to add to: it's how you sign in.
+        let add = if self.accounts.is_empty() {
+            fl!("sign-in")
+        } else {
+            fl!("add-account")
+        };
+        let divider = !entries.is_empty();
+        entries.push((add, "list-add-symbolic", Page::Add, divider));
+        entries.push((
+            fl!("add-connection"),
+            "list-add-symbolic",
+            Page::AddConnection,
+            false,
+        ));
+        let shown = entries
+            .iter()
+            .position(|(_, _, page, _)| page == select)
+            .unwrap_or(0);
+        for (i, (text, icon, page, divider)) in entries.into_iter().enumerate() {
             let entry = self
                 .nav
                 .insert()
-                .text(a.label())
-                .icon(widget::icon::from_name("avatar-default-symbolic").icon())
-                .data(page.clone());
-            if &page == select {
+                .text(text)
+                .icon(widget::icon::from_name(icon).icon())
+                .divider_above(divider)
+                .data(page);
+            if i == shown {
                 entry.activate();
             }
-        }
-        // With no account (first start, or after signing out of the only
-        // one) there is nothing to add to: it's how you sign in.
-        let add = self
-            .nav
-            .insert()
-            .text(if self.accounts.is_empty() {
-                fl!("sign-in")
-            } else {
-                fl!("add-account")
-            })
-            .icon(widget::icon::from_name("list-add-symbolic").icon())
-            .data(Page::Add);
-        if select == &Page::Add || self.accounts.is_empty() {
-            add.activate();
         }
     }
 

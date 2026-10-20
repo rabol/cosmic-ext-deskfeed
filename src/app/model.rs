@@ -297,6 +297,49 @@ pub enum Message {
     Settings(SettingsMessage),
     Quit(QuitMessage),
     App(AppMessage),
+    Rdp(RdpMessage),
+}
+
+/// Saved plain RDP connections (`rdp.rs`, ADR 0029): the "Add connection"
+/// form, editing and removing.
+#[derive(Debug, Clone)]
+pub enum RdpMessage {
+    /// Edit this saved connection in the form.
+    Edit(String),
+    Input(FormField, String),
+    PasswordInput(PasswordText),
+    TogglePasswordVisible,
+    Save,
+    /// Back to the list without saving.
+    Cancel,
+    /// Removes the connection being edited.
+    Remove,
+    /// The keyring stored or deleted a connection's password (for the log).
+    PasswordStored(Result<(), String>),
+}
+
+/// The "Add connection" form's text fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormField {
+    Name,
+    Server,
+    Username,
+    Domain,
+}
+
+/// The "Add connection" form, also for editing a saved connection.
+#[derive(Default)]
+pub(super) struct ConnectionForm {
+    /// The saved connection being edited; `None`: a new one.
+    pub(super) editing: Option<String>,
+    pub(super) name: String,
+    pub(super) server: String,
+    pub(super) username: String,
+    pub(super) domain: String,
+    /// Only kept until saved, then in the keyring.
+    pub(super) password: String,
+    pub(super) password_shown: bool,
+    pub(super) error: Option<String>,
 }
 
 /// Accounts: saved sign-ins, signing in and out, desktop lists (`account_flow.rs`).

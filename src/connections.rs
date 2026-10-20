@@ -91,6 +91,52 @@ impl SavedConnection {
         Ok(connection)
     }
 
+    /// The connection from a form with one "Server" field (`host`,
+    /// `host:port`, `[IPv6]:port`, or an IPv6 address alone) and a domain
+    /// (empty: none given).
+    pub fn from_server(
+        name: &str,
+        server: &str,
+        username: &str,
+        domain: &str,
+    ) -> Result<Self, ConnectionError> {
+        let server = server.trim();
+        let (host, port) = if let Some(rest) = server.strip_prefix('[') {
+            let (host, after) = rest.split_once(']').ok_or(ConnectionError::BadHost)?;
+            match after {
+                "" => (host, ""),
+                p => (host, p.strip_prefix(':').ok_or(ConnectionError::BadHost)?),
+            }
+        } else if server.matches(':').count() == 1 {
+            server.split_once(':').unwrap_or((server, ""))
+        } else {
+            // No colon, or several: an IPv6 address without a port.
+            (server, "")
+        };
+        let logon = match domain.trim() {
+            "" => LogonSetting::Automatic,
+            d => LogonSetting::CustomDomain(d.to_owned()),
+        };
+        Self::from_form(name, host, port, username, logon)
+    }
+
+    /// What the form shows for this connection: the server as typed back,
+    /// and the domain (empty without one).
+    pub fn server(&self) -> String {
+        if self.port == DEFAULT_PORT {
+            self.host.clone()
+        } else {
+            self.address()
+        }
+    }
+
+    pub fn domain(&self) -> &str {
+        match &self.logon {
+            LogonSetting::CustomDomain(d) => d,
+            _ => "",
+        }
+    }
+
     /// Checks every field; run again before each launch, since the
     /// settings file can be edited by hand.
     pub fn check(&self) -> Result<(), ConnectionError> {
@@ -260,6 +306,38 @@ mod tests {
             ok("", "", LogonSetting::EntraSignIn),
             Err(ConnectionError::EntraNotAvailable)
         );
+    }
+
+    #[test]
+    fn one_server_field() {
+        let server = |s: &str| SavedConnection::from_server("", s, "", "").map(|c| c.address());
+        assert_eq!(server("pc01"), Ok("pc01:3389".into()));
+        assert_eq!(server(" pc01:3390 "), Ok("pc01:3390".into()));
+        assert_eq!(server("[fe80::1]:3390"), Ok("[fe80::1]:3390".into()));
+        assert_eq!(server("[fe80::1]"), Ok("[fe80::1]:3389".into()));
+        assert_eq!(server("fe80::1"), Ok("[fe80::1]:3389".into()));
+        assert_eq!(server("pc01:x"), Err(ConnectionError::BadPort));
+        assert_eq!(server("[fe80::1]x"), Err(ConnectionError::BadHost));
+        assert_eq!(server("[fe80::1"), Err(ConnectionError::BadHost));
+        assert_eq!(server(""), Err(ConnectionError::NoHost));
+        // And back into the form as typed.
+        for typed in ["pc01", "pc01:3390", "fe80::1", "[fe80::1]:3390"] {
+            let c = SavedConnection::from_server("", typed, "", "").unwrap();
+            assert_eq!(c.server(), typed);
+        }
+    }
+
+    #[test]
+    fn the_domain_field() {
+        let logon = |d: &str| SavedConnection::from_server("", "pc01", "", d).map(|c| c.logon);
+        assert_eq!(logon("  "), Ok(LogonSetting::Automatic));
+        assert_eq!(
+            logon(" CORP "),
+            Ok(LogonSetting::CustomDomain("CORP".into()))
+        );
+        assert_eq!(logon("co rp"), Err(ConnectionError::BadDomain));
+        let c = SavedConnection::from_server("", "pc01", "", "CORP").unwrap();
+        assert_eq!(c.domain(), "CORP");
     }
 
     #[test]

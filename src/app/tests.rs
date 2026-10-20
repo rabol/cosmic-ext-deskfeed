@@ -512,7 +512,7 @@ fn the_sidebar_offers_sign_in_until_there_is_an_account() {
     };
     let mut app = app();
     app.rebuild_nav(&Page::Add);
-    assert_eq!(labels(&app), [fl!("sign-in")]);
+    assert_eq!(labels(&app), [fl!("sign-in"), fl!("add-connection")]);
     add_account(
         &mut app,
         "acct-n",
@@ -522,17 +522,25 @@ fn the_sidebar_offers_sign_in_until_there_is_an_account() {
     app.rebuild_nav(&Page::Add);
     assert_eq!(
         labels(&app),
-        ["anna@example.com".to_owned(), fl!("add-account")]
+        [
+            "anna@example.com".to_owned(),
+            fl!("add-account"),
+            fl!("add-connection")
+        ]
     );
     // Signed out, it stays (owner's decision, 2026-10-20); removed, it's
     // back to "Sign in".
     let _ = app.update(Message::Account(AccountMessage::SignOut("acct-n".into())));
     assert_eq!(
         labels(&app),
-        ["anna@example.com".to_owned(), fl!("add-account")]
+        [
+            "anna@example.com".to_owned(),
+            fl!("add-account"),
+            fl!("add-connection")
+        ]
     );
     let _ = app.update(Message::Account(AccountMessage::Remove("acct-n".into())));
-    assert_eq!(labels(&app), [fl!("sign-in")]);
+    assert_eq!(labels(&app), [fl!("sign-in"), fl!("add-connection")]);
 }
 
 mod signed_out_accounts {
@@ -706,4 +714,190 @@ fn the_add_entry_starts_the_sign_in_when_clicked() {
         .unwrap();
     let _ = app.on_nav_select(add);
     assert!(app.adding.is_some(), "the sign-in was started");
+}
+
+/// Saved plain RDP connections (ADR 0029): the form, the list, the sidebar
+/// and removing one. Connecting is tested with the launcher.
+mod saved_connections {
+    use super::*;
+
+    fn rdp(app: &mut AppModel, m: RdpMessage) {
+        let _ = app.update(Message::Rdp(m));
+    }
+
+    fn fill(app: &mut AppModel, name: &str, server: &str, user: &str, domain: &str) {
+        for (field, text) in [
+            (FormField::Name, name),
+            (FormField::Server, server),
+            (FormField::Username, user),
+            (FormField::Domain, domain),
+        ] {
+            rdp(app, RdpMessage::Input(field, text.into()));
+        }
+    }
+
+    fn labels(app: &AppModel) -> Vec<String> {
+        app.nav
+            .iter()
+            .filter_map(|id| app.nav.text(id).map(str::to_owned))
+            .collect()
+    }
+
+    /// Adds one through the form; returns its ID.
+    fn add(app: &mut AppModel, name: &str, server: &str) -> String {
+        let before: HashSet<String> = app.config.connections.keys().cloned().collect();
+        fill(app, name, server, "anna", "");
+        rdp(app, RdpMessage::Save);
+        let mut new = app
+            .config
+            .connections
+            .keys()
+            .filter(|k| !before.contains(*k));
+        let id = new.next().expect("saved").clone();
+        assert!(new.next().is_none());
+        id
+    }
+
+    #[test]
+    fn added_through_the_form_it_is_saved_listed_and_shown() {
+        let mut app = app();
+        app.rebuild_nav(&Page::AddConnection);
+        let id = add(&mut app, "Office PC", "pc1.example.lan:3390");
+        assert!(id.starts_with("rdp-"), "a random ID, never the host");
+        let c = &app.config.connections[&id];
+        assert_eq!((c.host.as_str(), c.port), ("pc1.example.lan", 3390));
+        assert_eq!(c.username, "anna");
+        assert_eq!(c.logon, LogonSetting::Automatic);
+        let rows: Vec<_> = app.connection_rows.iter().map(|r| &r.title).collect();
+        assert_eq!(rows, ["Office PC"]);
+        assert_eq!(app.selected_page(), Some(Page::Connections));
+        assert_eq!(app.connection_form.server, "", "the form is cleared");
+    }
+
+    #[test]
+    fn a_bad_server_is_explained_and_nothing_saved() {
+        let mut app = app();
+        for (server, error) in [
+            ("", "error-connection-no-host"),
+            ("pc 1", "error-connection-host"),
+            ("pc1:0", "error-connection-port"),
+            ("anna@pc1", "error-connection-host"),
+        ] {
+            fill(&mut app, "", server, "anna", "");
+            rdp(&mut app, RdpMessage::Save);
+            assert!(app.config.connections.is_empty(), "{server:?} not saved");
+            let expected = match error {
+                "error-connection-no-host" => fl!("error-connection-no-host"),
+                "error-connection-host" => fl!("error-connection-host"),
+                _ => fl!("error-connection-port"),
+            };
+            assert_eq!(app.connection_form.error.as_deref(), Some(&*expected));
+            assert_eq!(app.connection_form.server, server, "what was typed stays");
+        }
+    }
+
+    #[test]
+    fn editing_prefills_and_keeps_the_id() {
+        let mut app = app();
+        let id = add(&mut app, "Office PC", "pc1.example.lan");
+        let _ = app.update(Message::Settings(SettingsMessage::OpenDesktopSettings(
+            id.clone(),
+        )));
+        let f = &app.connection_form;
+        assert_eq!(f.editing.as_deref(), Some(id.as_str()));
+        assert_eq!(
+            (f.name.as_str(), f.server.as_str(), f.username.as_str()),
+            ("Office PC", "pc1.example.lan", "anna")
+        );
+        assert_eq!(app.selected_page(), Some(Page::AddConnection));
+        rdp(
+            &mut app,
+            RdpMessage::Input(FormField::Domain, "CORP".into()),
+        );
+        rdp(&mut app, RdpMessage::Save);
+        assert_eq!(app.config.connections.len(), 1, "changed, not added");
+        assert_eq!(
+            app.config.connections[&id].logon,
+            LogonSetting::CustomDomain("CORP".into())
+        );
+    }
+
+    #[test]
+    fn the_sidebar_shows_connections_only_when_some_are_saved() {
+        let mut app = app();
+        app.rebuild_nav(&Page::AddConnection);
+        assert!(!labels(&app).contains(&fl!("connections")));
+        let id = add(&mut app, "", "pc1");
+        assert_eq!(
+            labels(&app),
+            [fl!("connections"), fl!("sign-in"), fl!("add-connection")]
+        );
+        let _ = app.update(Message::Settings(SettingsMessage::OpenDesktopSettings(id)));
+        rdp(&mut app, RdpMessage::Remove);
+        assert_eq!(labels(&app), [fl!("sign-in"), fl!("add-connection")]);
+    }
+
+    #[test]
+    fn removing_takes_everything_about_it() {
+        let mut app = app();
+        let keep = add(&mut app, "Other", "pc2");
+        let id = add(&mut app, "Office PC", "pc1");
+        for key in [&id, &keep] {
+            app.config.certificate_pins.insert(key.clone(), "AA".into());
+            app.config
+                .desktop_settings
+                .insert(key.clone(), crate::settings::ConnectionSettings::default());
+            app.config
+                .logon_settings
+                .insert(key.clone(), LogonSetting::Automatic);
+            app.config.favorites.insert(key.clone());
+            app.config.saved_passwords.insert(key.clone());
+        }
+        let _ = app.update(Message::Settings(SettingsMessage::OpenDesktopSettings(
+            id.clone(),
+        )));
+        rdp(&mut app, RdpMessage::Remove);
+        let c = &app.config;
+        assert!(!c.connections.contains_key(&id));
+        assert!(!c.certificate_pins.contains_key(&id));
+        assert!(!c.desktop_settings.contains_key(&id));
+        assert!(!c.logon_settings.contains_key(&id));
+        assert!(!c.favorites.contains(&id));
+        assert!(!c.saved_passwords.contains(&id));
+        // The other one is untouched.
+        assert!(c.connections.contains_key(&keep) && c.certificate_pins.contains_key(&keep));
+        assert!(c.favorites.contains(&keep) && c.saved_passwords.contains(&keep));
+        let rows: Vec<_> = app.connection_rows.iter().map(|r| &r.title).collect();
+        assert_eq!(rows, ["Other"]);
+    }
+
+    #[test]
+    fn a_password_given_is_marked_remembered_never_saved_in_the_settings() {
+        let mut app = app();
+        fill(&mut app, "", "pc1", "anna", "");
+        rdp(
+            &mut app,
+            RdpMessage::PasswordInput(PasswordText("s3cret!".into())),
+        );
+        rdp(&mut app, RdpMessage::Save);
+        let id = app.config.connections.keys().next().unwrap().clone();
+        assert!(app.config.saved_passwords.contains(&id));
+        assert_eq!(app.connection_form.password, "");
+        let settings = format!("{:?}", app.config);
+        assert!(!settings.contains("s3cret!"));
+    }
+
+    #[test]
+    fn a_connection_removed_elsewhere_closes_its_form() {
+        let mut app = app();
+        let id = add(&mut app, "", "pc1");
+        let _ = app.update(Message::Settings(SettingsMessage::OpenDesktopSettings(id)));
+        let mut config = app.config.clone();
+        config.connections.clear();
+        let _ = app.update(Message::App(AppMessage::UpdateConfig(Box::new(config))));
+        assert!(app.connection_form.editing.is_none());
+        assert!(app.connection_rows.is_empty());
+        rdp(&mut app, RdpMessage::Save);
+        assert!(app.config.connections.is_empty(), "not brought back");
+    }
 }

@@ -7,9 +7,6 @@ mod autostart;
 mod awake;
 mod cache;
 mod config;
-// Read and written from the screens in step 4 of ADR 0029; until then
-// only the settings file and the tests use it.
-#[cfg_attr(not(test), allow(dead_code))]
 mod connections;
 mod deps;
 mod display;

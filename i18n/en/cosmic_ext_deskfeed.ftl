@@ -335,3 +335,27 @@ diagnostics-save = Save…
 diagnostics-saved = Saved to { $path }
 diagnostics-not-saved = Not saved: { $detail }
 error-sign-in-rejected = Windows rejected the sign-in.
+
+## Saved plain RDP connections (ADR 0029)
+connections = Connections
+add-connection = Add connection
+edit-connection = Edit connection
+connection-name = Name
+connection-name-placeholder = Optional; the server otherwise
+connection-server = Server
+connection-server-placeholder = Host name or IP address, optionally :port
+connection-username = User name
+connection-password = Password
+connection-password-placeholder = Optional; asked for when connecting otherwise
+connection-password-keep = Leave empty to keep the remembered one
+connection-domain = Domain
+connection-domain-placeholder = Optional
+connection-password-hint = A password given here is remembered in the keyring.
+save = Save
+remove-connection = Remove connection
+error-connection-no-host = Enter the server's host name or IP address.
+error-connection-host = The server isn't a host name or an IP address.
+error-connection-port = The port must be a number from 1 to 65535.
+error-connection-username = The user name can't contain line breaks or control characters.
+error-connection-name = The name can be at most 80 characters, on one line.
+error-connection-domain = The domain can only contain letters, digits, ".", "-" and "_".

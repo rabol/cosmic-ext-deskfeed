@@ -15,6 +15,8 @@ impl AppModel {
                 Some(account) => self.account_view(account),
                 None => self.add_view(),
             },
+            Some(Page::Connections) => self.connections_view(),
+            Some(Page::AddConnection) => self.connection_form_view(),
             _ => self.add_view(),
         }
     }
@@ -233,7 +235,7 @@ impl AppModel {
     /// and connect buttons.
     // One flat layout, top to bottom; reads best in one place.
     #[allow(clippy::too_many_lines)]
-    fn resource_row<'a>(
+    pub(super) fn resource_row<'a>(
         &'a self,
         account: &str,
         r: &'a ResourceView,
