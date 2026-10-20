@@ -22,7 +22,7 @@ impl AppModel {
     pub(super) fn add_view(&self) -> Element<'_, Message> {
         let space = cosmic::theme::spacing();
         if let Some(Adding::SigningIn { .. }) = &self.adding {
-            return waiting_view(Message::CancelSignIn(None));
+            return waiting_view(Message::Account(AccountMessage::CancelSignIn(None)));
         }
         let mut col = widget::column::with_capacity(5)
             .push(widget::text::title1(if self.accounts.is_empty() {
@@ -31,7 +31,10 @@ impl AppModel {
                 fl!("add-account")
             }))
             .push(widget::text::body(fl!("unofficial-notice")).width(Length::Fixed(420.0)))
-            .push(widget::button::suggested(fl!("sign-in")).on_press(Message::AddAccount))
+            .push(
+                widget::button::suggested(fl!("sign-in"))
+                    .on_press(Message::Account(AccountMessage::AddAccount)),
+            )
             .spacing(space.space_m)
             .align_x(Alignment::Center);
         if let Some(Adding::Failed(e)) = &self.adding {
@@ -67,26 +70,27 @@ impl AppModel {
                             .width(Length::Fixed(420.0)),
                     )
                     .push(
-                        widget::button::suggested(fl!("sign-in"))
-                            .on_press(Message::SignInAccount(account.id.clone())),
+                        widget::button::suggested(fl!("sign-in")).on_press(Message::Account(
+                            AccountMessage::SignInAccount(account.id.clone()),
+                        )),
                     )
                     .spacing(space.space_m)
                     .align_x(Alignment::Center);
                 if account.can_retry {
-                    col = col.push(
-                        widget::button::standard(fl!("try-again"))
-                            .on_press(Message::RetryRestore(account.id.clone())),
-                    );
+                    col = col.push(widget::button::standard(fl!("try-again")).on_press(
+                        Message::Account(AccountMessage::RetryRestore(account.id.clone())),
+                    ));
                 }
                 col = col.push(
-                    widget::button::text(fl!("sign-out"))
-                        .on_press(Message::SignOut(account.id.clone())),
+                    widget::button::text(fl!("sign-out")).on_press(Message::Account(
+                        AccountMessage::SignOut(account.id.clone()),
+                    )),
                 );
                 with_offline(col.into())
             }
-            AccountState::SigningIn { .. } => {
-                waiting_view(Message::CancelSignIn(Some(account.id.clone())))
-            }
+            AccountState::SigningIn { .. } => waiting_view(Message::Account(
+                AccountMessage::CancelSignIn(Some(account.id.clone())),
+            )),
             AccountState::Ready {
                 loading,
                 workspaces,
@@ -232,7 +236,9 @@ impl AppModel {
                 let mut b = widget::button::suggested(fl!("connect"));
                 // An offline entry never connects (spec §7).
                 if live && r.kind != ResourceKind::Other {
-                    b = b.on_press(Message::Connect(r.key.clone()));
+                    b = b.on_press(Message::Connection(ConnectionMessage::Connect(
+                        r.key.clone(),
+                    )));
                 }
                 (None, b.into())
             }
@@ -240,13 +246,17 @@ impl AppModel {
             Some(Connection::Preparing | Connection::AwaitingUser) => (
                 progress.clone(),
                 widget::button::standard(fl!("cancel"))
-                    .on_press(Message::Disconnect(r.key.clone()))
+                    .on_press(Message::Connection(ConnectionMessage::Disconnect(
+                        r.key.clone(),
+                    )))
                     .into(),
             ),
             Some(Connection::Connecting | Connection::Authenticating) => (
                 progress.clone(),
                 widget::button::standard(fl!("disconnect"))
-                    .on_press(Message::Disconnect(r.key.clone()))
+                    .on_press(Message::Connection(ConnectionMessage::Disconnect(
+                        r.key.clone(),
+                    )))
                     .into(),
             ),
             Some(Connection::Disconnecting) => (
@@ -270,26 +280,30 @@ impl AppModel {
                     // app's windows have the titles Windows gives them
                     // (ADR 0020).
                     .push_maybe((r.kind == ResourceKind::Desktop).then(|| {
-                        widget::button::suggested(fl!("show-desktop"))
-                            .on_press(Message::ShowSession(r.key.clone()))
+                        widget::button::suggested(fl!("show-desktop")).on_press(
+                            Message::Connection(ConnectionMessage::ShowSession(r.key.clone())),
+                        )
                     }))
-                    .push(
-                        widget::button::destructive(fl!("disconnect"))
-                            .on_press(Message::Disconnect(r.key.clone())),
-                    )
+                    .push(widget::button::destructive(fl!("disconnect")).on_press(
+                        Message::Connection(ConnectionMessage::Disconnect(r.key.clone())),
+                    ))
                     .spacing(cosmic::theme::spacing().space_xs)
                     .into(),
             ),
             Some(Connection::Reconnecting { .. }) => (
                 progress.clone(),
                 widget::button::standard(fl!("stop"))
-                    .on_press(Message::Disconnect(r.key.clone()))
+                    .on_press(Message::Connection(ConnectionMessage::Disconnect(
+                        r.key.clone(),
+                    )))
                     .into(),
             ),
             Some(Connection::Failed(e)) => (
                 Some(e.clone()),
                 widget::button::suggested(fl!("connect"))
-                    .on_press(Message::Connect(r.key.clone()))
+                    .on_press(Message::Connection(ConnectionMessage::Connect(
+                        r.key.clone(),
+                    )))
                     .into(),
             ),
         };
@@ -337,10 +351,12 @@ impl AppModel {
             } else {
                 fl!("favorite-add")
             })
-            .on_press(Message::ToggleFavorite(r.key.clone()));
+            .on_press(Message::App(AppMessage::ToggleFavorite(r.key.clone())));
         let settings = widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
             .tooltip(fl!("desktop-settings"))
-            .on_press(Message::OpenDesktopSettings(r.key.clone()));
+            .on_press(Message::Settings(SettingsMessage::OpenDesktopSettings(
+                r.key.clone(),
+            )));
         // The feed's icon, or a stock one until it has loaded (or without one).
         let icon = match r
             .icon
@@ -398,21 +414,21 @@ impl AppModel {
         if any {
             col = col.push(
                 widget::search_input(fl!("search-desktops"), &self.search)
-                    .on_input(Message::SearchInput)
-                    .on_clear(Message::SearchInput(String::new())),
+                    .on_input(|text| Message::App(AppMessage::SearchInput(text)))
+                    .on_clear(Message::App(AppMessage::SearchInput(String::new()))),
             );
         }
         if let Some(notice) = &account.notice {
-            col = col.push(
-                widget::row::with_capacity(2)
-                    .push(widget::text::body(notice.clone()).width(Length::Fill))
-                    .push(
-                        widget::button::standard(fl!("try-again"))
-                            .on_press(Message::RetrySave(account.id.clone())),
-                    )
-                    .spacing(cosmic::theme::spacing().space_xs)
-                    .align_y(Alignment::Center),
-            );
+            col =
+                col.push(
+                    widget::row::with_capacity(2)
+                        .push(widget::text::body(notice.clone()).width(Length::Fill))
+                        .push(widget::button::standard(fl!("try-again")).on_press(
+                            Message::Account(AccountMessage::RetrySave(account.id.clone())),
+                        ))
+                        .spacing(cosmic::theme::spacing().space_xs)
+                        .align_y(Alignment::Center),
+                );
         }
         if loading {
             col = col.push(widget::text::body(fl!("loading-desktops")));

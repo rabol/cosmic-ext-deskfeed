@@ -27,37 +27,40 @@ fn choice_value(choice: usize) -> Option<bool> {
 impl AppModel {
     /// Settings messages: opening and changing app, account and desktop
     /// settings. Routed here by `route`.
-    pub(super) fn settings_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    pub(super) fn settings_message(
+        &mut self,
+        message: SettingsMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::OpenAccountSettings(id) => {
+            SettingsMessage::OpenAccountSettings(id) => {
                 self.settings_target = Some(id);
                 self.context_page = ContextPage::AccountSettings;
                 self.core.window.show_context = true;
             }
-            Message::OpenDesktopSettings(key) => {
+            SettingsMessage::OpenDesktopSettings(key) => {
                 self.settings_target = Some(key);
                 self.context_page = ContextPage::DesktopSettings;
                 self.core.window.show_context = true;
             }
-            Message::AppToggle(t, on) => {
+            SettingsMessage::AppToggle(t, on) => {
                 self.edit_settings(Level::App, "", |s| s.set_toggle(t, Some(on)));
             }
-            Message::AppNumber(n, value) => {
+            SettingsMessage::AppNumber(n, value) => {
                 self.edit_settings(Level::App, "", |s| s.set_number(n, Some(value)));
             }
-            Message::AppChoice(c, i) => {
+            SettingsMessage::AppChoice(c, i) => {
                 let value = c.options().get(i).copied();
                 self.edit_settings(Level::App, "", |s| s.set_choice(c, value));
             }
-            Message::AccountChoice(id, c, i) => {
+            SettingsMessage::AccountChoice(id, c, i) => {
                 let value = i.checked_sub(1).and_then(|i| c.options().get(i).copied());
                 self.edit_settings(Level::Account, &id, |s| s.set_choice(c, value));
             }
-            Message::DesktopChoice(key, c, i) => {
+            SettingsMessage::DesktopChoice(key, c, i) => {
                 let value = i.checked_sub(1).and_then(|i| c.options().get(i).copied());
                 self.edit_settings(Level::Desktop, &key, |s| s.set_choice(c, value));
             }
-            Message::AppTheme(i) => {
+            SettingsMessage::AppTheme(i) => {
                 let value = u32::try_from(i).unwrap_or(0).min(2);
                 match &self.config_handler {
                     Some(handler) => {
@@ -67,7 +70,7 @@ impl AppModel {
                 }
                 return apply_theme(value);
             }
-            Message::AppBackground(on) => {
+            SettingsMessage::AppBackground(on) => {
                 match &self.config_handler {
                     Some(handler) => {
                         let _ = self.config.set_background(handler, on);
@@ -81,14 +84,14 @@ impl AppModel {
                     self.tray_unavailable = None;
                 }
             }
-            Message::AppAutostart(on) => match crate::autostart::set(on) {
+            SettingsMessage::AppAutostart(on) => match crate::autostart::set(on) {
                 Ok(()) => {
                     self.autostart = on;
                     crate::app_log!("start at login: {}", if on { "on" } else { "off" });
                 }
                 Err(e) => crate::app_log!("start at login not changed: {e}"),
             },
-            Message::AppLogSize(mib) => {
+            SettingsMessage::AppLogSize(mib) => {
                 let (min, max, _) = crate::log::MAX_SIZE_MIB;
                 let mib = mib.clamp(min, max);
                 crate::log::set_max_size_mib(mib);
@@ -99,24 +102,22 @@ impl AppModel {
                     None => self.config.log_max_mib = Some(mib),
                 }
             }
-            Message::AccountToggle(id, t, choice) => {
+            SettingsMessage::AccountToggle(id, t, choice) => {
                 self.edit_settings(Level::Account, &id, |s| {
                     s.set_toggle(t, choice_value(choice));
                 });
             }
-            Message::AccountNumber(id, n, value) => {
+            SettingsMessage::AccountNumber(id, n, value) => {
                 self.edit_settings(Level::Account, &id, |s| s.set_number(n, value));
             }
-            Message::DesktopToggle(key, t, choice) => {
+            SettingsMessage::DesktopToggle(key, t, choice) => {
                 self.edit_settings(Level::Desktop, &key, |s| {
                     s.set_toggle(t, choice_value(choice));
                 });
             }
-            Message::DesktopNumber(key, n, value) => {
+            SettingsMessage::DesktopNumber(key, n, value) => {
                 self.edit_settings(Level::Desktop, &key, |s| s.set_number(n, value));
             }
-            // `update` routes only this handler's messages here.
-            other => misrouted(&other),
         }
         Task::none()
     }
@@ -195,7 +196,7 @@ impl AppModel {
                 .description(description)
                 .control(
                     widget::toggler(current.toggle(t))
-                        .on_toggle(move |on| Message::AppToggle(t, on)),
+                        .on_toggle(move |on| Message::Settings(SettingsMessage::AppToggle(t, on))),
                 )
                 .into()
         };
@@ -204,7 +205,7 @@ impl AppModel {
             widget::settings::item::builder(name)
                 .description(description)
                 .control(number_spin(n, current.number(n), move |v| {
-                    Message::AppNumber(n, v)
+                    Message::Settings(SettingsMessage::AppNumber(n, v))
                 }))
                 .into()
         };
@@ -215,7 +216,7 @@ impl AppModel {
             widget::settings::item::builder(name)
                 .description(description)
                 .control(widget::dropdown(labels, selected, move |i| {
-                    Message::AppChoice(c, i)
+                    Message::Settings(SettingsMessage::AppChoice(c, i))
                 }))
                 .into()
         };
@@ -225,7 +226,7 @@ impl AppModel {
                 widget::settings::item::builder(fl!("setting-theme")).control(widget::dropdown(
                     vec![fl!("theme-system"), fl!("theme-dark"), fl!("theme-light")],
                     Some(self.config.app_theme.unwrap_or(0).min(2) as usize),
-                    Message::AppTheme,
+                    |theme| Message::Settings(SettingsMessage::AppTheme(theme)),
                 )),
             );
         let background_desc = match (&self.tray_unavailable, self.config.background) {
@@ -238,13 +239,17 @@ impl AppModel {
                 widget::settings::item::builder(fl!("setting-background"))
                     .description(background_desc)
                     .control(
-                        widget::toggler(self.config.background).on_toggle(Message::AppBackground),
+                        widget::toggler(self.config.background)
+                            .on_toggle(|on| Message::Settings(SettingsMessage::AppBackground(on))),
                     ),
             )
             .add(
                 widget::settings::item::builder(fl!("setting-autostart"))
                     .description(fl!("setting-autostart-desc"))
-                    .control(widget::toggler(self.autostart).on_toggle(Message::AppAutostart)),
+                    .control(
+                        widget::toggler(self.autostart)
+                            .on_toggle(|on| Message::Settings(SettingsMessage::AppAutostart(on))),
+                    ),
             );
         let (min, max, default) = crate::log::MAX_SIZE_MIB;
         let mib = self.config.log_max_mib.unwrap_or(default).clamp(min, max);
@@ -260,7 +265,7 @@ impl AppModel {
                         1,
                         min,
                         max,
-                        Message::AppLogSize,
+                        |mib| Message::Settings(SettingsMessage::AppLogSize(mib)),
                     )),
             );
         settings_column(
@@ -305,9 +310,9 @@ impl AppModel {
                 false,
             ),
             Page::WithAccount,
-            move |t, i| Message::AccountToggle(id_toggle.clone(), t, i),
-            move |n, v| Message::AccountNumber(id_number.clone(), n, v),
-            move |c, i| Message::AccountChoice(id_choice.clone(), c, i),
+            move |t, i| Message::Settings(SettingsMessage::AccountToggle(id_toggle.clone(), t, i)),
+            move |n, v| Message::Settings(SettingsMessage::AccountNumber(id_number.clone(), n, v)),
+            move |c, i| Message::Settings(SettingsMessage::AccountChoice(id_choice.clone(), c, i)),
         )
     }
 
@@ -344,10 +349,9 @@ impl AppModel {
             security = security.add(
                 widget::settings::item::builder(fl!("setting-certificate"))
                     .description(fl!("setting-certificate-desc", fingerprint = short))
-                    .control(
-                        widget::button::destructive(fl!("remove"))
-                            .on_press(Message::ForgetCertificate(key.to_owned())),
-                    ),
+                    .control(widget::button::destructive(fl!("remove")).on_press(
+                        Message::Connection(ConnectionMessage::ForgetCertificate(key.to_owned())),
+                    )),
             );
             any = true;
         }
@@ -355,10 +359,9 @@ impl AppModel {
             security = security.add(
                 widget::settings::item::builder(fl!("setting-saved-password"))
                     .description(fl!("setting-saved-password-desc"))
-                    .control(
-                        widget::button::destructive(fl!("remove"))
-                            .on_press(Message::ForgetPassword(key.to_owned())),
-                    ),
+                    .control(widget::button::destructive(fl!("remove")).on_press(
+                        Message::Connection(ConnectionMessage::ForgetPassword(key.to_owned())),
+                    )),
             );
             any = true;
         }
@@ -378,9 +381,9 @@ impl AppModel {
             pin,
             open_note(hint, open, true),
             page,
-            move |t, i| Message::DesktopToggle(key_toggle.clone(), t, i),
-            move |n, v| Message::DesktopNumber(key_number.clone(), n, v),
-            move |c, i| Message::DesktopChoice(key_choice.clone(), c, i),
+            move |t, i| Message::Settings(SettingsMessage::DesktopToggle(key_toggle.clone(), t, i)),
+            move |n, v| Message::Settings(SettingsMessage::DesktopNumber(key_number.clone(), n, v)),
+            move |c, i| Message::Settings(SettingsMessage::DesktopChoice(key_choice.clone(), c, i)),
         )
     }
 }

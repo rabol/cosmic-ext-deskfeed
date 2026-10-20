@@ -154,14 +154,22 @@ impl AppModel {
                     Err(fl!("error-generic")),
                 )
                 .await;
-                Message::Launched(account, epoch, key, attempt, result)
+                Message::Connection(ConnectionMessage::Launched(
+                    account, epoch, key, attempt, result,
+                ))
             })
         };
         let events = {
             let (account, key) = (account.to_owned(), key.to_owned());
-            cosmic::task::stream(
-                rx.map(move |e| Message::Session(account.clone(), epoch, key.clone(), attempt, e)),
-            )
+            cosmic::task::stream(rx.map(move |e| {
+                Message::Connection(ConnectionMessage::Session(
+                    account.clone(),
+                    epoch,
+                    key.clone(),
+                    attempt,
+                    e,
+                ))
+            }))
         };
         let session = started.chain(events);
         if !settings.new_workspace {
@@ -199,7 +207,7 @@ impl AppModel {
                 Err("task".to_owned()),
             )
             .await;
-            Message::WorkspaceMoved(key, mine, result)
+            Message::Connection(ConnectionMessage::WorkspaceMoved(key, mine, result))
         })
     }
 
@@ -259,7 +267,7 @@ impl AppModel {
                         Err(()),
                     )
                     .await;
-                    Message::SignOutFilesRemoved(id, result)
+                    Message::Account(AccountMessage::SignOutFilesRemoved(id, result))
                 });
             }
             Ok(session) => {
@@ -273,7 +281,7 @@ impl AppModel {
                 if wanted {
                     return cosmic::task::future(async move {
                         tokio::time::sleep(deadline).await;
-                        Message::ConnectDeadline(key, attempt)
+                        Message::Connection(ConnectionMessage::ConnectDeadline(key, attempt))
                     });
                 }
             }
@@ -311,7 +319,7 @@ impl AppModel {
                 Err("task".into()),
             )
             .await;
-            Message::SessionShown(result)
+            Message::Connection(ConnectionMessage::SessionShown(result))
         })
     }
 }

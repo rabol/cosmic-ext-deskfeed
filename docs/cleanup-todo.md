@@ -32,7 +32,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 
 ## 2. Structure: biggest wins
 
-- [ ] **Message routing ceremony** (`src/app/mod.rs` `route`, the four handlers' `misrouted` fallbacks, `src/app/routing_check.rs`).
+- [x] **Message routing ceremony** (Done 2026-10-20: `Message` holds `Account`, `Connection`, `Settings`, `Quit` and `App` messages, each handler takes its own; `misrouted` and `routing_check.rs` are gone. `route` is five lines.) (`src/app/mod.rs` `route`, the four handlers' `misrouted` fallbacks, `src/app/routing_check.rs`).
   - About 95 messages are listed twice: once in `route` and once in each handler, plus a run-time "wrong handler" fallback.
   - The gap caused the Quit bug, and a 155-line source-parsing test was added to cover it. That test depends on exact formatting.
   - *Simpler:* nested message enums (`Message::Account(…)`, `Connection(…)`, `Settings(…)`, `Quit(…)`), so the compiler enforces the routing. `route`, `misrouted` and `routing_check.rs` then go.

@@ -63,7 +63,9 @@ impl AppModel {
                             Err("task".into()),
                         )
                         .await;
-                        Message::PasswordSaved(key, id, ticket, result)
+                        Message::Connection(ConnectionMessage::PasswordSaved(
+                            key, id, ticket, result,
+                        ))
                     });
                 }
                 let desk = self.desks.at(key);
@@ -311,7 +313,7 @@ impl AppModel {
         let key = key.to_owned();
         cosmic::task::future(async move {
             tokio::time::sleep(wait).await;
-            Message::ReconnectDue(key, timer)
+            Message::Connection(ConnectionMessage::ReconnectDue(key, timer))
         })
     }
 

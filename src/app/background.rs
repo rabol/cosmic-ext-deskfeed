@@ -89,9 +89,11 @@ impl AppModel {
                 // A password, a certificate or a failure opens the window
                 // (`window_needed`).
                 self.desks.at(&key).from_tray = true;
-                self.route(Message::Connect(key))
+                self.connection_message(ConnectionMessage::Connect(key))
             }
-            TrayEvent::ShowDesktop(key) => self.route(Message::ShowSession(key)),
+            TrayEvent::ShowDesktop(key) => {
+                self.connection_message(ConnectionMessage::ShowSession(key))
+            }
             TrayEvent::Quit => {
                 // Asked in the window when desktops are open.
                 let show = if self.desks.open_count() == 0 {
@@ -99,7 +101,7 @@ impl AppModel {
                 } else {
                     self.show_window()
                 };
-                Task::batch([show, self.route(Message::QuitChosen)])
+                Task::batch([show, self.quit_message(QuitMessage::Chosen)])
             }
         }
     }
@@ -182,7 +184,8 @@ impl AppModel {
             return Subscription::none();
         }
         titles.sort();
-        Subscription::run_with(titles, crate::awake::watch).map(Message::Awake)
+        Subscription::run_with(titles, crate::awake::watch)
+            .map(|event| Message::App(AppMessage::Awake(event)))
     }
 }
 

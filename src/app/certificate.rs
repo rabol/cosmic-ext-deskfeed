@@ -78,15 +78,15 @@ pub(super) fn certificate_dialog(d: &CertificateDialog) -> Element<'_, Message> 
         dialog = dialog
             .primary_action(
                 widget::button::destructive(fl!("certificate-trust"))
-                    .on_press(Message::TrustCertificate),
+                    .on_press(Message::Connection(ConnectionMessage::TrustCertificate)),
             )
-            .secondary_action(
-                widget::button::standard(fl!("cancel")).on_press(Message::CloseCertificateDialog),
-            );
+            .secondary_action(widget::button::standard(fl!("cancel")).on_press(
+                Message::Connection(ConnectionMessage::CloseCertificateDialog),
+            ));
     } else {
-        dialog = dialog.primary_action(
-            widget::button::standard(fl!("close")).on_press(Message::CloseCertificateDialog),
-        );
+        dialog = dialog.primary_action(widget::button::standard(fl!("close")).on_press(
+            Message::Connection(ConnectionMessage::CloseCertificateDialog),
+        ));
     }
     dialog.into()
 }

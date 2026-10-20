@@ -10,22 +10,25 @@ impl AppModel {
     // One `match` over this handler's messages; splitting it would only
     // spread the routing out.
     #[allow(clippy::too_many_lines)]
-    pub(super) fn account_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    pub(super) fn account_message(
+        &mut self,
+        message: AccountMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::SavedLoaded(result) => return self.saved_loaded(result),
-            Message::Restored(id, generation, outcome) => {
+            AccountMessage::SavedLoaded(result) => return self.saved_loaded(result),
+            AccountMessage::Restored(id, generation, outcome) => {
                 return self.restored(&id, generation, outcome);
             }
-            Message::RetryRestore(id) => return self.start_restore(&id),
-            Message::AddAccount => return self.start_add(),
-            Message::SignInAccount(id) => return self.start_account_sign_in(&id),
-            Message::CancelSignIn(None) => {
+            AccountMessage::RetryRestore(id) => return self.start_restore(&id),
+            AccountMessage::AddAccount => return self.start_add(),
+            AccountMessage::SignInAccount(id) => return self.start_account_sign_in(&id),
+            AccountMessage::CancelSignIn(None) => {
                 if let Some(Adding::SigningIn { cancel, .. }) = &self.adding {
                     cancel.cancel();
                 }
                 self.adding = None;
             }
-            Message::CancelSignIn(Some(id)) => {
+            AccountMessage::CancelSignIn(Some(id)) => {
                 let generation = self.next();
                 if let Some(a) = self.account_mut(&id) {
                     if let AccountState::SigningIn { cancel } = &a.state {
@@ -35,17 +38,17 @@ impl AppModel {
                     a.state = AccountState::NeedsSignIn { error: None };
                 }
             }
-            Message::SignInFinished(origin, generation, profile, result) => {
+            AccountMessage::SignInFinished(origin, generation, profile, result) => {
                 return self.sign_in_finished(origin.as_deref(), generation, &profile, result);
             }
-            Message::Saved(id, sign_in, result) => {
+            AccountMessage::Saved(id, sign_in, result) => {
                 if let Some(a) = self.account_mut(&id)
                     && a.sign_in == sign_in
                 {
                     a.notice = result.err();
                 }
             }
-            Message::RetrySave(id) => {
+            AccountMessage::RetrySave(id) => {
                 let Some(a) = self.account(&id) else {
                     return Task::none();
                 };
@@ -64,11 +67,11 @@ impl AppModel {
                         Err(fl!("error-generic")),
                     )
                     .await;
-                    Message::Saved(id, sign_in, result)
+                    Message::Account(AccountMessage::Saved(id, sign_in, result))
                 });
             }
-            Message::Refresh(id) => return self.load_resources(&id),
-            Message::RefreshDue => {
+            AccountMessage::Refresh(id) => return self.load_resources(&id),
+            AccountMessage::RefreshDue => {
                 // The check timer stops while the computer sleeps; the
                 // wall clock doesn't (spec §7: refresh after resume).
                 let now = (Instant::now(), SystemTime::now());
@@ -84,32 +87,32 @@ impl AppModel {
                 }
                 return self.refresh_due();
             }
-            Message::Discovered(id, epoch, generation, result) => {
+            AccountMessage::Discovered(id, epoch, generation, result) => {
                 return self.discovered(&id, epoch, generation, result);
             }
-            Message::IconsLoaded(id, epoch, icons) => self.icons_loaded(&id, epoch, icons),
-            Message::CacheLoaded(id, epoch, cached) => self.cache_loaded(&id, epoch, cached),
-            Message::SignOut(id) => return self.ask_sign_out(&id),
-            Message::SignOutSelected => {
+            AccountMessage::IconsLoaded(id, epoch, icons) => self.icons_loaded(&id, epoch, icons),
+            AccountMessage::CacheLoaded(id, epoch, cached) => self.cache_loaded(&id, epoch, cached),
+            AccountMessage::SignOut(id) => return self.ask_sign_out(&id),
+            AccountMessage::SignOutSelected => {
                 if let Some(Page::Account(id)) = self.selected_page() {
                     return self.ask_sign_out(&id);
                 }
             }
-            Message::SignOutConfirm => {
+            AccountMessage::SignOutConfirm => {
                 if let Some(id) = self.sign_out_asking.take() {
                     return self.sign_out(&id);
                 }
             }
-            Message::SignOutCancel => self.sign_out_asking = None,
-            Message::SignOutFinished(id, identity, result) => {
+            AccountMessage::SignOutCancel => self.sign_out_asking = None,
+            AccountMessage::SignOutFinished(id, identity, result) => {
                 if let Err(e) = result {
                     crate::app_log!("sign-out: keyring not cleaned ({e})");
                     self.cleanup_retry(&id).keyring = Some(*identity);
                 }
             }
-            Message::RetrySignOutCleanup => return self.retry_sign_out_cleanup(),
-            Message::DismissSignOutCleanup => self.cleanup_retry = None,
-            Message::SignOutFilesRemoved(id, result) => {
+            AccountMessage::RetrySignOutCleanup => return self.retry_sign_out_cleanup(),
+            AccountMessage::DismissSignOutCleanup => self.cleanup_retry = None,
+            AccountMessage::SignOutFilesRemoved(id, result) => {
                 if result.is_err() {
                     crate::app_log!("sign-out: sign-in files not removed");
                     self.cleanup_retry(&id).files = true;
@@ -127,8 +130,6 @@ impl AppModel {
                     return self.continue_quit();
                 }
             }
-            // `update` routes only this handler's messages here.
-            other => misrouted(&other),
         }
         Task::none()
     }
@@ -196,7 +197,7 @@ impl AppModel {
         cosmic::task::future(async move {
             let owner = id.clone();
             let cached = off_ui(move || store.load(&owner, keep), None).await;
-            Message::CacheLoaded(id, epoch, cached)
+            Message::Account(AccountMessage::CacheLoaded(id, epoch, cached))
         })
     }
 
@@ -266,7 +267,7 @@ impl AppModel {
                 Err(StepError::Show(fl!("error-generic"))),
             )
             .await;
-            Message::Restored(id, generation, outcome)
+            Message::Account(AccountMessage::Restored(id, generation, outcome))
         })
     }
 
@@ -387,12 +388,12 @@ impl AppModel {
                 Err(SignInError::HelperFailed(signin::HelperProblem::Task)),
             )
             .await;
-            Message::SignInFinished(
+            Message::Account(AccountMessage::SignInFinished(
                 origin,
                 generation,
                 used,
                 result.map(Arc::new).map_err(describe_sign_in_error),
-            )
+            ))
         })
     }
 
@@ -487,7 +488,7 @@ impl AppModel {
                 Err(fl!("error-generic")),
             )
             .await;
-            Message::Saved(save_id, generation, result)
+            Message::Account(AccountMessage::Saved(save_id, generation, result))
         });
         Task::batch([save, self.load_resources(&id)])
     }
@@ -574,7 +575,7 @@ impl AppModel {
                 Err(StepError::Show(fl!("error-generic"))),
             )
             .await;
-            Message::Discovered(id, epoch, generation, result)
+            Message::Account(AccountMessage::Discovered(id, epoch, generation, result))
         })
     }
 
@@ -705,7 +706,7 @@ impl AppModel {
                 Vec::new(),
             )
             .await;
-            Message::IconsLoaded(id, epoch, icons)
+            Message::Account(AccountMessage::IconsLoaded(id, epoch, icons))
         })
     }
 
@@ -772,7 +773,7 @@ impl AppModel {
             tasks.push(cosmic::task::future(async move {
                 let owner = id.clone();
                 let result = off_ui(move || accounts::shared().remove_files(&owner), Err(())).await;
-                Message::SignOutFilesRemoved(id, result)
+                Message::Account(AccountMessage::SignOutFilesRemoved(id, result))
             }));
         }
         if let Some(identity) = retry.keyring {
@@ -799,10 +800,11 @@ impl AppModel {
             .body(fl!("sign-out-body", count = open))
             .primary_action(
                 widget::button::destructive(fl!("sign-out-disconnect"))
-                    .on_press(Message::SignOutConfirm),
+                    .on_press(Message::Account(AccountMessage::SignOutConfirm)),
             )
             .secondary_action(
-                widget::button::standard(fl!("cancel")).on_press(Message::SignOutCancel),
+                widget::button::standard(fl!("cancel"))
+                    .on_press(Message::Account(AccountMessage::SignOutCancel)),
             )
             .into()
     }
@@ -867,7 +869,7 @@ impl AppModel {
                     Err(()),
                 )
                 .await;
-                Message::SignOutFilesRemoved(id, result)
+                Message::Account(AccountMessage::SignOutFilesRemoved(id, result))
             })
         };
         let keyring = keyring_cleanup(id.to_owned(), account.identity);
@@ -895,6 +897,6 @@ fn keyring_cleanup(
             Err(fl!("error-sign-out-incomplete")),
         )
         .await;
-        Message::SignOutFinished(id, Box::new(kept), result)
+        Message::Account(AccountMessage::SignOutFinished(id, Box::new(kept), result))
     })
 }

@@ -47,8 +47,6 @@ mod launch;
 mod model;
 mod password;
 mod quit;
-#[cfg(test)]
-mod routing_check;
 mod session;
 mod settings_ui;
 mod views;
@@ -214,7 +212,7 @@ impl cosmic::Application for AppModel {
                 Err(fl!("error-generic")),
             )
             .await;
-            Message::SavedLoaded(result)
+            Message::Account(AccountMessage::SavedLoaded(result))
         });
         let deps = app.check_dependencies();
         let theme = settings_ui::apply_theme(app.config.app_theme.unwrap_or(0));
@@ -278,19 +276,25 @@ impl cosmic::Application for AppModel {
             return vec![
                 widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
                     .tooltip(fl!("account-settings"))
-                    .on_press(Message::OpenAccountSettings(account.id.clone()))
+                    .on_press(Message::Settings(SettingsMessage::OpenAccountSettings(
+                        account.id.clone(),
+                    )))
                     .into(),
             ];
         };
         let mut refresh = widget::button::text(fl!("refresh"));
         if !loading {
-            refresh = refresh.on_press(Message::Refresh(account.id.clone()));
+            refresh = refresh.on_press(Message::Account(AccountMessage::Refresh(
+                account.id.clone(),
+            )));
         }
         vec![
             refresh.into(),
             widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
                 .tooltip(fl!("account-settings"))
-                .on_press(Message::OpenAccountSettings(account.id.clone()))
+                .on_press(Message::Settings(SettingsMessage::OpenAccountSettings(
+                    account.id.clone(),
+                )))
                 .into(),
         ]
     }
@@ -302,18 +306,18 @@ impl cosmic::Application for AppModel {
         Some(match self.context_page {
             ContextPage::About => context_drawer::about(
                 &self.about,
-                |url| Message::LaunchUrl(url.to_string()),
-                Message::ToggleContextPage(ContextPage::About),
+                |url| Message::App(AppMessage::LaunchUrl(url.to_string())),
+                Message::App(AppMessage::ToggleContextPage(ContextPage::About)),
             ),
             ContextPage::Dependencies => context_drawer::context_drawer(
                 dependencies_view(self.deps.as_deref()),
-                Message::ToggleContextPage(ContextPage::Dependencies),
+                Message::App(AppMessage::ToggleContextPage(ContextPage::Dependencies)),
             )
             .title(fl!("dependencies"))
             .actions({
                 let mut b = widget::button::standard(fl!("check-again"));
                 if self.deps.is_some() {
-                    b = b.on_press(Message::CheckDependencies);
+                    b = b.on_press(Message::App(AppMessage::CheckDependencies));
                 }
                 b
             }),
@@ -331,18 +335,18 @@ impl cosmic::Application for AppModel {
                 });
                 let mut save = widget::button::suggested(fl!("diagnostics-save"));
                 if self.diagnostics.is_some() {
-                    save = save.on_press(Message::SaveDiagnostics);
+                    save = save.on_press(Message::App(AppMessage::SaveDiagnostics));
                 }
                 context_drawer::context_drawer(
                     col,
-                    Message::ToggleContextPage(ContextPage::Diagnostics),
+                    Message::App(AppMessage::ToggleContextPage(ContextPage::Diagnostics)),
                 )
                 .title(fl!("diagnostics"))
                 .actions(save)
             }
             ContextPage::AppSettings => context_drawer::context_drawer(
                 self.app_settings_view(),
-                Message::ToggleContextPage(ContextPage::AppSettings),
+                Message::App(AppMessage::ToggleContextPage(ContextPage::AppSettings)),
             )
             .title(fl!("settings")),
             ContextPage::AccountSettings => {
@@ -350,11 +354,12 @@ impl cosmic::Application for AppModel {
                 let title = self.account(&id).map(Account::label).unwrap_or_default();
                 context_drawer::context_drawer(
                     self.account_settings_view(&id),
-                    Message::ToggleContextPage(ContextPage::AccountSettings),
+                    Message::App(AppMessage::ToggleContextPage(ContextPage::AccountSettings)),
                 )
                 .title(title)
                 .actions(
-                    widget::button::destructive(fl!("sign-out")).on_press(Message::SignOut(id)),
+                    widget::button::destructive(fl!("sign-out"))
+                        .on_press(Message::Account(AccountMessage::SignOut(id))),
                 )
             }
             ContextPage::DesktopSettings => {
@@ -366,7 +371,7 @@ impl cosmic::Application for AppModel {
                     .unwrap_or_default();
                 context_drawer::context_drawer(
                     self.desktop_settings_view(&key),
-                    Message::ToggleContextPage(ContextPage::DesktopSettings),
+                    Message::App(AppMessage::ToggleContextPage(ContextPage::DesktopSettings)),
                 )
                 .title(title)
             }
@@ -375,7 +380,7 @@ impl cosmic::Application for AppModel {
 
     /// The window's close button.
     fn on_app_exit(&mut self) -> Option<Self::Message> {
-        Some(Message::QuitRequested)
+        Some(Message::Quit(QuitMessage::Requested))
     }
 
     fn dialog(&self) -> Option<Element<'_, Self::Message>> {
@@ -404,11 +409,15 @@ impl cosmic::Application for AppModel {
                 widget::secure_input(
                     fl!("windows-password"),
                     d.password.as_str(),
-                    Some(Message::TogglePasswordVisible),
+                    Some(Message::Connection(
+                        ConnectionMessage::TogglePasswordVisible,
+                    )),
                     d.password_hidden,
                 )
-                .on_input(|s| Message::PasswordInput(PasswordText(s)))
-                .on_submit(|_| Message::DialogConnect),
+                .on_input(|s| {
+                    Message::Connection(ConnectionMessage::PasswordInput(PasswordText(s)))
+                })
+                .on_submit(|_| Message::Connection(ConnectionMessage::DialogConnect)),
             );
         }
         controls = controls.push(
@@ -417,21 +426,24 @@ impl cosmic::Application for AppModel {
                 .push(widget::dropdown(
                     &self.logon_labels,
                     Some(d.logon),
-                    Message::LogonSelected,
+                    |logon| Message::Connection(ConnectionMessage::LogonSelected(logon)),
                 ))
                 .spacing(space.space_xxs),
         );
         if d.logon == LOGON_CUSTOM {
             controls = controls.push(
-                widget::text_input(fl!("domain-placeholder"), d.custom_domain.as_str())
-                    .on_input(Message::CustomDomainInput),
+                widget::text_input(fl!("domain-placeholder"), d.custom_domain.as_str()).on_input(
+                    |domain| Message::Connection(ConnectionMessage::CustomDomainInput(domain)),
+                ),
             );
         }
         if d.logon != LOGON_ENTRA {
             controls = controls.push(
                 widget::checkbox(d.remember)
                     .label(fl!("remember-password"))
-                    .on_toggle(Message::ToggleRememberPassword),
+                    .on_toggle(|on| {
+                        Message::Connection(ConnectionMessage::ToggleRememberPassword(on))
+                    }),
             );
         }
         controls = controls.push(widget::text::caption(fl!("password-explainer")));
@@ -441,10 +453,12 @@ impl cosmic::Application for AppModel {
                 .title(fl!("connect-to", title = d.title.clone()))
                 .control(controls)
                 .primary_action(
-                    widget::button::suggested(fl!("connect")).on_press(Message::DialogConnect),
+                    widget::button::suggested(fl!("connect"))
+                        .on_press(Message::Connection(ConnectionMessage::DialogConnect)),
                 )
                 .secondary_action(
-                    widget::button::standard(fl!("cancel")).on_press(Message::DialogCancel),
+                    widget::button::standard(fl!("cancel"))
+                        .on_press(Message::Connection(ConnectionMessage::DialogCancel)),
                 )
                 .into(),
         )
@@ -464,13 +478,14 @@ impl cosmic::Application for AppModel {
         if let Some(checks) = &self.deps
             && !deps::required_ok(checks)
         {
-            col = col.push(
-                widget::warning(fl!("deps-missing"))
-                    .on_close(Message::ToggleContextPage(ContextPage::Dependencies)),
-            );
+            col = col.push(widget::warning(fl!("deps-missing")).on_close(Message::App(
+                AppMessage::ToggleContextPage(ContextPage::Dependencies),
+            )));
         }
         if let Some(notice) = &self.notice {
-            col = col.push(widget::warning(notice.clone()).on_close(Message::DismissNotice));
+            col = col.push(
+                widget::warning(notice.clone()).on_close(Message::App(AppMessage::DismissNotice)),
+            );
         }
         if self.cleanup_retry.is_some() {
             col = col.push(
@@ -478,13 +493,13 @@ impl cosmic::Application for AppModel {
                     .push(
                         widget::container(
                             widget::warning(fl!("error-sign-out-incomplete"))
-                                .on_close(Message::DismissSignOutCleanup),
+                                .on_close(Message::Account(AccountMessage::DismissSignOutCleanup)),
                         )
                         .width(Length::Fill),
                     )
                     .push(
                         widget::button::standard(fl!("try-again"))
-                            .on_press(Message::RetrySignOutCleanup),
+                            .on_press(Message::Account(AccountMessage::RetrySignOutCleanup)),
                     )
                     .spacing(cosmic::theme::spacing().space_xs)
                     .align_y(Alignment::Center),
@@ -497,14 +512,15 @@ impl cosmic::Application for AppModel {
         Subscription::batch([
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
-                .map(|update| Message::UpdateConfig(update.config)),
+                .map(|update| Message::App(AppMessage::UpdateConfig(update.config))),
             // Checks the wall clock, so lists are also refreshed soon after
             // a resume from suspend (the timer itself stops while
             // suspended).
-            cosmic::iced::time::every(REFRESH_CHECK).map(|_| Message::RefreshDue),
+            cosmic::iced::time::every(REFRESH_CHECK)
+                .map(|_| Message::Account(AccountMessage::RefreshDue)),
             // Closing from the desktop (window menu, keyboard shortcut,
             // dock); the window's own close button goes to `on_app_exit`.
-            cosmic::iced::window::close_requests().map(|_| Message::QuitRequested),
+            cosmic::iced::window::close_requests().map(|_| Message::Quit(QuitMessage::Requested)),
             // Shortcuts (`key_binds`) while the window has the keyboard.
             cosmic::iced::event::listen_with(|event, _status, _window| {
                 let cosmic::iced::Event::Keyboard(cosmic::iced::keyboard::Event::KeyPressed {
@@ -524,9 +540,10 @@ impl cosmic::Application for AppModel {
             // Full-screen sessions that keep the screen on (`awake.rs`).
             self.awake_subscription(),
             // Started again: show the window (`single.rs`).
-            Subscription::run(crate::single::activations).map(Message::StartedAgain),
+            Subscription::run(crate::single::activations)
+                .map(|token| Message::App(AppMessage::StartedAgain(token))),
             if self.config.background {
-                Subscription::run(tray_events).map(Message::Tray)
+                Subscription::run(tray_events).map(|event| Message::App(AppMessage::Tray(event)))
             } else {
                 Subscription::none()
             },
@@ -543,16 +560,6 @@ impl cosmic::Application for AppModel {
         self.desks.tidy();
         Task::batch([task, window, tray])
     }
-}
-
-/// A message `route` sent to a handler that doesn't handle it: a bug.
-/// Debug builds stop; release builds log the message's name only (its
-/// fields may hold a password or token).
-fn misrouted(message: &Message) {
-    let text = format!("{message:?}");
-    let name = text.split(['(', ' ', '{']).next().unwrap_or("?");
-    crate::app_log!("bug: message {name} routed to the wrong handler");
-    debug_assert!(false, "message routed to the wrong handler: {name}");
 }
 
 /// The About page.
@@ -625,90 +632,11 @@ impl AppModel {
     /// Hands each message to the part of the app it belongs to.
     fn route(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::SavedLoaded(..)
-            | Message::Restored(..)
-            | Message::RetryRestore(..)
-            | Message::AddAccount
-            | Message::SignInAccount(..)
-            | Message::CancelSignIn(..)
-            | Message::SignInFinished(..)
-            | Message::Saved(..)
-            | Message::Refresh(..)
-            | Message::RefreshDue
-            | Message::Discovered(..)
-            | Message::IconsLoaded(..)
-            | Message::CacheLoaded(..)
-            | Message::SignOut(..)
-            | Message::RetrySave(..)
-            | Message::SignOutSelected
-            | Message::SignOutConfirm
-            | Message::SignOutCancel
-            | Message::SignOutFinished(..)
-            | Message::RetrySignOutCleanup
-            | Message::DismissSignOutCleanup
-            | Message::SignOutFilesRemoved(..) => self.account_message(message),
-            Message::Connect(..)
-            | Message::ConnectionFileReady(..)
-            | Message::PasswordInput(..)
-            | Message::TogglePasswordVisible
-            | Message::LogonSelected(..)
-            | Message::CustomDomainInput(..)
-            | Message::DialogCancel
-            | Message::DialogConnect
-            | Message::Launched(..)
-            | Message::Session(..)
-            | Message::ConnectDeadline(..)
-            | Message::ReconnectDue(..)
-            | Message::ShowSession(..)
-            | Message::ToggleRememberPassword(..)
-            | Message::SavedPasswordLoaded(..)
-            | Message::PasswordSaved(..)
-            | Message::ForgetPassword(..)
-            | Message::TrustCertificate
-            | Message::CloseCertificateDialog
-            | Message::ForgetCertificate(..)
-            | Message::SessionShown(..)
-            | Message::Disconnect(..)
-            | Message::WorkspaceMoved(..)
-            | Message::QuitRequested
-            | Message::QuitChosen
-            | Message::QuitToBackground
-            | Message::QuitConfirm
-            | Message::QuitCancel
-            | Message::ReadyToQuit => self.connection_message(message),
-            Message::OpenAccountSettings(..)
-            | Message::OpenDesktopSettings(..)
-            | Message::AppToggle(..)
-            | Message::AppNumber(..)
-            | Message::AppLogSize(..)
-            | Message::AppTheme(..)
-            | Message::AppBackground(..)
-            | Message::AppAutostart(..)
-            | Message::AppChoice(..)
-            | Message::AccountChoice(..)
-            | Message::DesktopChoice(..)
-            | Message::AccountToggle(..)
-            | Message::AccountNumber(..)
-            | Message::DesktopToggle(..)
-            | Message::DesktopNumber(..) => self.settings_message(message),
-            // Listed, not a catch-all: a new message that isn't routed is a
-            // compile error, not a silent no-op.
-            Message::Awake(..)
-            | Message::CheckDependencies
-            | Message::DependenciesChecked(..)
-            | Message::DiagnosticsReady(..)
-            | Message::DiagnosticsSaved(..)
-            | Message::DismissNotice
-            | Message::LaunchUrl(..)
-            | Message::OpenDiagnostics
-            | Message::OpenLogFolder
-            | Message::SaveDiagnostics
-            | Message::SearchInput(..)
-            | Message::StartedAgain(..)
-            | Message::ToggleContextPage(..)
-            | Message::ToggleFavorite(..)
-            | Message::Tray(..)
-            | Message::UpdateConfig(..) => self.app_message(message),
+            Message::Account(m) => self.account_message(m),
+            Message::Connection(m) => self.connection_message(m),
+            Message::Settings(m) => self.settings_message(m),
+            Message::Quit(m) => self.quit_message(m),
+            Message::App(m) => self.app_message(m),
         }
     }
 
@@ -716,10 +644,10 @@ impl AppModel {
     // One `match` over this handler's messages; splitting it would only
     // spread the routing out.
     #[allow(clippy::too_many_lines)]
-    pub(super) fn app_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    pub(super) fn app_message(&mut self, message: AppMessage) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::Tray(event) => return self.tray_event(event),
-            Message::Awake(event) => match event {
+            AppMessage::Tray(event) => return self.tray_event(event),
+            AppMessage::Awake(event) => match event {
                 crate::awake::AwakeEvent::Held(true) => {
                     crate::app_log!("screen kept on: a full-screen desktop is in front");
                 }
@@ -730,12 +658,12 @@ impl AppModel {
                     crate::app_log!("can't keep the screen on: {why}");
                 }
             },
-            Message::StartedAgain(token) => {
+            AppMessage::StartedAgain(token) => {
                 crate::app_log!("started again: showing the window");
                 return self.tray_event(crate::tray::TrayEvent::Show(token));
             }
-            Message::SearchInput(text) => self.search = text,
-            Message::OpenDiagnostics => {
+            AppMessage::SearchInput(text) => self.search = text,
+            AppMessage::OpenDiagnostics => {
                 self.context_page = ContextPage::Diagnostics;
                 self.core.window.show_context = true;
                 self.diagnostics = None;
@@ -747,11 +675,11 @@ impl AppModel {
                         "The report couldn't be built; see the log.".to_owned(),
                     )
                     .await;
-                    Message::DiagnosticsReady(text)
+                    Message::App(AppMessage::DiagnosticsReady(text))
                 });
             }
-            Message::DiagnosticsReady(text) => self.diagnostics = Some(text),
-            Message::SaveDiagnostics => {
+            AppMessage::DiagnosticsReady(text) => self.diagnostics = Some(text),
+            AppMessage::SaveDiagnostics => {
                 // Saved exactly as shown.
                 let Some(text) = self.diagnostics.clone() else {
                     return Task::none();
@@ -778,17 +706,17 @@ impl AppModel {
                         Err(cosmic::dialog::file_chooser::Error::Cancelled) => Err(None),
                         Err(e) => Err(Some(e.to_string())),
                     };
-                    Message::DiagnosticsSaved(result)
+                    Message::App(AppMessage::DiagnosticsSaved(result))
                 });
             }
-            Message::DiagnosticsSaved(result) => {
+            AppMessage::DiagnosticsSaved(result) => {
                 self.diagnostics_status = match result {
                     Ok(path) => Some(fl!("diagnostics-saved", path = path)),
                     Err(Some(e)) => Some(fl!("diagnostics-not-saved", detail = e)),
                     Err(None) => None,
                 };
             }
-            Message::ToggleFavorite(key) => {
+            AppMessage::ToggleFavorite(key) => {
                 let mut favorites = self.config.favorites.clone();
                 if !favorites.remove(&key) {
                     favorites.insert(key);
@@ -800,8 +728,8 @@ impl AppModel {
                     None => self.config.favorites = favorites,
                 }
             }
-            Message::CheckDependencies => return self.check_dependencies(),
-            Message::DependenciesChecked(checks) => {
+            AppMessage::CheckDependencies => return self.check_dependencies(),
+            AppMessage::DependenciesChecked(checks) => {
                 for c in &checks {
                     if !c.status.is_ok() {
                         crate::app_log!("dependency {:?}: {:?}", c.dependency, c.status);
@@ -814,7 +742,7 @@ impl AppModel {
                     return self.show_window();
                 }
             }
-            Message::ToggleContextPage(page) => {
+            AppMessage::ToggleContextPage(page) => {
                 if self.context_page == page {
                     self.core.window.show_context = !self.core.window.show_context;
                 } else {
@@ -822,14 +750,14 @@ impl AppModel {
                     self.core.window.show_context = true;
                 }
             }
-            Message::UpdateConfig(config) => self.config = config,
-            Message::LaunchUrl(url) => {
+            AppMessage::UpdateConfig(config) => self.config = config,
+            AppMessage::LaunchUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
                     crate::app_log!("failed to open link: {err}");
                 }
             }
-            Message::DismissNotice => self.notice = None,
-            Message::OpenLogFolder => {
+            AppMessage::DismissNotice => self.notice = None,
+            AppMessage::OpenLogFolder => {
                 if let Some(dir) = crate::log::dir() {
                     // Make sure it exists even before the first line.
                     crate::app_log!("log folder opened");
@@ -838,8 +766,6 @@ impl AppModel {
                     }
                 }
             }
-            // `update` routes only this handler's messages here.
-            other => misrouted(&other),
         }
         Task::none()
     }
@@ -926,7 +852,7 @@ impl AppModel {
                 deps::not_checked(&fl!("deps-check-failed")),
             )
             .await;
-            Message::DependenciesChecked(checks)
+            Message::App(AppMessage::DependenciesChecked(checks))
         })
     }
 }
@@ -982,14 +908,18 @@ impl menu::action::MenuAction for MenuAction {
 
     fn message(&self) -> Self::Message {
         match self {
-            MenuAction::About => Message::ToggleContextPage(ContextPage::About),
-            MenuAction::Settings => Message::ToggleContextPage(ContextPage::AppSettings),
-            MenuAction::Diagnostics => Message::OpenDiagnostics,
-            MenuAction::Dependencies => Message::ToggleContextPage(ContextPage::Dependencies),
-            MenuAction::AddAccount => Message::AddAccount,
-            MenuAction::SignOut => Message::SignOutSelected,
-            MenuAction::OpenLogFolder => Message::OpenLogFolder,
-            MenuAction::Quit => Message::QuitChosen,
+            MenuAction::About => Message::App(AppMessage::ToggleContextPage(ContextPage::About)),
+            MenuAction::Settings => {
+                Message::App(AppMessage::ToggleContextPage(ContextPage::AppSettings))
+            }
+            MenuAction::Diagnostics => Message::App(AppMessage::OpenDiagnostics),
+            MenuAction::Dependencies => {
+                Message::App(AppMessage::ToggleContextPage(ContextPage::Dependencies))
+            }
+            MenuAction::AddAccount => Message::Account(AccountMessage::AddAccount),
+            MenuAction::SignOut => Message::Account(AccountMessage::SignOutSelected),
+            MenuAction::OpenLogFolder => Message::App(AppMessage::OpenLogFolder),
+            MenuAction::Quit => Message::Quit(QuitMessage::Chosen),
         }
     }
 }

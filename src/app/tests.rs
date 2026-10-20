@@ -129,21 +129,21 @@ fn sign_out_with_a_desktop_open_asks_first() {
     );
     launching(&mut app, "acct-3a", "k1");
 
-    let _ = app.update(Message::SignOut("acct-3a".into()));
+    let _ = app.update(Message::Account(AccountMessage::SignOut("acct-3a".into())));
     assert_eq!(app.sign_out_asking.as_deref(), Some("acct-3a"));
     assert!(app.dialog().is_some(), "the sign-out question is shown");
     assert!(app.account("acct-3a").is_some());
 
     // Cancel keeps everything.
-    let _ = app.update(Message::SignOutCancel);
+    let _ = app.update(Message::Account(AccountMessage::SignOutCancel));
     assert!(app.sign_out_asking.is_none());
     assert!(app.dialog().is_none());
     assert!(app.account("acct-3a").is_some());
     assert!(app.desks.launching("k1").is_some_and(|l| !l.stop));
 
     // Disconnect and sign out.
-    let _ = app.update(Message::SignOut("acct-3a".into()));
-    let _ = app.update(Message::SignOutConfirm);
+    let _ = app.update(Message::Account(AccountMessage::SignOut("acct-3a".into())));
+    let _ = app.update(Message::Account(AccountMessage::SignOutConfirm));
     assert!(app.sign_out_asking.is_none());
     assert!(app.account("acct-3a").is_none());
     assert!(app.signing_out.contains("acct-3a"));
@@ -163,7 +163,7 @@ fn sign_out_with_nothing_open_doesnt_ask() {
         "00000000-0000-0000-0000-0000000003a1",
         "k1",
     );
-    let _ = app.update(Message::SignOut("acct-so".into()));
+    let _ = app.update(Message::Account(AccountMessage::SignOut("acct-so".into())));
     assert!(app.sign_out_asking.is_none());
     assert!(app.account("acct-so").is_none());
 }
@@ -180,22 +180,24 @@ fn cancel_while_preparing_starts_nothing_later() {
         "00000000-0000-0000-0000-0000000003d0",
         "k1",
     );
-    let _ = app.update(Message::Connect("k1".into()));
+    let _ = app.update(Message::Connection(ConnectionMessage::Connect("k1".into())));
     assert_eq!(app.desks.conn("k1"), Some(&Connection::Preparing));
 
-    let _ = app.update(Message::Disconnect("k1".into()));
+    let _ = app.update(Message::Connection(ConnectionMessage::Disconnect(
+        "k1".into(),
+    )));
     assert_eq!(app.desks.conn("k1"), None, "back to Connect");
 
     let file = Ok((
         connection_file(),
         signed_in("00000000-0000-0000-0000-0000000003d0"),
     ));
-    let _ = app.update(Message::ConnectionFileReady(
+    let _ = app.update(Message::Connection(ConnectionMessage::ConnectionFileReady(
         "acct-3d".into(),
         epoch,
         "k1".into(),
         file,
-    ));
+    )));
     assert_eq!(app.desks.conn("k1"), None);
     assert!(app.dialogs.shown().is_none(), "no password dialog");
     assert!(app.desks.launching("k1").is_none());
@@ -212,21 +214,23 @@ fn cancel_while_waiting_for_the_password_closes_the_dialog() {
         "00000000-0000-0000-0000-0000000003d1",
         "k1",
     );
-    let _ = app.update(Message::Connect("k1".into()));
+    let _ = app.update(Message::Connection(ConnectionMessage::Connect("k1".into())));
     let file = Ok((
         connection_file(),
         signed_in("00000000-0000-0000-0000-0000000003d1"),
     ));
-    let _ = app.update(Message::ConnectionFileReady(
+    let _ = app.update(Message::Connection(ConnectionMessage::ConnectionFileReady(
         "acct-3e".into(),
         epoch,
         "k1".into(),
         file,
-    ));
+    )));
     assert_eq!(app.desks.conn("k1"), Some(&Connection::AwaitingUser));
     assert!(app.dialogs.shown().is_some_and(|d| d.key == "k1"));
 
-    let _ = app.update(Message::Disconnect("k1".into()));
+    let _ = app.update(Message::Connection(ConnectionMessage::Disconnect(
+        "k1".into(),
+    )));
     assert_eq!(app.desks.conn("k1"), None, "back to Connect");
     assert!(app.dialogs.shown().is_none(), "the dialog closed");
     assert!(app.desks.launching("k1").is_none());
@@ -247,10 +251,10 @@ fn quit_from_the_menu_asks_while_a_desktop_is_open() {
     let _ = app.update(MenuAction::Quit.message());
     assert_eq!(app.quit, Quit::Asking);
     assert!(app.dialog().is_some(), "the quit question is shown");
-    let _ = app.update(Message::QuitCancel);
+    let _ = app.update(Message::Quit(QuitMessage::Cancel));
     assert_eq!(app.quit, Quit::No);
     let _ = app.update(MenuAction::Quit.message());
-    let _ = app.update(Message::QuitConfirm);
+    let _ = app.update(Message::Quit(QuitMessage::Confirm));
     assert_eq!(app.quit, Quit::Stopping);
 }
 

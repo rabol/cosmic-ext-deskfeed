@@ -64,7 +64,9 @@ impl AppModel {
                 Err("task".into()),
             )
             .await;
-            Message::SavedPasswordLoaded(account, epoch, key, logon, connection, result)
+            Message::Connection(ConnectionMessage::SavedPasswordLoaded(
+                account, epoch, key, logon, connection, result,
+            ))
         })
     }
 

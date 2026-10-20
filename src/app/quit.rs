@@ -7,20 +7,20 @@ use super::*;
 
 impl AppModel {
     /// Quitting: asked, confirmed, cancelled, done.
-    pub(super) fn quit_message(&mut self, message: &Message) -> Task<cosmic::Action<Message>> {
+    pub(super) fn quit_message(&mut self, message: QuitMessage) -> Task<cosmic::Action<Message>> {
         match (message, self.quit) {
-            (Message::QuitRequested, Quit::No) => return self.request_quit(false),
-            (Message::QuitChosen, Quit::No) => return self.request_quit(true),
-            (Message::QuitToBackground, Quit::Asking) => {
+            (QuitMessage::Requested, Quit::No) => return self.request_quit(false),
+            (QuitMessage::Chosen, Quit::No) => return self.request_quit(true),
+            (QuitMessage::ToBackground, Quit::Asking) => {
                 self.quit = Quit::No;
                 return self.hide_window();
             }
-            (Message::QuitCancel, Quit::Asking) => self.quit = Quit::No,
-            (Message::QuitConfirm, Quit::Asking) => {
+            (QuitMessage::Cancel, Quit::Asking) => self.quit = Quit::No,
+            (QuitMessage::Confirm, Quit::Asking) => {
                 self.quit = Quit::Stopping;
                 return self.continue_quit();
             }
-            (Message::ReadyToQuit, _) => return cosmic::iced::exit(),
+            (QuitMessage::ReadyToQuit, _) => return cosmic::iced::exit(),
             _ => {}
         }
         Task::none()
@@ -76,7 +76,7 @@ impl AppModel {
                 (),
             )
             .await;
-            Message::ReadyToQuit
+            Message::Quit(QuitMessage::ReadyToQuit)
         })
     }
 
@@ -87,15 +87,18 @@ impl AppModel {
             .title(fl!("quit-title"))
             .body(fl!("quit-body", count = open))
             .primary_action(
-                widget::button::destructive(fl!("quit-disconnect")).on_press(Message::QuitConfirm),
+                widget::button::destructive(fl!("quit-disconnect"))
+                    .on_press(Message::Quit(QuitMessage::Confirm)),
             )
             .secondary_action(
-                widget::button::standard(fl!("cancel")).on_press(Message::QuitCancel),
+                widget::button::standard(fl!("cancel"))
+                    .on_press(Message::Quit(QuitMessage::Cancel)),
             );
         // Spec §5: the third choice when background operation is on.
         if self.can_run_in_background() {
             dialog = dialog.tertiary_action(
-                widget::button::text(fl!("quit-to-background")).on_press(Message::QuitToBackground),
+                widget::button::text(fl!("quit-to-background"))
+                    .on_press(Message::Quit(QuitMessage::ToBackground)),
             );
         }
         dialog.into()

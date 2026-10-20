@@ -288,12 +288,20 @@ impl std::fmt::Debug for PasswordText {
     }
 }
 
+/// Every message, by the part of the app that handles it (`route`), so
+/// the compiler checks that each reaches its handler.
 #[derive(Debug, Clone)]
 pub enum Message {
-    LaunchUrl(String),
-    ToggleContextPage(ContextPage),
-    UpdateConfig(Config),
-    DismissNotice,
+    Account(AccountMessage),
+    Connection(ConnectionMessage),
+    Settings(SettingsMessage),
+    Quit(QuitMessage),
+    App(AppMessage),
+}
+
+/// Accounts: saved sign-ins, signing in and out, desktop lists (`account_flow.rs`).
+#[derive(Debug, Clone)]
+pub enum AccountMessage {
     /// The saved sign-ins, or why they couldn't be read.
     SavedLoaded(Result<Vec<Stored>, String>),
     /// Account ID, generation, outcome.
@@ -351,6 +359,13 @@ pub enum Message {
     /// Account ID: its sign-in window and sessions have ended and its
     /// files are deleted (`Err`: some couldn't be).
     SignOutFilesRemoved(String, Result<(), ()>),
+    /// An account's offline list was read (account, epoch, list).
+    CacheLoaded(String, u64, Option<crate::cache::Cached>),
+}
+
+/// Connecting desktops, their dialogs and sessions (`connect.rs`).
+#[derive(Debug, Clone)]
+pub enum ConnectionMessage {
     Connect(String),
     /// Account ID, epoch, resource key, and the connection file with the
     /// account (tokens renewed first if needed).
@@ -408,33 +423,22 @@ pub enum Message {
     /// Resource key, wait: time for the next reconnect attempt.
     ReconnectDue(String, u64),
     Disconnect(String),
-    CheckDependencies,
-    DependenciesChecked(Vec<Check>),
-    OpenLogFolder,
-    /// An account's offline list was read (account, epoch, list).
-    CacheLoaded(String, u64, Option<crate::cache::Cached>),
-    /// From the tray (background operation).
-    Tray(crate::tray::TrayEvent),
-    /// Keep the screen on: for the log (`awake.rs`).
-    Awake(crate::awake::AwakeEvent),
-    /// Deskfeed was started again, with the launcher's activation token.
-    StartedAgain(Option<String>),
+    /// "Open on a new workspace" finished: resource key, that wait's stop
+    /// flag (to tell it from a newer wait), and how it went.
+    WorkspaceMoved(
+        String,
+        Arc<std::sync::atomic::AtomicBool>,
+        Result<(), String>,
+    ),
+}
+
+/// The settings pages (`settings_ui.rs`).
+#[derive(Debug, Clone)]
+pub enum SettingsMessage {
     /// App settings → Background.
     AppBackground(bool),
     /// App settings → Background → Start when you log in.
     AppAutostart(bool),
-    /// Quit dialog: close the window, keep the desktops.
-    QuitToBackground,
-    /// View → Diagnostics: build the report and show it.
-    OpenDiagnostics,
-    DiagnosticsReady(String),
-    SaveDiagnostics,
-    /// Where it was saved, or why not (`None`: cancelled).
-    DiagnosticsSaved(Result<String, Option<String>>),
-    /// The search field's text.
-    SearchInput(String),
-    /// Resource key.
-    ToggleFavorite(String),
     OpenAccountSettings(String),
     OpenDesktopSettings(String),
     AppToggle(Toggle, bool),
@@ -456,22 +460,50 @@ pub enum Message {
     DesktopToggle(String, Toggle, usize),
     /// `None`: follow the account.
     DesktopNumber(String, Number, Option<u32>),
-    /// "Open on a new workspace" finished: resource key, that wait's stop
-    /// flag (to tell it from a newer wait), and how it went.
-    WorkspaceMoved(
-        String,
-        Arc<std::sync::atomic::AtomicBool>,
-        Result<(), String>,
-    ),
+}
+
+/// Quitting (`quit.rs`).
+#[derive(Debug, Clone)]
+pub enum QuitMessage {
+    /// Quit dialog: close the window, keep the desktops.
+    ToBackground,
     /// The window's close button or the desktop asked the app to close.
-    QuitRequested,
+    Requested,
     /// Quit from the menu, Ctrl+Q or the tray: quits even with background
     /// operation on (asking first while desktops are open).
-    QuitChosen,
-    QuitConfirm,
-    QuitCancel,
+    Chosen,
+    Confirm,
+    Cancel,
     /// All sessions have ended: exit.
     ReadyToQuit,
+}
+
+/// App-wide: dependencies, the context drawer, links, notices, the log, the tray.
+#[derive(Debug, Clone)]
+pub enum AppMessage {
+    LaunchUrl(String),
+    ToggleContextPage(ContextPage),
+    UpdateConfig(Config),
+    DismissNotice,
+    CheckDependencies,
+    DependenciesChecked(Vec<Check>),
+    OpenLogFolder,
+    /// From the tray (background operation).
+    Tray(crate::tray::TrayEvent),
+    /// Keep the screen on: for the log (`awake.rs`).
+    Awake(crate::awake::AwakeEvent),
+    /// Deskfeed was started again, with the launcher's activation token.
+    StartedAgain(Option<String>),
+    /// View → Diagnostics: build the report and show it.
+    OpenDiagnostics,
+    DiagnosticsReady(String),
+    SaveDiagnostics,
+    /// Where it was saved, or why not (`None`: cancelled).
+    DiagnosticsSaved(Result<String, Option<String>>),
+    /// The search field's text.
+    SearchInput(String),
+    /// Resource key.
+    ToggleFavorite(String),
 }
 
 /// Why a background step for an account failed.

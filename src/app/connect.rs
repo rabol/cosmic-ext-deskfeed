@@ -11,10 +11,13 @@ impl AppModel {
     // One `match` over this handler's messages; splitting it would only
     // spread the routing out.
     #[allow(clippy::too_many_lines)]
-    pub(super) fn connection_message(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
+    pub(super) fn connection_message(
+        &mut self,
+        message: ConnectionMessage,
+    ) -> Task<cosmic::Action<Message>> {
         match message {
-            Message::Connect(key) => return self.prepare_connection(&key),
-            Message::ConnectionFileReady(id, epoch, key, result) => {
+            ConnectionMessage::Connect(key) => return self.prepare_connection(&key),
+            ConnectionMessage::ConnectionFileReady(id, epoch, key, result) => {
                 if self.account(&id).is_none_or(|a| a.epoch != epoch) {
                     return Task::none();
                 }
@@ -37,49 +40,58 @@ impl AppModel {
                 };
                 return self.connection_file_ready(&id, key, result);
             }
-            Message::PasswordInput(PasswordText(s)) => {
+            ConnectionMessage::PasswordInput(PasswordText(s)) => {
                 if let Some(d) = self.dialogs.shown_mut() {
                     d.password = s;
                 }
             }
-            Message::TogglePasswordVisible => {
+            ConnectionMessage::TogglePasswordVisible => {
                 if let Some(d) = self.dialogs.shown_mut() {
                     d.password_hidden = !d.password_hidden;
                 }
             }
-            Message::LogonSelected(i) => {
+            ConnectionMessage::LogonSelected(i) => {
                 if let Some(d) = self.dialogs.shown_mut() {
                     d.logon = i;
                     d.error = None;
                 }
             }
-            Message::CustomDomainInput(s) => {
+            ConnectionMessage::CustomDomainInput(s) => {
                 if let Some(d) = self.dialogs.shown_mut() {
                     d.custom_domain = s;
                 }
             }
             // Cancelled: back to Connect.
-            Message::DialogCancel => {
+            ConnectionMessage::DialogCancel => {
                 if let Some(d) = self.dialogs.close() {
                     self.desks.clear_conn(&d.key);
                 }
             }
-            Message::DialogConnect => return self.dialog_connect(),
-            Message::Launched(id, epoch, key, attempt, result) => {
+            ConnectionMessage::DialogConnect => return self.dialog_connect(),
+            ConnectionMessage::Launched(id, epoch, key, attempt, result) => {
                 return self.launched(&id, epoch, key, attempt, result);
             }
-            Message::ConnectDeadline(key, attempt) => self.connect_deadline(&key, attempt),
-            Message::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
-            Message::ShowSession(key) => return self.show_session(&key),
-            Message::ToggleRememberPassword(on) => {
+            ConnectionMessage::ConnectDeadline(key, attempt) => {
+                self.connect_deadline(&key, attempt);
+            }
+            ConnectionMessage::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
+            ConnectionMessage::ShowSession(key) => return self.show_session(&key),
+            ConnectionMessage::ToggleRememberPassword(on) => {
                 if let Some(d) = self.dialogs.shown_mut() {
                     d.remember = on;
                 }
             }
-            Message::SavedPasswordLoaded(account, epoch, key, logon, connection, result) => {
+            ConnectionMessage::SavedPasswordLoaded(
+                account,
+                epoch,
+                key,
+                logon,
+                connection,
+                result,
+            ) => {
                 return self.saved_password_loaded(&account, epoch, key, logon, connection, result);
             }
-            Message::PasswordSaved(key, id, ticket, result) => match result {
+            ConnectionMessage::PasswordSaved(key, id, ticket, result) => match result {
                 // Only while nothing changed since: a sign-out or Forget
                 // meanwhile wins.
                 Ok(true)
@@ -95,8 +107,8 @@ impl AppModel {
                     self.desks.at(&key).note = Some(fl!("password-not-saved", detail = e));
                 }
             },
-            Message::ForgetPassword(key) => return self.forget_password(&key),
-            Message::TrustCertificate => {
+            ConnectionMessage::ForgetPassword(key) => return self.forget_password(&key),
+            ConnectionMessage::TrustCertificate => {
                 let Some(d) = self.certificate_dialog.take() else {
                     return Task::none();
                 };
@@ -111,27 +123,21 @@ impl AppModel {
                 self.desks.clear_conn(&d.key);
                 return self.prepare_connection(&d.key);
             }
-            Message::CloseCertificateDialog => self.certificate_dialog = None,
-            Message::ForgetCertificate(key) => {
+            ConnectionMessage::CloseCertificateDialog => self.certificate_dialog = None,
+            ConnectionMessage::ForgetCertificate(key) => {
                 let mut pins = self.config.certificate_pins.clone();
                 if pins.remove(&key).is_some() {
                     crate::app_log!("approved session host certificate forgotten");
                     self.save_certificate_pins(pins);
                 }
             }
-            Message::SessionShown(result) => {
+            ConnectionMessage::SessionShown(result) => {
                 // The desktop is open either way; only the log hears of it.
                 if let Err(e) = result {
                     crate::app_log!("show desktop: not brought to the front ({e})");
                 }
             }
-            Message::QuitRequested
-            | Message::QuitChosen
-            | Message::QuitToBackground
-            | Message::QuitConfirm
-            | Message::QuitCancel
-            | Message::ReadyToQuit => return self.quit_message(&message),
-            Message::Session(id, epoch, key, attempt, event) => {
+            ConnectionMessage::Session(id, epoch, key, attempt, event) => {
                 // Only the current attempt's events: a reader may still
                 // report after its session ended.
                 if self.account(&id).is_some_and(|a| a.epoch == epoch)
@@ -143,7 +149,7 @@ impl AppModel {
                     return self.session_event(&key, event);
                 }
             }
-            Message::Disconnect(key) => {
+            ConnectionMessage::Disconnect(key) => {
                 // Not started yet: preparing, or waiting for its password
                 //. A connection file still on its way is
                 // dropped when it arrives.
@@ -171,7 +177,7 @@ impl AppModel {
                     l.stop = true;
                 }
             }
-            Message::WorkspaceMoved(key, done, result) => {
+            ConnectionMessage::WorkspaceMoved(key, done, result) => {
                 // Only this wait's: a newer one keeps its handle.
                 if let Some(d) = self.desks.get_mut(&key)
                     && d.mover.as_ref().is_some_and(|m| Arc::ptr_eq(m, &done))
@@ -184,8 +190,6 @@ impl AppModel {
                     crate::app_log!("open on a new workspace: not moved ({e})");
                 }
             }
-            // `update` routes only this handler's messages here.
-            other => misrouted(&other),
         }
         Task::none()
     }
@@ -292,7 +296,9 @@ impl AppModel {
                 Err(StepError::Show(fl!("error-generic"))),
             )
             .await;
-            Message::ConnectionFileReady(id, epoch, key, result)
+            Message::Connection(ConnectionMessage::ConnectionFileReady(
+                id, epoch, key, result,
+            ))
         })
     }
 

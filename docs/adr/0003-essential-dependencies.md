@@ -95,4 +95,4 @@ An outside review proposed more crates. Taken: `ksni` (above), and `tempfile` fo
 - **`subtle` for comparing the sign-in `state`**: not needed at all. Each attempt is used up by its first callback, so timing can't help an attacker; a plain `==` is used.
 - **`jsonwebtoken` for ID tokens**: it has no `ring` backend, so it would bring the RustCrypto `rsa` stack and `sha2` 0.10 beside ours. Its defaults differ (60 s leeway, `nbf` not checked). The tenant, issuer, nonce and account checks stay ours either way. Our code is about 80 lines on top of `ring`'s signature check.
 - **`oauth2` for the token requests**: its ureq support is for ureq 2 (we use 3), and it always brings chrono, `rand` 0.8, `getrandom` 0.2 and `sha2` 0.10. Most of our code there is Microsoft-specific policy, which stays.
-- **`syn` for `routing_check.rs`**: that test goes once messages are nested enums (cleanup-todo §2).
+- **`syn` for `routing_check.rs`**: that test went with the nested message enums (cleanup-todo §2), where the compiler checks the routing.
