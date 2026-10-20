@@ -229,6 +229,7 @@ impl AppModel {
             ResourceKind::RemoteApp => fl!("kind-remoteapp"),
             ResourceKind::Other => fl!("kind-other"),
         };
+        let progress = conn.and_then(Connection::progress_label);
         let (status, control): (Option<String>, Element<'a, Message>) = match conn {
             None => {
                 let mut b = widget::button::suggested(fl!("connect"));
@@ -239,32 +240,20 @@ impl AppModel {
                 (None, b.into())
             }
             // Not started yet: Cancel stops it.
-            Some(Connection::Preparing) => (
-                Some(fl!("status-preparing")),
+            Some(Connection::Preparing | Connection::AwaitingUser) => (
+                progress.clone(),
                 widget::button::standard(fl!("cancel"))
                     .on_press(Message::Disconnect(r.key.clone()))
                     .into(),
             ),
-            Some(Connection::AwaitingUser) => (
-                Some(fl!("status-awaiting-user")),
-                widget::button::standard(fl!("cancel"))
-                    .on_press(Message::Disconnect(r.key.clone()))
-                    .into(),
-            ),
-            Some(Connection::Connecting) => (
-                Some(fl!("status-connecting")),
-                widget::button::standard(fl!("disconnect"))
-                    .on_press(Message::Disconnect(r.key.clone()))
-                    .into(),
-            ),
-            Some(Connection::Authenticating) => (
-                Some(fl!("status-authenticating")),
+            Some(Connection::Connecting | Connection::Authenticating) => (
+                progress.clone(),
                 widget::button::standard(fl!("disconnect"))
                     .on_press(Message::Disconnect(r.key.clone()))
                     .into(),
             ),
             Some(Connection::Disconnecting) => (
-                Some(fl!("status-disconnecting")),
+                progress.clone(),
                 widget::button::standard(fl!("disconnect")).into(),
             ),
             Some(Connection::Connected) => (
@@ -294,8 +283,8 @@ impl AppModel {
                     .spacing(cosmic::theme::spacing().space_xs)
                     .into(),
             ),
-            Some(Connection::Reconnecting { attempt, of }) => (
-                Some(fl!("status-reconnecting", attempt = attempt, of = of)),
+            Some(Connection::Reconnecting { .. }) => (
+                progress.clone(),
                 widget::button::standard(fl!("stop"))
                     .on_press(Message::Disconnect(r.key.clone()))
                     .into(),

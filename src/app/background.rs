@@ -125,17 +125,8 @@ impl AppModel {
                     .any(|a| matches!(a.state, AccountState::NeedsSignIn { .. }))
         });
         // Settled ones don't need watching any more.
-        self.desks.retain_from_tray(|_, d| {
-            matches!(
-                d.connection,
-                Some(
-                    Connection::Preparing
-                        | Connection::AwaitingUser
-                        | Connection::Connecting
-                        | Connection::Authenticating
-                )
-            )
-        });
+        self.desks
+            .retain_from_tray(|_, d| d.connection.as_ref().is_some_and(Connection::is_starting));
         if self.quit == Quit::Asking
             || self.dialog.is_some()
             || self.certificate_dialog.is_some()
@@ -283,14 +274,7 @@ fn tray_desktop(r: &ResourceView, desks: &Desks) -> crate::tray::TrayItem {
             checked: false,
             enabled: true,
         },
-        Some(Connection::Preparing | Connection::Connecting) => busy(fl!("status-connecting")),
-        Some(Connection::AwaitingUser) => busy(fl!("status-awaiting-user")),
-        Some(Connection::Authenticating) => busy(fl!("status-authenticating")),
-        Some(Connection::Disconnecting) => busy(fl!("status-disconnecting")),
-        Some(Connection::Reconnecting { attempt, of }) => {
-            let (attempt, of) = (*attempt, *of);
-            busy(fl!("status-reconnecting", attempt = attempt, of = of))
-        }
+        Some(under_way) => busy(under_way.progress_label().unwrap_or_default()),
     }
 }
 

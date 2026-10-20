@@ -199,6 +199,35 @@ pub(super) enum Connection {
     Failed(String),
 }
 
+impl Connection {
+    /// On its way to connected: getting the file, asking for the password,
+    /// FreeRDP connecting or signing in.
+    pub(super) fn is_starting(&self) -> bool {
+        matches!(
+            self,
+            Self::Preparing | Self::AwaitingUser | Self::Connecting | Self::Authenticating
+        )
+    }
+
+    /// The text for a state that is under way, the same on the row and in
+    /// the tray; `None` for connected and failed, which each show their
+    /// own way.
+    pub(super) fn progress_label(&self) -> Option<String> {
+        Some(match self {
+            Self::Preparing => fl!("status-preparing"),
+            Self::AwaitingUser => fl!("status-awaiting-user"),
+            Self::Connecting => fl!("status-connecting"),
+            Self::Authenticating => fl!("status-authenticating"),
+            Self::Disconnecting => fl!("status-disconnecting"),
+            Self::Reconnecting { attempt, of } => {
+                let (attempt, of) = (*attempt, *of);
+                fl!("status-reconnecting", attempt = attempt, of = of)
+            }
+            Self::Connected | Self::Failed(_) => return None,
+        })
+    }
+}
+
 /// A desktop the app is reconnecting (ADR 0014).
 pub(super) struct Reconnect {
     /// Attempts started so far.
@@ -613,6 +642,44 @@ pub(super) fn workspace_view(account: &SignedIn, feed: discovery::WorkspaceFeed)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connection_states_under_way() {
+        use Connection::*;
+        let all = [
+            Preparing,
+            AwaitingUser,
+            Connecting,
+            Authenticating,
+            Connected,
+            Disconnecting,
+            Reconnecting { attempt: 2, of: 5 },
+            Failed("x".into()),
+        ];
+        let starting: Vec<bool> = all.iter().map(Connection::is_starting).collect();
+        // Only the steps toward connected; not disconnecting or waiting
+        // to reconnect.
+        assert_eq!(
+            starting,
+            [true, true, true, true, false, false, false, false]
+        );
+        // A label for everything under way, the same text the row and the
+        // tray show; connected and failed show their own way.
+        for c in &all {
+            let label = c.progress_label();
+            assert_eq!(
+                label.is_some(),
+                !matches!(c, Connected | Failed(_)),
+                "{c:?}"
+            );
+        }
+        let reconnecting = all[6].progress_label().unwrap();
+        assert!(
+            reconnecting.contains('2') && reconnecting.contains('5'),
+            "{reconnecting}"
+        );
+        assert_ne!(Preparing.progress_label(), Connecting.progress_label());
+    }
 
     use crate::auth::token::TokenSet;
     use crate::service::http::BearerToken;

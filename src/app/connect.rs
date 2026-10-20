@@ -210,16 +210,10 @@ impl AppModel {
         if self.quit != Quit::No
             || self.desks.running(key).is_some()
             || self.desks.launching(key).is_some()
-            || matches!(
-                self.desks.conn(key),
-                Some(
-                    Connection::Preparing
-                        | Connection::AwaitingUser
-                        | Connection::Connecting
-                        | Connection::Authenticating
-                        | Connection::Disconnecting
-                )
-            )
+            || self
+                .desks
+                .conn(key)
+                .is_some_and(|c| c.is_starting() || *c == Connection::Disconnecting)
         {
             return Task::none(); // no accidental duplicate launches
         }
