@@ -100,6 +100,20 @@ pub(super) fn end_outcome(
     }
 }
 
+/// Whether Windows refused the credentials: a password that ended like
+/// this is never sent again by itself (ADR 0005). A remembered one is
+/// deleted (ADR 0009 addendum: "If Windows rejects it, it is deleted").
+pub(super) fn refuses_password(end: &SessionEnd) -> bool {
+    matches!(
+        end,
+        SessionEnd::LogonFailed
+            | SessionEnd::AccountLockedOut
+            | SessionEnd::PasswordExpired
+            | SessionEnd::AccountDisabled
+            | SessionEnd::AuthenticationFailed
+    )
+}
+
 /// Whether an ended session is reconnected by the app (ADR 0014).
 ///
 /// - A connected session that lost its connection starts reconnecting.
@@ -547,6 +561,36 @@ mod tests {
                 EndOutcome::Failed,
                 "{end:?}"
             );
+        }
+    }
+
+    #[test]
+    fn every_credential_refusal_counts_as_refusing_the_password() {
+        // Found by the test audit (2026-10-20): a remembered password was
+        // kept after "locked out" or "expired" and sent again on the next
+        // Connect. Each of these must remove it.
+        for end in [
+            SessionEnd::LogonFailed,
+            SessionEnd::AccountLockedOut,
+            SessionEnd::PasswordExpired,
+            SessionEnd::AccountDisabled,
+            SessionEnd::AuthenticationFailed,
+        ] {
+            assert!(refuses_password(&end), "{end:?}");
+            // ... and none of them is retried by itself.
+            assert!(
+                !reconnects(&end, false, true, Some(&PASSWORD), true),
+                "{end:?}"
+            );
+        }
+        for end in [
+            SessionEnd::Closed,
+            SessionEnd::ConnectionLost,
+            SessionEnd::DnsFailed,
+            SessionEnd::HostTimedOut,
+            SessionEnd::Failed { code: 131 },
+        ] {
+            assert!(!refuses_password(&end), "{end:?}");
         }
     }
 

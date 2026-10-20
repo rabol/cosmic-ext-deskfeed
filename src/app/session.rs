@@ -234,6 +234,13 @@ impl AppModel {
             decide::EndOutcome::Failed => {
                 self.desks
                     .set_conn(key, Connection::Failed(describe_session_end(end)));
+                // Windows refused the remembered password for another
+                // reason (locked, expired, …): it goes too, so the next
+                // Connect asks instead of sending it again (ADR 0005,
+                // ADR 0009 addendum).
+                if used_saved && decide::refuses_password(end) {
+                    save_task = self.forget_password(key);
+                }
             }
         }
         save_task
