@@ -186,12 +186,6 @@ impl cosmic::Application for AppModel {
         crate::app_log!("Deskfeed {} started", env!("CARGO_PKG_VERSION"));
         launcher::clean_stale_runtime_dirs();
         accounts::clean_unfinished_profiles();
-        let about = About::default()
-            .name(fl!("app-title"))
-            .icon(widget::icon::from_raster_bytes(APP_ICON))
-            .version(env!("CARGO_PKG_VERSION"))
-            .links([(fl!("repository"), REPOSITORY)])
-            .license(env!("CARGO_PKG_LICENSE"));
         let config_handler = cosmic_config::Config::new(Self::APP_ID, Config::VERSION).ok();
         let config = config_handler
             .as_ref()
@@ -200,51 +194,14 @@ impl cosmic::Application for AppModel {
             })
             .unwrap_or_default();
         crate::log::set_max_size_mib(config.log_max_mib.unwrap_or(crate::log::MAX_SIZE_MIB.2));
-
-        let mut app = AppModel {
+        let mut app = AppModel::new(
             core,
-            context_page: ContextPage::default(),
-            about,
-            key_binds: key_binds(),
             config,
             config_handler,
-            http: Arc::new(Http::new(EndpointPolicy::azure_public())),
-            nav: nav_bar::Model::default(),
-            accounts: Vec::new(),
-            loading_saved: true,
-            adding: None,
-            notice: None,
-            counter: 0,
-            desks: desk::Desks::default(),
-            signing_out: HashSet::new(),
-            sign_out_asking: None,
-            cleanup_retry: None,
-            last_check: None,
-            search: String::new(),
-            tray: None,
-            tray_unavailable: None,
-            tray_menu: None,
-            autostart: crate::autostart::enabled(),
-            diagnostics: None,
-            diagnostics_status: None,
-            cache: crate::cache::Store::user(),
-            icons: HashMap::new(),
-            quit: Quit::No,
-            dialogs: decide::DialogQueue::default(),
-            certificate_dialog: None,
-            logon_labels: vec![
-                fl!("logon-automatic"),
-                fl!("logon-empty-domain"),
-                fl!("logon-custom-domain"),
-                fl!("logon-entra"),
-            ],
-            deps: None,
-            settings_target: None,
-            follow_app_on: vec![fl!("follow-app-on"), fl!("on"), fl!("off")],
-            follow_app_off: vec![fl!("follow-app-off"), fl!("on"), fl!("off")],
-            follow_account_on: vec![fl!("follow-account-on"), fl!("on"), fl!("off")],
-            follow_account_off: vec![fl!("follow-account-off"), fl!("on"), fl!("off")],
-        };
+            Http::new(EndpointPolicy::azure_public()),
+            crate::cache::Store::user(),
+            crate::autostart::enabled(),
+        );
         app.rebuild_nav(&Page::Add);
         let title = app.update_title();
         let load = cosmic::task::future(async {
@@ -598,7 +555,73 @@ fn misrouted(message: &Message) {
     debug_assert!(false, "message routed to the wrong handler: {name}");
 }
 
+/// The About page.
+fn about() -> About {
+    About::default()
+        .name(fl!("app-title"))
+        .icon(widget::icon::from_raster_bytes(APP_ICON))
+        .version(env!("CARGO_PKG_VERSION"))
+        .links([(fl!("repository"), REPOSITORY)])
+        .license(env!("CARGO_PKG_LICENSE"))
+}
+
 impl AppModel {
+    /// The app with nothing loaded yet. `init` adds what starting does
+    /// (cleaning up, loading saved sign-ins); tests use it as it is.
+    fn new(
+        core: cosmic::Core,
+        config: Config,
+        config_handler: Option<cosmic_config::Config>,
+        http: Http,
+        cache: Option<crate::cache::Store>,
+        autostart: bool,
+    ) -> Self {
+        AppModel {
+            core,
+            context_page: ContextPage::default(),
+            about: about(),
+            key_binds: key_binds(),
+            config,
+            config_handler,
+            http: Arc::new(http),
+            nav: nav_bar::Model::default(),
+            accounts: Vec::new(),
+            loading_saved: true,
+            adding: None,
+            notice: None,
+            counter: 0,
+            desks: desk::Desks::default(),
+            signing_out: HashSet::new(),
+            sign_out_asking: None,
+            cleanup_retry: None,
+            last_check: None,
+            search: String::new(),
+            tray: None,
+            tray_unavailable: None,
+            tray_menu: None,
+            autostart,
+            diagnostics: None,
+            diagnostics_status: None,
+            cache,
+            icons: HashMap::new(),
+            quit: Quit::No,
+            dialogs: decide::DialogQueue::default(),
+            certificate_dialog: None,
+            logon_labels: vec![
+                fl!("logon-automatic"),
+                fl!("logon-empty-domain"),
+                fl!("logon-custom-domain"),
+                fl!("logon-entra"),
+            ],
+            deps: None,
+            settings_target: None,
+            follow_app_on: vec![fl!("follow-app-on"), fl!("on"), fl!("off")],
+            follow_app_off: vec![fl!("follow-app-off"), fl!("on"), fl!("off")],
+            follow_account_on: vec![fl!("follow-account-on"), fl!("on"), fl!("off")],
+            follow_account_off: vec![fl!("follow-account-off"), fl!("on"), fl!("off")],
+        }
+    }
+
     /// Hands each message to the part of the app it belongs to.
     fn route(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
         match message {
@@ -972,12 +995,4 @@ impl menu::action::MenuAction for MenuAction {
 }
 
 #[cfg(test)]
-mod tests {
-    #[tokio::test]
-    async fn crashed_work_gives_the_fallback_not_a_normal_result() {
-        assert_eq!(super::off_ui(|| 3, 7).await, 3);
-        let crashed: Result<Vec<u8>, String> =
-            super::off_ui(|| panic!("simulated crash"), Err("crashed".into())).await;
-        assert_eq!(crashed, Err("crashed".to_owned()));
-    }
-}
+mod tests;

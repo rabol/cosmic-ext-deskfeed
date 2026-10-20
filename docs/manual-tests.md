@@ -20,10 +20,6 @@ Install the current build first (`just install`, or the package).
    - *Expected:* the desktop connects, or the account shows a Sign in button. Never a raw error.
    - Within 5 minutes of waking, the list's "Updated …" time changes to after waking.
 
-3a. **Sign out with a desktop open** (the dialog; the app's state can't be tested yet, see cleanup-todo.md). Connect a desktop, then select Sign out on its account.
-   - *Expected:* "Sign out of …?" with "Disconnect and sign out" and Cancel.
-   - Cancel keeps everything; the other button disconnects and signs out.
-
 3b. **Sign-out when the keyring refuses** (the real keyring and its unlock prompt). Lock the keyring, select Sign out, and cancel the unlock prompt.
    - *Expected:* "Sign-out couldn't remove all of the account's sign-in data" with Try again.
    - Select Try again and unlock. *Expected:* the warning goes, and the account doesn't come back after restarting Deskfeed.
@@ -31,8 +27,6 @@ Install the current build first (`just install`, or the package).
 3c. **Sign in while the keyring is locked** (same). Lock the keyring, sign in, and cancel the unlock prompt.
    - *Expected:* the desktop list works, with a note that the sign-in couldn't be saved and Try again.
    - Select Try again and unlock. *Expected:* the note goes, and you're still signed in after restarting Deskfeed.
-
-3d. **Cancel before a desktop starts** (the app's state can't be tested yet, see cleanup-todo.md). Select Connect, and while the row says "Preparing" or "Waiting for your password", select Cancel. *Expected:* the row goes back to Connect, a password dialog for it closes, and nothing starts afterwards.
 
 3e. **Your account is filled in on Microsoft's page** (Microsoft's page). On a desktop that uses Entra sign-in, select Connect. *Expected:* when Microsoft's page appears, your account is already filled in or selected.
 
