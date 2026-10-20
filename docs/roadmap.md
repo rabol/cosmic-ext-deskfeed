@@ -24,6 +24,8 @@ Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md)
 
 ## Owner's calls
 
+- **Plain RDP connections** ("Add connection", [ADR 0029](adr/0029-plain-rdp-connections.md), proposed): four open questions before work starts.
+
 - **Report the FreeRDP proxy bug upstream:** HTTP proxy authentication drops the last character of the password ([ADR 0008](adr/0008-http-and-crypto-crates.md) addendum). The report would be public.
 
 ## Not in v1
