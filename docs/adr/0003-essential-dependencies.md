@@ -67,3 +67,9 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
     - `chrono`: new crates, and finding the local zone needs `iana-time-zone` on top;
     - our own code: an `unsafe` call to `localtime_r` and a hand-written calendar algorithm for the log.
   - Chosen: `jiff`. A test compares the labels with coreutils' `date` around daylight-saving changes; it agreed under eight zones, `TZ` unset, empty and bogus.
+- **Tray: our own code kept (2026-10-20).** `src/tray.rs` serves the StatusNotifierItem and its dbusmenu over zbus (ADR 0017).
+  - Options compared:
+    - `ksni` 0.3.6: two new crates (`ksni`, `pastey`), on the zbus we already use. Menus, check marks, disabled lines, submenus and "watcher went away" callbacks are all there. But it has no `ProvideXdgActivationToken`: COSMIC's panel sends its activation token through that call before each click, and without it Deskfeed's window can't take focus from the tray (ADR 0017, checked on the live session);
+    - `tray-icon` 0.26: 14 new crates, including GTK 3 and libappindicator, plus a GTK main loop;
+    - our own code: about 470 lines plus tests, already working on COSMIC, including the token and the panel's tray going away.
+  - Kept: our own code. Look again if `ksni` gains the activation token.
