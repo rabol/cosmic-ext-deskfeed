@@ -46,6 +46,12 @@ Install the current build first (`just install`, or the package).
    - *Expected:* Quit at the bottom, showing Ctrl+Q.
    - Quit, or Ctrl+Q, closes Deskfeed completely: no tray icon left.
 
+4b. **The tray after the switch to ksni** (the real panel and focus; ADR 0017 update). Turn on Settings → Background and close the window.
+   - Click the tray icon. *Expected:* the window opens and has the keyboard focus (you can type in the search field at once).
+   - Close it, open the tray menu and select Show Deskfeed. *Expected:* the same.
+   - With a desktop connected: it shows a check mark in the menu, and selecting it brings it to the front.
+   - Restart the panel (`killall cosmic-panel`). *Expected:* the icon comes back within a few seconds, and the window does not pop up.
+
 4. **Start when you log in** (COSMIC's autostart). Turn on Settings → Background → Start when you log in. Log out and back in. *Expected:* only the tray icon appears, no window.
 
 ### Desktop sessions

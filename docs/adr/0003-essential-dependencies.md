@@ -67,12 +67,14 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
     - `chrono`: new crates, and finding the local zone needs `iana-time-zone` on top;
     - our own code: an `unsafe` call to `localtime_r` and a hand-written calendar algorithm for the log.
   - Chosen: `jiff`. A test compares the labels with coreutils' `date` around daylight-saving changes; it agreed under eight zones, `TZ` unset, empty and bogus.
-- **Tray: our own code kept (2026-10-20).** `src/tray.rs` serves the StatusNotifierItem and its dbusmenu over zbus (ADR 0017).
+- **`ksni`, pinned to a git revision (2026-10-20):** the tray icon and its menu (ADR 0017), replacing about 260 lines of our own StatusNotifierItem and dbusmenu code.
   - Options compared:
-    - `ksni` 0.3.6: two new crates (`ksni`, `pastey`), on the zbus we already use. Menus, check marks, disabled lines, submenus and "watcher went away" callbacks are all there. But it has no `ProvideXdgActivationToken`: COSMIC's panel sends its activation token through that call before each click, and without it Deskfeed's window can't take focus from the tray (ADR 0017, checked on the live session);
+    - `ksni`: the item, the menu (check marks, disabled lines, submenus), menu updates, and registering again when the panel's tray returns. Two new crates (`ksni`, `pastey`) plus `crossbeam-queue`; it uses the zbus we already have. The released 0.3.6 has no `ProvideXdgActivationToken`. Its main branch has it (`current_xdg_activation_token`, 2026-10-20, version 0.3.7 not yet released);
     - `tray-icon` 0.26: 14 new crates, including GTK 3 and libappindicator, plus a GTK main loop;
-    - our own code: about 470 lines plus tests, already working on COSMIC, including the token and the panel's tray going away.
-  - Kept: our own code. Look again if `ksni` gains the activation token.
+    - our own code: worked on COSMIC, but took protocol shortcuts (`GetProperty` always 0, `GetGroupProperties` empty, `GetLayout` ignoring its arguments).
+  - Chosen: `ksni`, pinned to commit `cd9b7cc` (reviewed: the token code and the release notes), as libcosmic is pinned. Move to the 0.3.7 release when it is out.
+  - COSMIC's order was checked in its source (cosmic-applets `status_menu.rs`, `app.rs`): before a click on the icon or a menu line, it sends the token and waits for the answer. ksni pairs a token that arrived up to 100 ms before the click. A test plays that order on a private bus.
+  - One difference handled in our code: ksni runs a disabled line's action if a click arrives for it; ours does nothing.
 - **`proptest` 1.12, test-only (2026-10-20):** the engine under `testkit::random_inputs` (ADR 0023), which now shrinks a failing input to the fewest and smallest edits that still fail.
   - Options compared:
 

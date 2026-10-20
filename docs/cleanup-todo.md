@@ -175,11 +175,11 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - *Simpler:* `fake_freerdp(script)`, `launch_fake(spec, script)`, `is_gone(pid)`.
   - Effort M, risk low.
 - [x] **Four hand-written fake HTTP servers and ~14 temp-dir naming schemes.** (Done 2026-10-20: mockito, compared with wiremock and httpmock, with one raw server kept for hostile cases; temporary folders with `tempfile`, already in the tree. Both in ADR 0003.) *Simpler:* one configurable test server in `test_util`, and `tempfile` (already in Cargo.lock) as a dev-dependency (an ADR line per the minimal-dependencies rule). Effort S, risk low.
-- [ ] **Hand-written code where a mature crate fits** (owner, 2026-10-20: "keep minimal does not mean handcode everything"). Weigh each honestly — crate if it replaces real code or a tricky format and is widely used; record it in an ADR:
+- [x] **Hand-written code where a mature crate fits** (owner, 2026-10-20: "keep minimal does not mean handcode everything"). Weigh each honestly — crate if it replaces real code or a tricky format and is widely used; record it in an ADR:
   - test HTTP fakes → `mockito` (decided; one small raw server stays for hostile cases);
   - test temp folders → `tempfile` (done 2026-10-20);
   - `testkit::random_inputs` → `proptest` (shrinks failing inputs) (done 2026-10-20);
-  - the tray's StatusNotifierItem/dbusmenu code (`tray.rs`, ~470 lines) → `ksni` (kept 2026-10-20: `ksni` lacks COSMIC's activation token, so the window couldn't take focus from the tray; `tray-icon` brings GTK 3);
+  - the tray's StatusNotifierItem/dbusmenu code (`tray.rs`, ~470 lines) → `ksni` (done 2026-10-20, owner's decision after an outside review: ksni pinned to a git revision with COSMIC's activation token, until its 0.3.7 release);
   - local time via `localtime_r` (`views.rs`) → a time crate, if one is already in the tree (done 2026-10-20: `jiff`, which also replaced the log's hand-written calendar).
 - [ ] **Two tiny workspace crates** (`lines/`, `testkit/`): sharing code with the helper is a real need, but one crate is enough. Merge them into the common crate from §2, with the random-input tool behind a feature. Effort S, risk low.
 - [x] **`justfile`.** (Done 2026-10-20: `just ci`; `check` as CI; comments on the right recipes; `check-json` gone; `tag` bumps only the app and the helper, tags `v<version>` as the AUR package expects, no interactive amend.)

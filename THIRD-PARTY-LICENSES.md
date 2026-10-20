@@ -11,11 +11,11 @@ Deskfeed is MIT-licensed ([LICENSE](./LICENSE)). This file lists the software it
 | GTK 4 | LGPL-2.1-or-later | Dynamically linked by the sign-in helper only |
 | A Secret Service (oo7, GNOME Keyring, …) | Varies | Separate program, used over D-Bus |
 
-## Rust crates (511)
+## Rust crates (514)
 
-From `Cargo.lock`, for Linux, generated 2026-10-17. 489 are compiled into `cosmic-ext-deskfeed` or `cosmic-ext-deskfeed-signin`; the ones marked **build only** run while building (build scripts, the desktop-entry generator) and are not part of the programs. License expressions are as each crate declares them; where one says *OR*, either license may be chosen.
+From `Cargo.lock`, for Linux, generated 2026-10-20. 492 are compiled into `cosmic-ext-deskfeed` or `cosmic-ext-deskfeed-signin`; the ones marked **build only** run while building (build scripts, the desktop-entry generator) and are not part of the programs. License expressions are as each crate declares them; where one says *OR*, either license may be chosen.
 
-Compiled into the programs: MIT OR Apache-2.0: 180, MIT: 142, Apache-2.0 OR MIT: 49, MIT/Apache-2.0: 18, Unicode-3.0: 18, Apache-2.0: 15, MIT OR Apache-2.0 OR Zlib: 10, MPL-2.0: 6, ISC: 5, Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT: 5, BSD-3-Clause: 5, Unlicense OR MIT: 4, CC0-1.0: 3, BSD-2-Clause: 3, Zlib OR Apache-2.0 OR MIT: 3, Zlib: 3, Apache-2.0/MIT: 2, MIT OR Zlib OR Apache-2.0: 2, BSD-3-Clause OR Apache-2.0: 2, Apache-2.0 OR ISC OR MIT: 2, Unlicense/MIT: 2, BSD-2-Clause OR Apache-2.0 OR MIT: 2, 0BSD OR MIT OR Apache-2.0: 1, Unlicense: 1, MIT OR LGPL-3.0-or-later: 1, Apache-2.0 AND MIT: 1, Apache-2.0 / MIT: 1, Apache-2.0 AND ISC: 1, Apache-2.0 OR GPL-2.0-only: 1, (MIT OR Apache-2.0) AND Unicode-3.0: 1
+Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT: 49, MIT/Apache-2.0: 18, Unicode-3.0: 18, Apache-2.0: 15, MIT OR Apache-2.0 OR Zlib: 10, MPL-2.0: 6, ISC: 5, Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT: 5, BSD-3-Clause: 5, Unlicense OR MIT: 4, CC0-1.0: 3, BSD-2-Clause: 3, Zlib OR Apache-2.0 OR MIT: 3, Zlib: 3, Unlicense: 2, Apache-2.0/MIT: 2, MIT OR Zlib OR Apache-2.0: 2, BSD-3-Clause OR Apache-2.0: 2, Apache-2.0 OR ISC OR MIT: 2, Unlicense/MIT: 2, BSD-2-Clause OR Apache-2.0 OR MIT: 2, 0BSD OR MIT OR Apache-2.0: 1, MIT OR LGPL-3.0-or-later: 1, Apache-2.0 AND MIT: 1, Apache-2.0 / MIT: 1, Apache-2.0 AND ISC: 1, Apache-2.0 OR GPL-2.0-only: 1, (MIT OR Apache-2.0) AND Unicode-3.0: 1
 
 ¹ No license field in the crate's metadata; taken from the license file in its source repository. libcosmic and its COSMIC crates are MPL-2.0 (file-level copyleft: it applies to changes to those files, not to this app's own code).
 
@@ -101,6 +101,7 @@ Compiled into the programs: MIT OR Apache-2.0: 180, MIT: 142, Apache-2.0 OR MIT:
 | cosmic-theme | 1.0.0 | MPL-2.0 ¹ |  |  |
 | cpufeatures | 0.3.1 | MIT OR Apache-2.0 |  | https://github.com/RustCrypto/utils |
 | crc32fast | 1.5.2 | MIT OR Apache-2.0 |  | https://github.com/srijs/rust-crc32fast |
+| crossbeam-queue | 0.3.14 | MIT OR Apache-2.0 |  | https://github.com/crossbeam-rs/crossbeam |
 | crossbeam-utils | 0.8.23 | MIT OR Apache-2.0 |  | https://github.com/crossbeam-rs/crossbeam |
 | cryoglyph | 0.1.0 | MIT OR Apache-2.0 OR Zlib |  | https://github.com/iced-rs/cryoglyph |
 | crypto-common | 0.2.2 | MIT OR Apache-2.0 |  | https://github.com/RustCrypto/traits |
@@ -254,6 +255,7 @@ Compiled into the programs: MIT OR Apache-2.0: 180, MIT: 142, Apache-2.0 OR MIT:
 | kamadak-exif | 0.6.1 | BSD-2-Clause |  | https://github.com/kamadak/exif-rs |
 | keyboard-types | 0.8.3 | MIT OR Apache-2.0 |  | https://github.com/rust-windowing/keyboard-types |
 | khronos-egl | 6.0.0 | MIT/Apache-2.0 |  | https://github.com/timothee-haudebourg/khronos-egl |
+| ksni | 0.3.7 | Unlicense |  | https://github.com/iovxw/ksni |
 | kurbo | 0.10.4 | MIT OR Apache-2.0 |  | https://github.com/linebender/kurbo |
 | kurbo | 0.11.3 | Apache-2.0 OR MIT |  | https://github.com/linebender/kurbo |
 | libc | 0.2.191 | MIT OR Apache-2.0 |  | https://github.com/rust-lang/libc |
@@ -309,6 +311,7 @@ Compiled into the programs: MIT OR Apache-2.0: 180, MIT: 142, Apache-2.0 OR MIT:
 | parking | 2.2.1 | Apache-2.0 OR MIT |  | https://github.com/smol-rs/parking |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 |  | https://github.com/Amanieu/parking_lot |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 |  | https://github.com/Amanieu/parking_lot |
+| pastey | 0.2.3 | MIT OR Apache-2.0 |  | https://github.com/as1100k/pastey |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 |  | https://github.com/servo/rust-url/ |
 | phf | 0.13.1 | MIT |  | https://github.com/rust-phf/rust-phf |
 | phf_generator | 0.13.1 | MIT |  | https://github.com/rust-phf/rust-phf |

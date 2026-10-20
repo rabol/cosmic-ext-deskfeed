@@ -31,7 +31,7 @@ libcosmic closes the app when its main window closes, unless the `multi-window` 
 
 - With no status area in the panel, background operation is unavailable, not silently broken.
 - Starting in the background at login built on this (2026-10-19).
-- The dbusmenu implementation is minimal: it always returns the whole menu, and it has no icons or submenus.
+- The tray protocol is served by `ksni` since 2026-10-20 (see the update below).
 
 ## Addendum (2026-10-19): start when you log in
 
@@ -58,3 +58,7 @@ Until now the item registered again when the panel's tray (the StatusNotifierWat
 
 - `tray::follow_host` watches the watcher's name. If it is gone and still gone after 5 s (a panel restart takes a moment), the app gets `Unavailable` and shows its window, as when there is no tray at startup. When the watcher returns, the item registers again and the app gets `Ready`, so the icon and menu come back. A refused registration also counts as `Unavailable`.
 - Tested on a private bus (`dbus-daemon`, with a stand-in watcher), so the real panel isn't touched (`follows_the_panels_tray`). A quick restart re-registers without telling the app. A tray gone for good tells it after the grace time. A tray coming back later brings the icon back. Without the new step, the test fails. CI installs `dbus` for it.
+
+## Update (2026-10-20): ksni serves the tray
+
+`src/tray.rs` no longer implements StatusNotifierItem and dbusmenu itself: `ksni` does, pinned to a git revision until its 0.3.7 release (ADR 0003). Unchanged for the app: the menu it builds, the events it hears, COSMIC's activation token on clicks, and the 5-second grace before `Unavailable` when the panel's tray goes away. The tests now run in a child process on a private bus, since ksni uses only the session bus.
