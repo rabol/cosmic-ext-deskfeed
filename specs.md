@@ -10,7 +10,7 @@ Status: proposed implementation specification. Created 2026-10-17.
 - Project directory: `/home/srabol/code/cosmic-ext-deskfeed`, its own Git repository.
 - License for original project code: MIT, with `SPDX-License-Identifier: MIT` where appropriate.
 - Platform: Linux, designed first for the COSMIC desktop on Wayland.
-- Purpose: sign in to a work or school account, discover entitled Azure Virtual Desktop and Windows 365 resources, and launch and manage desktop and RemoteApp sessions.
+- Purpose: sign in to a work or school account, discover entitled Azure Virtual Desktop and Windows 365 resources, and launch and manage desktop and RemoteApp sessions. Also connect directly to Windows machines by host name over RDP (saved connections, NLA, certificate approval; changed 2026-10-20, ADR 0029).
 - Primary goal: a client that works reliably on COSMIC. The reference application (§3) signs in and lists resources, but connecting fails for the owner on COSMIC (§3, issue #38). Reliable connection and session stability are core requirements, not polish.
 - Independent community application; do not imply Microsoft or System76 endorsement.
 - Future hosting: the public GitHub repository above; creating and publishing it is a later, explicit step.
@@ -227,6 +227,7 @@ Manual release matrix on COSMIC Wayland:
 - Multi-hour session soak on COSMIC with the default backend, plus each reproduced reference-app session failure.
 - Corporate HTTP proxy.
 - Authorized AVD desktop and Windows 365 connection, on a host pool with Entra single sign-on and on one without it (password login, the issue #38 case); RemoteApp before declaring it supported.
+- A direct RDP connection to a Windows machine by host name: password logon with NLA, certificate approval the first time, a changed certificate blocked, reconnect (ADR 0029).
 - Native installation with missing or too-old dependencies (the startup check); locked/unavailable keyring and memory-only sessions.
 - Windowed/fullscreen, selected monitors, mixed DPI, display hotplug, keyboard shortcuts, and supported clipboard directions.
 - Audio device changes during a session; microphone/camera opt-in and unplug/replug when those features are enabled.

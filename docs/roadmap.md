@@ -8,6 +8,10 @@ Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md)
 - AppStream screenshots.
 - The real-tenant checks in [manual-tests.md](manual-tests.md), including the stability run (spec §8, §13): several hours of use with idle time, audio device changes, a monitor plugged in, network changes, and suspend and resume.
 
+## Next
+
+- **Plain RDP connections** ("Add connection", [ADR 0029](adr/0029-plain-rdp-connections.md), accepted): direct connections with NLA, one "Connections" page; five steps.
+
 ## Open questions
 
 - **"Client version not supported"** (spec §7): a specific message when the service rejects the client version. What the service sends in that case isn't known yet. It needs evidence (a real rejection, or Microsoft's documentation) before anything is built.
@@ -24,7 +28,6 @@ Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md)
 
 ## Owner's calls
 
-- **Plain RDP connections** ("Add connection", [ADR 0029](adr/0029-plain-rdp-connections.md), proposed): four open questions before work starts.
 
 - **Report the FreeRDP proxy bug upstream:** HTTP proxy authentication drops the last character of the password ([ADR 0008](adr/0008-http-and-crypto-crates.md) addendum). The report would be public.
 

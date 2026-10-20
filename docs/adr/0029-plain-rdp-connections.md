@@ -1,6 +1,6 @@
 # 0029. Plain RDP connections ("Add connection")
 
-- Status: Proposed. Needs the owner's answers to the open questions at the end, and a spec change (§1, §13), before work starts.
+- Status: Accepted (the owner's answers below, 2026-10-20); not built yet. Spec §1 and §13 changed to match.
 - Date: 2026-10-20
 
 ## Context
@@ -71,9 +71,9 @@ Size: about the accounts rework plus the settings pages together, a few thousand
 
 A Windows machine or VM the owner sets up. In Windows: Settings → System → Remote Desktop → on; a local user with a password; note the PC's name or IP address. Then manual tests: add, connect (password dialog, certificate approval the first time), remember the password, reconnect after a network drop, remove.
 
-## Open questions for the owner
+## Decisions (owner, 2026-10-20)
 
-1. **Sidebar:** one "Connections" entry with all of them (proposed), or one sidebar entry per connection, like accounts?
-2. **Security:** NLA only (proposed; Windows' default), or also allow TLS without NLA for older machines, as a per-connection setting?
-3. **Scope:** the first version without RD Gateway and `.rdp` import (proposed), or include one of them?
-4. **Spec:** agree to widen §1 from "AVD and Windows 365" to "and Windows machines by host name"?
+1. **Sidebar:** one "Connections" entry listing all saved connections.
+2. **Security:** NLA only (`/sec:nla`); older machines without NLA don't connect.
+3. **Scope:** direct connections only in the first version; RD Gateway and `.rdp` import later, each its own decision.
+4. **Spec:** widened: §1 now also covers Windows machines by host name, and §13 lists a direct connection's checks.
