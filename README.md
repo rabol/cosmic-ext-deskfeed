@@ -101,7 +101,7 @@ just run              # run a release build
 | `signin/` | `cosmic-ext-deskfeed-signin`, the sign-in window ([why a separate program](./docs/adr/0007-sign-in-web-view.md)) |
 | `docs/` | Progress notes and architecture decision records |
 
-Dependencies are kept to a minimum on purpose ([ADR 0003](./docs/adr/0003-minimal-dependencies.md)); each new one needs a reason in an ADR.
+Dependencies are kept to a minimum on purpose ([ADR 0003](./docs/adr/0003-essential-dependencies.md)); each new one needs a reason in an ADR.
 
 ### Translations
 
@@ -119,7 +119,7 @@ just rootdir=debian/cosmic-ext-deskfeed prefix=/usr install
 
 ## Dependencies
 
-Kept to a minimum on purpose; each one has a reason ([ADR 0003](./docs/adr/0003-minimal-dependencies.md)).
+Kept to a minimum on purpose; each one has a reason ([ADR 0003](./docs/adr/0003-essential-dependencies.md)).
 
 **Runtime (system):** see [Requirements](#requirements): COSMIC, FreeRDP 3.32.2+ with `WITH_AAD=ON`, WebKitGTK 6 with GTK 4, and optionally a Secret Service.
 

@@ -6,7 +6,7 @@ Each significant decision is recorded as a short Markdown file, `NNNN-title.md`,
 |---|---|---|
 | [0001](0001-record-architecture-decisions.md) | Record architecture decisions | Accepted |
 | [0002](0002-pin-libcosmic-revision.md) | Pin libcosmic to a reviewed revision | Accepted |
-| [0003](0003-minimal-dependencies.md) | Keep dependencies minimal (addendum: compare 2–3 options first) | Accepted |
+| [0003](0003-essential-dependencies.md) | Keep dependencies to essentials (addendum: compare 2–3 options first) | Accepted |
 | [0004](0004-freerdp-version-and-sign-in-helper.md) | FreeRDP 3.32.2 and the sign-in helper protocol | Accepted |
 | [0005](0005-password-login-host-pools.md) | Password login on host pools without Entra single sign-on | Accepted |
 | [0006](0006-build-app-alongside-compatibility-work.md) | Build the app alongside the compatibility work | Historical |

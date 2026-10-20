@@ -1,4 +1,4 @@
-# 0003. Keep dependencies minimal
+# 0003. Keep dependencies to essentials
 
 - Status: Accepted
 - Date: 2026-10-17

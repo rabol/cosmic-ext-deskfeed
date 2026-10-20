@@ -7,7 +7,7 @@
 
 With Microsoft's public Remote Desktop client ID, the only usable redirect is `https://login.microsoftonline.com/common/oauth2/nativeclient`. A normal browser can't return it to the app: since at least 2026-10-17 the page warns about phishing and redirects to `/common/wrongplace` after 3 seconds. FreeRDP 3.32.2 also requests tokens with this redirect on every connection (gateway, and session host on single sign-on host pools) through its helper protocol. So a web view that catches the redirect before the page loads is required, whatever the app's own sign-in uses. The loopback-redirect test is therefore not needed for this decision.
 
-Spec §2 and §6 allow one exception to "no GTK / no embedded browser": a separate, sign-in-only web view helper process. [ADR 0003](0003-minimal-dependencies.md) asks for as few dependencies as possible.
+Spec §2 and §6 allow one exception to "no GTK / no embedded browser": a separate, sign-in-only web view helper process. [ADR 0003](0003-essential-dependencies.md) asks for as few dependencies as possible.
 
 Options considered:
 

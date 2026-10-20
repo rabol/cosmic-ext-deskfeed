@@ -5,7 +5,7 @@ Thanks for helping! A few things matter more than usual in this project.
 ## Before you start
 
 - Read [specs.md](./specs.md) and the [architecture decision records](./docs/adr/README.md). Decisions with a trade-off get an ADR.
-- **Dependencies are kept to a minimum** ([ADR 0003](./docs/adr/0003-minimal-dependencies.md)). Prefer the standard library and crates already in libcosmic's tree. A new crate or system library needs a short ADR saying why.
+- **Dependencies are kept to a minimum** ([ADR 0003](./docs/adr/0003-essential-dependencies.md)). Prefer the standard library and crates already in libcosmic's tree. A new crate or system library needs a short ADR saying why.
 - **Native packages only**; no Flatpak ([ADR 0010](./docs/adr/0010-native-only-and-dependency-check.md)). A new runtime dependency also needs a line in the README and a check in `src/deps.rs`.
 - **Follow the COSMIC design language**: libcosmic's own widgets (settings sections, togglers, dropdowns, the context drawer, nav bar), patterned on COSMIC Settings.
 

@@ -60,7 +60,7 @@ All three clients use `client_failsafe_get_access_token`, so the sign-in helper 
 
 - [x] The helper completes the gateway token request on the owner's tenant (2026-10-17; the app now supplies that token itself).
 - [x] The helper completes the session-host token request (`/sec:aad`, proof-of-possession) on the owner's host pool (2026-10-17), although that pool doesn't have the single sign-on property. A pool with it is still untested ([compatibility](../compatibility.md)).
-- [ ] Not tested, and not needed since the sign-in window works ([ADR 0007](0007-sign-in-web-view.md); unauthenticated checks were inconclusive): whether Microsoft's public client ID accepts a loopback redirect (`http://localhost:<port>`). If it does, the system browser can replace the web view and the helper needs no web engine ([ADR 0003](0003-minimal-dependencies.md)). If it is rejected (`AADSTS50011`), record that.
+- [ ] Not tested, and not needed since the sign-in window works ([ADR 0007](0007-sign-in-web-view.md); unauthenticated checks were inconclusive): whether Microsoft's public client ID accepts a loopback redirect (`http://localhost:<port>`). If it does, the system browser can replace the web view and the helper needs no web engine ([ADR 0003](0003-essential-dependencies.md)). If it is rejected (`AADSTS50011`), record that.
 - [x] Backend comparison on COSMIC (spec §4 step 7): `sdl-freerdp3` native Wayland, `sdl-freerdp3` on XWayland, `xfreerdp3` on XWayland, plus `wlfreerdp3` (2026-10-18, above). A real Azure connection with `xfreerdp3` (owner's tenant, Entra sign-in, 2026-10-18 08:43): opened tiled and the desktop filled the tile after logon (owner confirmed). Still open: multi-hour stability.
 
 ## Consequences

@@ -11,7 +11,7 @@ The COSMIC app template depends on libcosmic as a Git dependency without a revis
 
 Pin `libcosmic` in `Cargo.toml` with `rev = "e1f2cd2e52226aa50d59bb2cd6d43ffe290106ed"` (libcosmic `master`, committed 2026-10-14, "fix(text_input): remove capture_escape property"). This is the revision the template resolved when the project was generated, so pinning it changes no code. `cargo check` passes with it on Rust 1.99.0.
 
-Also remove the template's `markdown` and `qr_code` features, which the app does not use (4 fewer packages in `Cargo.lock`; see [ADR 0003](0003-minimal-dependencies.md)). Keep `about`, `single-instance`, `wgpu` and `xdg-portal`.
+Also remove the template's `markdown` and `qr_code` features, which the app does not use (4 fewer packages in `Cargo.lock`; see [ADR 0003](0003-essential-dependencies.md)). Keep `about`, `single-instance`, `wgpu` and `xdg-portal`.
 
 To update libcosmic: change `rev`, run `cargo update -p libcosmic`, build and run the app, check the libcosmic changes for anything that affects us, and record the new revision here or in a new ADR.
 

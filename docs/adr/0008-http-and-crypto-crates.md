@@ -5,7 +5,7 @@
 
 ## Context
 
-[ADR 0003](0003-minimal-dependencies.md): reuse what is already in the dependency tree. Checked in `Cargo.lock` (2026-10-17), already present through libcosmic: `zbus` 5 (D-Bus, for the Secret Service), `serde` and `serde_json`, `roxmltree` (XML without external entity loading), `sha2`, `base64`, `rand`/`getrandom`, `url`, `percent-encoding`, `image`, `tokio`, `futures`. Missing: an HTTP client with TLS.
+[ADR 0003](0003-essential-dependencies.md): reuse what is already in the dependency tree. Checked in `Cargo.lock` (2026-10-17), already present through libcosmic: `zbus` 5 (D-Bus, for the Secret Service), `serde` and `serde_json`, `roxmltree` (XML without external entity loading), `sha2`, `base64`, `rand`/`getrandom`, `url`, `percent-encoding`, `image`, `tokio`, `futures`. Missing: an HTTP client with TLS.
 
 Spec §7 needs: no automatic authenticated redirects, bounded sizes and timeouts, system trust store (enterprise CAs), system proxy settings, and observable requests in tests.
 
