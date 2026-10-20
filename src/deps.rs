@@ -201,6 +201,16 @@ fn run(bin: &Path, args: &[&str]) -> Result<String, String> {
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| e.kind().to_string())?;
+    // Read while it runs: output larger than the pipe would otherwise
+    // block it until the time limit. Past the limit it is read and
+    // dropped, so the command never waits on us.
+    let mut stdout = child.stdout.take().expect("piped");
+    let reader = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let _ = (&mut stdout).take(MAX_OUTPUT).read_to_end(&mut out);
+        let _ = std::io::copy(&mut stdout, &mut std::io::sink());
+        out
+    });
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -214,10 +224,8 @@ fn run(bin: &Path, args: &[&str]) -> Result<String, String> {
             Err(e) => return Err(e.kind().to_string()),
         }
     };
-    let mut out = String::new();
-    if let Some(stdout) = child.stdout.take() {
-        let _ = stdout.take(MAX_OUTPUT).read_to_string(&mut out);
-    }
+    // The pipe closes when the command (and any child holding it) ends.
+    let out = String::from_utf8_lossy(&reader.join().unwrap_or_default()).into_owned();
     if status.success() {
         Ok(out)
     } else {
@@ -299,5 +307,30 @@ mod tests {
         assert_eq!(out.trim(), "hi");
         assert!(run(Path::new("/bin/sh"), &["-c", "exit 3"]).is_err());
         assert!(run(Path::new("/nonexistent/x"), &[]).is_err());
+    }
+
+    #[test]
+    fn long_output_doesnt_stall_the_check() {
+        // More than a pipe holds (64 KiB): read while it runs, or the
+        // command blocks writing and the check waits for its time limit.
+        let started = Instant::now();
+        let out = run(
+            Path::new("/bin/sh"),
+            &["-c", "head -c 204800 /dev/zero | tr '\\0' a"],
+        )
+        .unwrap();
+        assert_eq!(out.len(), 204_800);
+        // Beyond the limit: cut, still prompt.
+        let out = run(
+            Path::new("/bin/sh"),
+            &["-c", "head -c 400000 /dev/zero | tr '\\0' a"],
+        )
+        .unwrap();
+        assert_eq!(out.len() as u64, MAX_OUTPUT);
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
     }
 }
