@@ -131,11 +131,11 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - Every desktop sign-in logs "account not confirmed (no client_info)". It is the helper's only reason to depend on `base64`.
   - *If removed:* keep `login_hint`, drop the rest.
   - Effort M, risk low. Your decision.
-- [ ] **Password "wipe" that only clears one copy** ✓ checked. `process.rs:261-263` zeroes one buffer while the same password stays in `args: Vec<String>` and in the `Secret`. A write just before a drop can also be optimised away. *Either* drop it, *or* clear every copy properly. Effort S, risk low.
-- [ ] **A test-only retry loop in production code** ✓ checked. `spawn_retrying` (`process.rs:225-236`) retries "file busy" (ETXTBSY) 20 times, which only happens with freshly written test scripts. *Simpler:* the test writes the script and renames it into place. Effort S, risk low.
+- [x] **Password "wipe" that only clears one copy** (Done 2026-10-20: removed with its `unsafe`; neither the spec nor the review asks for wiping memory.) ✓ checked. `process.rs:261-263` zeroes one buffer while the same password stays in `args: Vec<String>` and in the `Secret`. A write just before a drop can also be optimised away. *Either* drop it, *or* clear every copy properly. Effort S, risk low.
+- [x] **A test-only retry loop in production code** (Kept, 2026-10-20: the suggested rename doesn't close the race, since a process another thread forks still inherits the open file until it execs; the retry also helps while a package update replaces FreeRDP.) ✓ checked. `spawn_retrying` (`process.rs:225-236`) retries "file busy" (ETXTBSY) 20 times, which only happens with freshly written test scripts. *Simpler:* the test writes the script and renames it into place. Effort S, risk low.
 - [ ] **Legacy resource-key migration** (`legacy_key`, `migrate_resource_keys`, `adopt_legacy_profile`). Added on the project's first day, before any release, so it only migrates your own development settings; it still runs on every refresh. Effort S, risk low (at worst, settings from before 2026-10-17 are lost).
 - [ ] **Legacy `clipboard: Option<bool>` and its migration** (`src/settings.rs:33-38`, `choice`/`set_choice`): the field existed for about a day before any release. Check your own config first. Effort S, risk low.
-- [ ] **Small dead pieces.**
+- [x] **Small dead pieces.** (Done 2026-10-20: the helper no longer parses FreeRDP's title; the test-only helpers moved into the tests. Kept: `dropped`, which the tests use to check exactly which properties were dropped; and the single "bad_request", since only Deskfeed sends requests, so any refusal is a Deskfeed bug.)
   - The helper parses and cleans `title`, then ignores it ✓ checked (`freerdp.rs:336` `title: _`).
   - `ConnectionFile::dropped` is counted but only read by tests.
   - `main.rs:132` throws away `RequestError`'s three variants with `.ok()`.

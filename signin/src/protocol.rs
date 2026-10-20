@@ -13,9 +13,6 @@ use url::Url;
 /// The sign-in must start here (spec §6).
 pub const LOGIN_HOST: &str = "login.microsoftonline.com";
 /// The only redirect the helper waits for.
-#[cfg(test)]
-pub const NATIVE_CLIENT: &str = "https://login.microsoftonline.com/common/oauth2/nativeclient";
-
 const MAX_REQUEST_LEN: usize = 16 * 1024;
 /// Longest redirect URL handed back, as the app's own limit
 /// (`MAX_CALLBACK_LEN` in `auth/attempt.rs`). Real ones are a few KiB.
@@ -127,11 +124,6 @@ pub enum Navigation {
     Block,
     /// The sign-in finished; stop and report.
     Finished(Reply),
-}
-
-#[cfg(test)]
-pub fn decide(uri: &str) -> Navigation {
-    decide_for(uri, &RedirectTarget::NativeClient)
 }
 
 /// The redirect a sign-in waits for.
@@ -364,6 +356,13 @@ mod silent_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const NATIVE_CLIENT: &str = "https://login.microsoftonline.com/common/oauth2/nativeclient";
+
+    /// `decide_for` with FreeRDP's usual redirect target.
+    fn decide(uri: &str) -> Navigation {
+        decide_for(uri, &RedirectTarget::NativeClient)
+    }
 
     const AUTH: &str =
         "https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?client_id=x";

@@ -236,7 +236,7 @@ pub(super) fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
 }
 
 /// Writes the argument lines and closes the pipe (an empty line ends them).
-/// Hands the arguments over. Never blocks: the whole payload
+/// Never blocks: the whole payload
 /// must fit in the pipe's buffer, and the write end is non-blocking, so a
 /// FreeRDP that never reads them can't hold up launching or quitting. On
 /// an error the caller stops FreeRDP.
@@ -253,15 +253,11 @@ pub(super) fn send_args(write_end: OwnedFd, args: &[String]) -> std::io::Result<
     let mut payload = args.join("\n");
     payload.push_str("\n\n");
     let fits = usize::try_from(capacity).is_ok_and(|c| payload.len() <= c);
-    let result = if fits && nonblocking {
+    if fits && nonblocking {
         w.write_all(payload.as_bytes())
     } else {
         Err(std::io::Error::other("arguments don't fit the pipe"))
-    };
-    // Wipe our copy of the password from this buffer.
-    // SAFETY: overwriting bytes with zeros keeps the String valid UTF-8.
-    unsafe { payload.as_bytes_mut().fill(0) };
-    result
+    }
 }
 
 /// Reads FreeRDP's log, waits for it to exit, removes the runtime folder

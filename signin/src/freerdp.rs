@@ -58,7 +58,6 @@ pub enum Incoming {
     Navigate {
         id: u64,
         url: String,
-        title: String,
         target: RedirectTarget,
         redirect_uri: String,
         timeout_ms: u64,
@@ -124,14 +123,6 @@ fn parse_navigate(id: u64, params: Option<&Value>) -> Option<Incoming> {
     protocol::valid_start_url(url)?;
     let redirect_uri = p.get("redirect_uri")?.as_str()?.trim().to_owned();
     let target = RedirectTarget::from_freerdp(&redirect_uri)?;
-    let title: String = p
-        .get("title")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(100)
-        .collect();
     let timeout_ms = match p.get("timeout_ms").and_then(Value::as_u64).unwrap_or(0) {
         0 => DEFAULT_TIMEOUT_MS,
         t => t.min(MAX_TIMEOUT_MS),
@@ -139,7 +130,6 @@ fn parse_navigate(id: u64, params: Option<&Value>) -> Option<Incoming> {
     Some(Incoming::Navigate {
         id,
         url: url.to_owned(),
-        title,
         target,
         redirect_uri,
         timeout_ms,
@@ -333,7 +323,6 @@ fn handle(
         Incoming::Navigate {
             id,
             url,
-            title: _,
             target,
             redirect_uri,
             timeout_ms,
