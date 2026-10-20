@@ -501,41 +501,26 @@ pub(super) fn search_matches(query: &str, ws: &WorkspaceView, r: &ResourceView) 
         || ws.name.to_lowercase().contains(query)
 }
 
-/// `t` in local time (`localtime_r`; no date crate needed).
-fn local(t: SystemTime) -> Option<libc::tm> {
-    let secs =
-        libc::time_t::try_from(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()).ok()?;
-    // SAFETY: `localtime_r` writes only into `tm`, which outlives the
-    // call; a null result means failure.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    let ok = unsafe { !libc::localtime_r(&raw const secs, &raw mut tm).is_null() };
-    ok.then_some(tm)
+/// `t` in this computer's time zone (`TZ`, else `/etc/localtime`).
+fn local(t: SystemTime) -> Option<jiff::Zoned> {
+    let t = jiff::Timestamp::try_from(t).ok()?;
+    Some(t.to_zoned(jiff::tz::TimeZone::system()))
 }
 
 /// "2026-10-18 14:05", local time.
 pub(super) fn date_time_label(t: SystemTime) -> String {
-    local(t).map_or_else(String::new, |tm| {
-        format!(
-            "{:04}-{:02}-{:02} {:02}:{:02}",
-            tm.tm_year + 1900,
-            tm.tm_mon + 1,
-            tm.tm_mday,
-            tm.tm_hour,
-            tm.tm_min
-        )
-    })
+    local(t).map_or_else(String::new, |t| t.strftime("%Y-%m-%d %H:%M").to_string())
 }
 
 /// "14:05" for today, "2026-10-17 14:05" for an earlier day, in local
-/// time (`localtime_r`; no date crate needed).
+/// time.
 pub(super) fn clock_label(t: SystemTime) -> String {
-    let Some(tm) = local(t) else {
+    let Some(local_t) = local(t) else {
         return String::new();
     };
-    let today = local(SystemTime::now())
-        .is_some_and(|n| (n.tm_year, n.tm_yday) == (tm.tm_year, tm.tm_yday));
+    let today = local(SystemTime::now()).is_some_and(|now| now.date() == local_t.date());
     if today {
-        format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+        local_t.strftime("%H:%M").to_string()
     } else {
         date_time_label(t)
     }
@@ -605,5 +590,50 @@ mod tests {
         // "1971-02-05 hh:mm" in any time zone.
         assert_eq!(old.len(), 16, "{old}");
         assert!(old.starts_with("1971-02-0"), "{old}");
+    }
+
+    /// The local time agrees with coreutils' `date`, which reads the same
+    /// time zone (`TZ`, else `/etc/localtime`). Try other zones with, for
+    /// example, `TZ=Australia/Lord_Howe cargo test local_time`.
+    #[test]
+    fn local_time_agrees_with_date() {
+        let Ok(probe) = std::process::Command::new("date")
+            .arg("-d")
+            .arg("@0")
+            .output()
+        else {
+            eprintln!("no `date` command; skipped");
+            return;
+        };
+        assert!(probe.status.success());
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        // The epoch, a leap day, both 2026 daylight-saving changes in
+        // Europe and the US, the last second of a year, and now.
+        let times = [
+            0,
+            951_825_599,
+            1_774_745_999,
+            1_774_746_000,
+            1_792_889_999,
+            1_792_890_000,
+            1_772_953_200,
+            1_793_512_800,
+            1_798_761_599,
+            now,
+        ];
+        for secs in times {
+            let out = std::process::Command::new("date")
+                .arg("-d")
+                .arg(format!("@{secs}"))
+                .arg("+%Y-%m-%d %H:%M")
+                .output()
+                .unwrap();
+            let expected = String::from_utf8(out.stdout).unwrap();
+            let t = SystemTime::UNIX_EPOCH + Duration::from_secs(secs);
+            assert_eq!(date_time_label(t), expected.trim_end(), "at {secs}");
+        }
     }
 }

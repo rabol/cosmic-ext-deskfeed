@@ -25,6 +25,9 @@ roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.3"
+# Local time for labels (ADR 0003); already in the tree through libcosmic,
+# which turns on the same features.
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 libc = "0.2"
 sha2 = "0.11"
 url = "2.5"

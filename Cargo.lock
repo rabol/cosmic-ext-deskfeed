@@ -991,6 +991,7 @@ dependencies = [
  "getrandom 0.3.4",
  "i18n-embed",
  "i18n-embed-fl",
+ "jiff",
  "libc",
  "libcosmic",
  "mockito",

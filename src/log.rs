@@ -18,7 +18,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 const FILE: &str = "app.log";
 const OLD: &str = "app.log.1";
@@ -273,34 +273,19 @@ fn looks_like_jwt(word: &str) -> bool {
     token.len() > 40 && token.matches('.').count() >= 2
 }
 
-/// `2026-10-17T18:18:10Z` (UTC).
+/// `2026-10-17T18:18:10Z` (UTC, whole seconds).
 fn timestamp(t: SystemTime) -> String {
-    let secs = t.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let days = i64::try_from(secs / 86_400).unwrap_or(0);
-    let rem = secs % 86_400;
-    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60
-    )
+    jiff::Timestamp::try_from(t)
+        .unwrap_or(jiff::Timestamp::UNIX_EPOCH)
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+        .to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
-    use std::time::Duration;
+    use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
     fn timestamps_are_utc_iso() {
@@ -313,6 +298,11 @@ mod tests {
         #[allow(clippy::duration_suboptimal_units)]
         let t = UNIX_EPOCH + Duration::from_secs(951_782_400);
         assert_eq!(timestamp(t), "2000-02-29T00:00:00Z");
+        // Whole seconds only.
+        assert_eq!(
+            timestamp(t + Duration::from_millis(999)),
+            "2000-02-29T00:00:00Z"
+        );
     }
 
     #[test]

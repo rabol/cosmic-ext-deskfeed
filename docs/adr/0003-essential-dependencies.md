@@ -61,3 +61,9 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
     - `temp-dir` or `testdir`: smaller, but new crates for the same job;
     - our own guard type in `testkit`: about 20 lines that `tempfile` already does, including unique names.
   - Chosen: `tempfile`, in the app and the sign-in helper.
+- **`jiff` 0.2 (2026-10-20):** local time for the labels in the window and the report, and the log's UTC timestamps.
+  - Options compared:
+    - `jiff`: already built into the app through libcosmic (its calendar), with the system time zone on, so nothing new; reads `TZ`, else `/etc/localtime`, like the C library;
+    - `chrono`: new crates, and finding the local zone needs `iana-time-zone` on top;
+    - our own code: an `unsafe` call to `localtime_r` and a hand-written calendar algorithm for the log.
+  - Chosen: `jiff`. A test compares the labels with coreutils' `date` around daylight-saving changes; it agreed under eight zones, `TZ` unset, empty and bogus.

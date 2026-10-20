@@ -180,7 +180,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - test temp folders → `tempfile` (done 2026-10-20);
   - `testkit::random_inputs` → `proptest` (shrinks failing inputs);
   - the tray's StatusNotifierItem/dbusmenu code (`tray.rs`, ~470 lines) → `ksni`;
-  - local time via `localtime_r` (`views.rs`) → a time crate, if one is already in the tree.
+  - local time via `localtime_r` (`views.rs`) → a time crate, if one is already in the tree (done 2026-10-20: `jiff`, which also replaced the log's hand-written calendar).
 - [ ] **Two tiny workspace crates** (`lines/`, `testkit/`): sharing code with the helper is a real need, but one crate is enough. Merge them into the common crate from §2, with the random-input tool behind a feature. Effort S, risk low.
 - [x] **`justfile`.** (Done 2026-10-20: `just ci`; `check` as CI; comments on the right recipes; `check-json` gone; `tag` bumps only the app and the helper, tags `v<version>` as the AUR package expects, no interactive amend.)
   - A doc comment sits on the wrong recipe.
