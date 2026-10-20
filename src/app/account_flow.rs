@@ -20,11 +20,8 @@ impl AppModel {
             Message::AddAccount => return self.start_add(),
             Message::SignInAccount(id) => return self.start_account_sign_in(&id),
             Message::CancelSignIn(None) => {
-                if let Some(Adding {
-                    cancel: Some(c), ..
-                }) = &self.adding
-                {
-                    c.cancel();
+                if let Some(Adding::SigningIn { cancel, .. }) = &self.adding {
+                    cancel.cancel();
                 }
                 self.adding = None;
             }
@@ -300,32 +297,20 @@ impl AppModel {
     /// Opens the sign-in window for an account not in the list yet, with a
     /// fresh cookie profile.
     pub(super) fn start_add(&mut self) -> Task<cosmic::Action<Message>> {
-        if matches!(
-            self.adding,
-            Some(Adding {
-                cancel: Some(_),
-                ..
-            })
-        ) {
+        if matches!(self.adding, Some(Adding::SigningIn { .. })) {
             return Task::none();
         }
         self.rebuild_nav(&Page::Add);
         let generation = self.next();
         let profile = accounts::new_profile_dir();
-        let error = |e| Adding {
-            generation,
-            cancel: None,
-            error: Some(e),
-        };
         let (Some(helper), Some(profile)) = (signin::find_helper(), profile) else {
-            self.adding = Some(error(fl!("error-helper-missing")));
+            self.adding = Some(Adding::Failed(fl!("error-helper-missing")));
             return Task::none();
         };
         let cancel = Cancel::default();
-        self.adding = Some(Adding {
+        self.adding = Some(Adding::SigningIn {
             generation,
-            cancel: Some(cancel.clone()),
-            error: None,
+            cancel: cancel.clone(),
         });
         self.run_sign_in(None, generation, helper, profile, None, cancel)
     }
@@ -407,10 +392,10 @@ impl AppModel {
         result: Result<Arc<SignedIn>, SignInFailure>,
     ) -> Task<cosmic::Action<Message>> {
         let current = match origin {
-            None => self
-                .adding
-                .as_ref()
-                .is_some_and(|a| a.generation == generation),
+            None => matches!(
+                &self.adding,
+                Some(Adding::SigningIn { generation: g, .. }) if *g == generation
+            ),
             Some(id) => self.account(id).is_some_and(|a| a.generation == generation),
         };
         if !current {
@@ -424,11 +409,8 @@ impl AppModel {
                 match origin {
                     None => {
                         accounts::remove_unused_profile(profile);
-                        self.adding = error.map(|e| Adding {
-                            generation,
-                            cancel: None,
-                            error: Some(e),
-                        });
+                        // `None`: cancelled, nothing to show.
+                        self.adding = error.map(Adding::Failed);
                     }
                     Some(id) => {
                         if let Some(a) = self.account_mut(id) {
@@ -441,7 +423,7 @@ impl AppModel {
         };
         let id = accounts::account_id(&signed_in.identity);
         if self.signing_out.contains(&id) {
-            self.refuse_while_signing_out(origin, generation, profile);
+            self.refuse_while_signing_out(origin, profile);
             return Task::none();
         }
         match decide::after_sign_in(origin, &id) {
@@ -494,20 +476,14 @@ impl AppModel {
 
     /// A sign-in finished for an account whose sign-out is still deleting
     /// its files: adopting this profile now would lose it.
-    fn refuse_while_signing_out(&mut self, origin: Option<&str>, generation: u64, profile: &Path) {
+    fn refuse_while_signing_out(&mut self, origin: Option<&str>, profile: &Path) {
         accounts::remove_unused_profile(profile);
-        let error = Some(fl!("error-still-signing-out"));
+        let error = fl!("error-still-signing-out");
         match origin {
-            None => {
-                self.adding = Some(Adding {
-                    generation,
-                    cancel: None,
-                    error,
-                });
-            }
+            None => self.adding = Some(Adding::Failed(error)),
             Some(other) => {
                 if let Some(a) = self.account_mut(other) {
-                    a.state = AccountState::NeedsSignIn { error };
+                    a.state = AccountState::NeedsSignIn { error: Some(error) };
                 }
             }
         }

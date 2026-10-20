@@ -94,13 +94,12 @@ impl AppModel {
             TrayEvent::ShowDesktop(key) => self.route(Message::ShowSession(key)),
             TrayEvent::Quit => {
                 // Asked in the window when desktops are open.
-                self.quit_chosen = true;
                 let show = if self.desks.open_count() == 0 {
                     Task::none()
                 } else {
                     self.show_window()
                 };
-                Task::batch([show, self.route(Message::QuitRequested)])
+                Task::batch([show, self.route(Message::QuitChosen)])
             }
         }
     }

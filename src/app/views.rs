@@ -21,10 +21,7 @@ impl AppModel {
 
     pub(super) fn add_view(&self) -> Element<'_, Message> {
         let space = cosmic::theme::spacing();
-        if let Some(Adding {
-            cancel: Some(_), ..
-        }) = &self.adding
-        {
+        if let Some(Adding::SigningIn { .. }) = &self.adding {
             return waiting_view(Message::CancelSignIn(None));
         }
         let mut col = widget::column::with_capacity(5)
@@ -37,7 +34,7 @@ impl AppModel {
             .push(widget::button::suggested(fl!("sign-in")).on_press(Message::AddAccount))
             .spacing(space.space_m)
             .align_x(Alignment::Center);
-        if let Some(Adding { error: Some(e), .. }) = &self.adding {
+        if let Some(Adding::Failed(e)) = &self.adding {
             col = col.push(widget::text::body(e.clone()).width(Length::Fixed(420.0)));
         }
         centered(col.into())

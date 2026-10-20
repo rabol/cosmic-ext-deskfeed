@@ -114,9 +114,6 @@ pub struct AppModel {
     tray: Option<crate::tray::Handle>,
     /// Why there is no tray, when background operation is on.
     tray_unavailable: Option<String>,
-    /// Quit was chosen (menu, Ctrl+Q, tray): really quit, not close to the
-    /// background.
-    quit_chosen: bool,
     /// The menu the tray shows now (sent again only when it changes).
     tray_menu: Option<Vec<crate::tray::TrayItem>>,
     /// "Start when you log in" (its autostart entry is there).
@@ -160,11 +157,13 @@ enum Page {
     Add,
 }
 
-struct Adding {
-    generation: u64,
-    /// `Some` while the sign-in window is open.
-    cancel: Option<Cancel>,
-    error: Option<String>,
+/// Adding an account (the Add page).
+enum Adding {
+    /// The sign-in window is open; `generation` tells its answer from a
+    /// cancelled one's.
+    SigningIn { generation: u64, cancel: Cancel },
+    /// It didn't work; shown on the Add page.
+    Failed(String),
 }
 
 impl cosmic::Application for AppModel {
@@ -225,7 +224,6 @@ impl cosmic::Application for AppModel {
             search: String::new(),
             tray: None,
             tray_unavailable: None,
-            quit_chosen: false,
             tray_menu: None,
             autostart: crate::autostart::enabled(),
             diagnostics: None,

@@ -9,25 +9,8 @@ impl AppModel {
     /// Quitting: asked, confirmed, cancelled, done.
     pub(super) fn quit_message(&mut self, message: &Message) -> Task<cosmic::Action<Message>> {
         match (message, self.quit) {
-            (Message::QuitChosen, Quit::No) => {
-                self.quit_chosen = true;
-                return self.quit_message(&Message::QuitRequested);
-            }
-            (Message::QuitRequested, Quit::No) => {
-                let step = decide::quit_step(
-                    self.desks.open_count() == 0,
-                    self.can_run_in_background(),
-                    std::mem::take(&mut self.quit_chosen),
-                );
-                match step {
-                    decide::QuitStep::Hide => return self.hide_window(),
-                    decide::QuitStep::Now => {
-                        self.quit = Quit::Stopping;
-                        return self.continue_quit();
-                    }
-                    decide::QuitStep::Ask => self.quit = Quit::Asking,
-                }
-            }
+            (Message::QuitRequested, Quit::No) => return self.request_quit(false),
+            (Message::QuitChosen, Quit::No) => return self.request_quit(true),
             (Message::QuitToBackground, Quit::Asking) => {
                 self.quit = Quit::No;
                 return self.hide_window();
@@ -43,6 +26,27 @@ impl AppModel {
         Task::none()
     }
 
+    /// Closing the window (`chosen` false) or choosing Quit: hide, quit, or
+    /// ask first (`decide::quit_step`).
+    fn request_quit(&mut self, chosen: bool) -> Task<cosmic::Action<Message>> {
+        let step = decide::quit_step(
+            self.desks.open_count() == 0,
+            self.can_run_in_background(),
+            chosen,
+        );
+        match step {
+            decide::QuitStep::Hide => self.hide_window(),
+            decide::QuitStep::Now => {
+                self.quit = Quit::Stopping;
+                self.continue_quit()
+            }
+            decide::QuitStep::Ask => {
+                self.quit = Quit::Asking;
+                Task::none()
+            }
+        }
+    }
+
     /// Quitting: once nothing is starting any more, ends every session and
     /// sign-in, waits for FreeRDP to be gone, then exits.
     pub(super) fn continue_quit(&mut self) -> Task<cosmic::Action<Message>> {
@@ -51,11 +55,8 @@ impl AppModel {
             return Task::none();
         }
         self.desks.stop_all_movers();
-        if let Some(Adding {
-            cancel: Some(c), ..
-        }) = &self.adding
-        {
-            c.cancel();
+        if let Some(Adding::SigningIn { cancel, .. }) = &self.adding {
+            cancel.cancel();
         }
         for a in &self.accounts {
             if let AccountState::SigningIn { cancel } = &a.state {
