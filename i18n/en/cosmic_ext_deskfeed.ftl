@@ -164,6 +164,25 @@ error-auth-failed = Authentication failed. Try signing out and in again.
 error-freerdp-crashed = The remote desktop client stopped unexpectedly.
 error-connect-too-long = Connecting took too long, so it was stopped. Try again.
 error-session-failed = The connection ended with an error (code { $code }).
+# A failure without its own message: an explanation, then FreeRDP's code
+# and error name for support.
+error-failed-named = { $why } (FreeRDP error { $code }, { $name }.) The details are in View → Diagnostics.
+error-failed-code = { $why } (FreeRDP error { $code }.) The details are in View → Diagnostics.
+cause-dns = The desktop's address couldn't be found. Check your internet connection.
+cause-network = The network connection to the desktop failed or was cut off. Check your internet connection and try again.
+cause-security = The desktop and Deskfeed couldn't agree on how to secure the sign-in. Try another logon setting for this desktop.
+cause-refused = The desktop refused the sign-in. Your account may not be allowed to use this desktop; ask your IT department.
+cause-booting = The desktop is starting up, which can take up to 5 minutes. Try again in a few minutes.
+cause-cancelled = The connection was stopped before it finished.
+cause-client = The remote desktop client (FreeRDP) couldn't set up the session on this computer.
+cause-idle = The desktop ended the session because it was idle.
+cause-logon-timeout = The desktop waited too long for the sign-in to finish.
+cause-ended-by-server = The desktop ended the session (signed out, or ended by an administrator).
+cause-license = The desktop has a licensing problem. Ask your IT department.
+stage-reaching = It stopped while connecting to the desktop, before signing in.
+stage-signing-in = It stopped while signing you in to the desktop.
+stage-setting-up = It stopped while the desktop was setting up your session.
+stage-running = It stopped after the session had started.
 
 # Dependencies
 dependencies = Dependencies

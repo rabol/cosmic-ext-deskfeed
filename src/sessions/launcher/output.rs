@@ -343,7 +343,13 @@ impl Log {
             self.activation_timeout = true;
         }
         self.read_certificate(line);
-        if line.contains("[ERROR]") || line.contains("[WARN]") || is_state_change(line) {
+        // `ERRINFO_…` is the server's reason for ending, logged at INFO
+        // (`libfreerdp/core/errinfo.c`); kept so the app can explain it.
+        if line.contains("[ERROR]")
+            || line.contains("[WARN]")
+            || line.contains("ERRINFO_")
+            || is_state_change(line)
+        {
             if self.lines.len() == MAX_LOG_LINES {
                 self.lines.remove(0);
             }

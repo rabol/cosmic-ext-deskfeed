@@ -208,10 +208,8 @@ impl AppModel {
                 let desk = self.desks.at(key);
                 desk.entra_failed = true;
                 desk.connection = Some(Connection::Failed(fl!("status-entra-failed")));
-                desk.last_failure = Some(fl!(
-                    "error-entra-failed",
-                    detail = describe_session_end(end)
-                ));
+                desk.last_failure =
+                    Some(fl!("error-entra-failed", detail = describe_ended(end, log)));
             }
             decide::EndOutcome::WrongPassword => {
                 // Stop and explain; the user decides whether to try
@@ -233,7 +231,7 @@ impl AppModel {
             }
             decide::EndOutcome::Failed => {
                 self.desks
-                    .set_conn(key, Connection::Failed(describe_session_end(end)));
+                    .set_conn(key, Connection::Failed(describe_ended(end, log)));
                 // Windows refused the remembered password for another
                 // reason (locked, expired, …): it goes too, so the next
                 // Connect asks instead of sending it again (ADR 0005,

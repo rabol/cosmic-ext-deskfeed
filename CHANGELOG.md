@@ -6,6 +6,8 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Fixed
 
+- A failed connection now explains itself instead of only "ended with an error (code 131)": FreeRDP's reason in plain words when it gives one (for example "the desktop refused the sign-in", "the desktop is starting up"), otherwise how far the connection got. The code and FreeRDP's error name stay in the message for support.
+- A remembered Windows password is now deleted when Windows refuses it for any reason (locked out, expired, disabled), not only for a wrong password, so it isn't sent again.
 - The clipboard never worked in a desktop since clipboard directions were added, whatever the setting said: FreeRDP turned it off from the connection file and the direction setting didn't turn it back on. It now follows the setting.
 
 ### Added
