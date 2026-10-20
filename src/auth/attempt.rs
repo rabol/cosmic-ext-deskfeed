@@ -224,7 +224,9 @@ impl Attempt {
         }
 
         let state = state.ok_or(CallbackError::MissingState)?;
-        if !constant_time_eq(state.as_bytes(), self.state.as_bytes()) {
+        // A plain comparison: its timing can't help an attacker, since the
+        // attempt is used up by this one callback, matching or not.
+        if state != self.state {
             return Err(CallbackError::StateMismatch);
         }
         if let Some(error) = error {
@@ -262,13 +264,6 @@ fn same_endpoint(a: &Url, b: &Url) -> bool {
         && a.path() == b.path()
         && a.username().is_empty()
         && a.password().is_none()
-}
-
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// Keeps only a short machine-readable code (letters, digits, `_`, `,`).
