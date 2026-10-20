@@ -597,7 +597,7 @@ mod tests {
         let error = "https://login.microsoftonline.com/common/oauth2/nativeclient?error=access_denied&error_codes=53003&state=s";
         let broker =
             "ms-appx-web://Microsoft.AAD.BrokerPlugin/a85cf173-4192-42f8-81fa-777a763e6e2c";
-        testkit::random_inputs(
+        common::testkit::random_inputs(
             "helper protocol",
             &[
                 request.as_bytes(),

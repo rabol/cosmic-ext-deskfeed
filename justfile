@@ -117,7 +117,7 @@ vendor-extract:
     rm -rf vendor
     tar pxf vendor.tar
 
-# The internal crates lines/ and testkit/ keep their version. The tag is
+# The internal crate common/ keeps its version. The tag is
 # `v<version>`, which the AUR package downloads.
 # Sets the app's and the sign-in helper's version, commits and tags it
 tag version:

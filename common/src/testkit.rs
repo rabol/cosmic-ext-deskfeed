@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 
-//! Test helpers shared by Deskfeed and its sign-in helper (a dev-dependency
-//! of both; never part of a program).
+//! Test helpers for Deskfeed and its sign-in helper: only with the
+//! `testkit` feature, which they turn on for their tests, so this is never
+//! part of a program.
 
 use std::time::{Duration, Instant};
 

@@ -99,7 +99,7 @@ mod tests {
     fn random_proxy_files_never_break_the_reader() {
         let sample =
             r#"{"uri":"http://anna:pw@proxy.example:3128","no_proxy":"localhost,.corp.example"}"#;
-        testkit::random_inputs("proxy file", &[sample.as_bytes()], |input| {
+        common::testkit::random_inputs("proxy file", &[sample.as_bytes()], |input| {
             if let Ok(p) = parse(&String::from_utf8_lossy(input)) {
                 assert!(!p.uri.is_empty() && p.uri.len() <= MAX_URI);
                 assert!(!p.uri.chars().any(char::is_control));

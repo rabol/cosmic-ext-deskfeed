@@ -1002,8 +1002,7 @@ name = "cosmic-ext-deskfeed"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "cosmic-ext-deskfeed-lines",
- "cosmic-ext-deskfeed-testkit",
+ "cosmic-ext-deskfeed-common",
  "dirs",
  "getrandom 0.3.4",
  "i18n-embed",
@@ -1032,28 +1031,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "cosmic-ext-deskfeed-lines"
+name = "cosmic-ext-deskfeed-common"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "cosmic-ext-deskfeed-signin"
 version = "0.1.0"
 dependencies = [
- "cosmic-ext-deskfeed-lines",
- "cosmic-ext-deskfeed-testkit",
+ "cosmic-ext-deskfeed-common",
  "gtk4",
  "serde",
  "serde_json",
  "tempfile",
  "url",
  "webkit6",
-]
-
-[[package]]
-name = "cosmic-ext-deskfeed-testkit"
-version = "0.1.0"
-dependencies = [
- "proptest",
 ]
 
 [[package]]

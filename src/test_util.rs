@@ -62,7 +62,7 @@ pub fn token_server(status: &str, body: &str) -> TokenServer {
 }
 
 /// Random-input testing (ADR 0023), shared with the sign-in helper.
-pub use testkit::random_inputs;
+pub use common::testkit::random_inputs;
 
 /// A private D-Bus session bus (`dbus-daemon`), ended when dropped,
 /// however the test ends, so a failing test can't leave it running (and

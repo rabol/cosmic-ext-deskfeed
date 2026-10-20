@@ -16,7 +16,7 @@ import sys
 from datetime import date
 
 TARGET = "x86_64-unknown-linux-gnu"
-OWN = {"cosmic-ext-deskfeed", "cosmic-ext-deskfeed-signin", "cosmic-ext-deskfeed-lines", "cosmic-ext-deskfeed-testkit"}
+OWN = {"cosmic-ext-deskfeed", "cosmic-ext-deskfeed-signin", "cosmic-ext-deskfeed-common"}
 
 # Git crates without a license field, checked against the license file in
 # their source repository (2026-10-17).
@@ -45,8 +45,8 @@ SYSTEM = """## System software (not part of this repository)
 
 def crates(edges: str) -> set[str]:
     out = subprocess.run(
-        # The two programs, not `--workspace`: testkit is a member, but
-        # only the tests use it.
+        # The two programs, not `--workspace`, so what only the tests use
+        # (the shared crate's testkit feature) isn't counted as shipped.
         ["cargo", "tree", "-p", "cosmic-ext-deskfeed", "-p", "cosmic-ext-deskfeed-signin",
          "--locked", "-e", edges, "--prefix", "none",
          "--format", "{p}", "--target", TARGET],

@@ -38,4 +38,4 @@ Once it was clear that nightly is needed only on the machine that runs the fuzze
 
 ## Update (2026-10-20): proptest underneath
 
-`testkit::random_inputs` keeps its rules and its signature, but proptest now generates the inputs and shrinks a failing one (ADR 0003). `testkit` is no longer standard library only.
+`testkit::random_inputs` keeps its rules and its signature, but proptest now generates the inputs and shrinks a failing one (ADR 0003). `testkit` is no longer standard library only. Since 2026-10-20 the tool is `common::testkit` in the shared workspace crate (`common/`), behind its `testkit` feature, which the app and the helper turn on for their tests only.

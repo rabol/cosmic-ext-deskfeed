@@ -1,15 +1,27 @@
 [package]
-name = "cosmic-ext-deskfeed-lines"
+name = "cosmic-ext-deskfeed-common"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.93"
 authors = ["Steen Rabol <cosmic-ext-avd@rabol.dev>"]
 license = "MIT"
-description = "Bounded line reading shared by Deskfeed and its sign-in helper"
+description = "Code shared by Deskfeed and its sign-in helper"
 repository = "https://github.com/rabol/cosmic-ext-deskfeed"
 publish = false
 
-# Standard library only.
 [lib]
-name = "bounded_lines"
+name = "common"
 path = "src/lib.rs"
+
+[features]
+# The random-input test tool (`common::testkit`); the app and the helper
+# turn it on for their tests only.
+testkit = ["dep:proptest"]
+
+[dependencies]
+# The random-input engine, which shrinks a failing input (ADR 0003, ADR 0023).
+proptest = { version = "1.12", default-features = false, features = ["std"], optional = true }
+
+[dev-dependencies]
+# For the testkit's own tests.
+proptest = { version = "1.12", default-features = false, features = ["std"] }

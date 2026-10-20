@@ -6,10 +6,8 @@
 //! the memory. This keeps at most `max` bytes of a line and skips the
 //! rest.
 //!
-//! Shared by the app and the sign-in helper as a small workspace crate
-//! (`lines/`), with only the standard library. It used to be included into
-//! the helper with `#[path]`, which rust-analyzer can't follow into another
-//! package's folder.
+//! Used by the app and the sign-in helper (FreeRDP's output, the helper's
+//! command channel).
 
 use std::io::BufRead;
 

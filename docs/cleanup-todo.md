@@ -181,7 +181,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - `testkit::random_inputs` → `proptest` (shrinks failing inputs) (done 2026-10-20);
   - the tray's StatusNotifierItem/dbusmenu code (`tray.rs`, ~470 lines) → `ksni` (done 2026-10-20, owner's decision after an outside review: ksni pinned to a git revision with COSMIC's activation token, until its 0.3.7 release);
   - local time via `localtime_r` (`views.rs`) → a time crate, if one is already in the tree (done 2026-10-20: `jiff`, which also replaced the log's hand-written calendar).
-- [ ] **Two tiny workspace crates** (`lines/`, `testkit/`): sharing code with the helper is a real need, but one crate is enough. Merge them into the common crate from §2, with the random-input tool behind a feature. Effort S, risk low.
+- [x] **Two tiny workspace crates** (`lines/`, `testkit/`) (Done 2026-10-20: one `common/` crate with `common::lines` and `common::testkit`, the latter behind a `testkit` feature the app and helper turn on for tests.): sharing code with the helper is a real need, but one crate is enough. Merge them into the common crate from §2, with the random-input tool behind a feature. Effort S, risk low.
 - [x] **`justfile`.** (Done 2026-10-20: `just ci`; `check` as CI; comments on the right recipes; `check-json` gone; `tag` bumps only the app and the helper, tags `v<version>` as the AUR package expects, no interactive amend.)
   - A doc comment sits on the wrong recipe.
   - `just check` doesn't match CI.
