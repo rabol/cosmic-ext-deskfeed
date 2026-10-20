@@ -45,6 +45,9 @@ pub struct Config {
     /// (keys: `accounts::account_id`). Names and IDs only: what's secret
     /// is in the keyring.
     pub accounts: BTreeMap<String, KnownAccount>,
+    /// Saved plain RDP connections (ADR 0029; keys: `connections::new_id`).
+    /// No passwords: those are in the keyring, opt-in.
+    pub connections: BTreeMap<String, crate::connections::SavedConnection>,
 }
 
 /// An account Deskfeed lists: who it is, for the sidebar and for signing

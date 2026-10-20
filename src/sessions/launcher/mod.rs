@@ -63,6 +63,15 @@ pub enum LogonSetting {
     EntraSignIn,
 }
 
+/// A domain the user typed for `CustomDomain`: letters, digits, `.`, `-`
+/// and `_`, at most 255.
+pub fn valid_domain(d: &str) -> bool {
+    !d.is_empty()
+        && d.len() <= 255
+        && d.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+}
+
 impl LogonSetting {
     pub fn needs_password(&self) -> bool {
         !matches!(self, Self::EntraSignIn)

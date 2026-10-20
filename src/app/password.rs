@@ -157,7 +157,7 @@ impl AppModel {
             LOGON_EMPTY => LogonSetting::EmptyDomain,
             LOGON_CUSTOM => {
                 let domain = d.custom_domain.trim().to_owned();
-                if !valid_domain(&domain) {
+                if !crate::sessions::launcher::valid_domain(&domain) {
                     d.error = Some(fl!("error-bad-domain"));
                     return Task::none();
                 }

@@ -646,13 +646,6 @@ fn hash_key(parts: &[&str]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&h.finalize()[..18])
 }
 
-pub(super) fn valid_domain(d: &str) -> bool {
-    !d.is_empty()
-        && d.len() <= 255
-        && d.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-}
-
 pub(super) fn workspace_view(account: &SignedIn, feed: discovery::WorkspaceFeed) -> WorkspaceView {
     let fallback = feed
         .tenant
