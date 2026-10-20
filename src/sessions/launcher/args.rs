@@ -147,20 +147,33 @@ impl HelperProxy {
 
 /// The argument lines for `/args-from`. `rdp_path` must end in `.rdp`.
 pub(super) fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<String>, LaunchError> {
-    let gateway = match spec.gateway_token.as_ref().map(BearerToken::expose) {
-        // A JWT: base64url parts and dots. Anything else could break the
-        // comma-separated option, so FreeRDP then fetches its own token.
-        Some(t)
-            if !t.is_empty()
-                && t.len() <= 16 * 1024
-                && t.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) =>
-        {
-            format!("/gateway:type:arm,bearer:{t}")
+    let entra = spec.logon == LogonSetting::EntraSignIn;
+    let mut args = vec![rdp_path.to_string_lossy().into_owned()];
+    match &spec.target {
+        Target::Azure {
+            gateway_token,
+            helper,
+            ..
+        } => {
+            args.push(match gateway_token.as_ref().map(BearerToken::expose) {
+                // A JWT: base64url parts and dots. Anything else could break
+                // the comma-separated option, so FreeRDP then fetches its
+                // own token.
+                Some(t)
+                    if !t.is_empty()
+                        && t.len() <= 16 * 1024
+                        && t.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) =>
+                {
+                    format!("/gateway:type:arm,bearer:{t}")
+                }
+                _ => "/gateway:type:arm".to_owned(),
+            });
+            args.push(format!("/azure:auth-helper:{}", helper.display()));
         }
-        _ => "/gateway:type:arm".to_owned(),
-    };
-    let mut args = vec![rdp_path.to_string_lossy().into_owned(), gateway];
+        Target::Direct if entra => return Err(LaunchError::EntraNeedsAzure),
+        Target::Direct => {}
+    }
     // FreeRDP runs `~/.config/freerdp/action.sh` for key combinations it
     // lists, and that can take keys from the session. The app sets the
     // session's keys itself (spec §5), so FreeRDP gets a script path that
@@ -173,9 +186,7 @@ pub(super) fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<Strin
     // The chosen logon decides, not the file's `enablerdsaadauth`: FreeRDP
     // applies the file first and then the arguments, and a lone `/sec:nla`
     // switches Entra (AAD) security off (3.32.2 `client/common/cmdline.c`).
-    let entra = spec.logon == LogonSetting::EntraSignIn;
     args.push(if entra { "/sec:aad" } else { "/sec:nla" }.to_owned());
-    args.push(format!("/azure:auth-helper:{}", spec.helper.display()));
     if let Some(user) = &spec.username {
         if user.contains(['\n', '\r', '\0']) || user.len() > MAX_USER_NAME {
             return Err(LaunchError::Io("bad user name".into()));

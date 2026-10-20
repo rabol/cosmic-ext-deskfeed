@@ -80,18 +80,11 @@ impl LogonSetting {
 
 pub struct LaunchSpec {
     pub connection: ConnectionFile,
+    pub target: Target,
     /// Shown to FreeRDP as `/u:`; the AVD service may replace it.
     pub username: Option<String>,
     pub password: Option<Secret>,
     pub logon: LogonSetting,
-    pub helper: PathBuf,
-    /// The account's sign-in web view profile, for silent token requests.
-    pub profile: PathBuf,
-    /// The app's own access token for the AVD service. FreeRDP asks for
-    /// exactly this token (same client ID and scope, FreeRDP 3.32.2
-    /// `libfreerdp/core/settings.c`) and skips its own request when one is
-    /// given (`gateway/arm.c`), which saves the user a sign-in prompt.
-    pub gateway_token: Option<BearerToken>,
     /// A session host certificate the user approved for this desktop
     /// (sha256, `aa:bb:…`); FreeRDP accepts exactly it (ADR 0016).
     pub pinned_certificate: Option<String>,
@@ -101,9 +94,35 @@ pub struct LaunchSpec {
     /// groups it with the app and "open on a new workspace" can find it.
     pub window_title: String,
     pub app_id: String,
-    /// The account's user name, so FreeRDP's own sign-in for the desktop
-    /// starts with it selected (ADR 0027).
-    pub login_hint: Option<String>,
+}
+
+/// Where FreeRDP connects.
+pub enum Target {
+    /// An Azure Virtual Desktop or Windows 365 desktop or app: through
+    /// Azure's gateway, with FreeRDP's Azure sign-in going through
+    /// Deskfeed's sign-in helper.
+    Azure {
+        helper: PathBuf,
+        /// The account's sign-in web view profile, for silent token
+        /// requests.
+        profile: PathBuf,
+        /// The app's own access token for the AVD service. FreeRDP asks for
+        /// exactly this token (same client ID and scope, FreeRDP 3.32.2
+        /// `libfreerdp/core/settings.c`) and skips its own request when one
+        /// is given (`gateway/arm.c`), which saves the user a sign-in
+        /// prompt.
+        gateway_token: Option<BearerToken>,
+        /// The account's user name, so FreeRDP's own sign-in for the
+        /// desktop starts with it selected (ADR 0027).
+        login_hint: Option<String>,
+    },
+    /// A Windows machine by host name (ADR 0029): the connection file
+    /// (`ConnectionFile::direct`) names it; no gateway and no Azure
+    /// sign-in; the password over NLA only.
+    // Started from the screens in step 4 of ADR 0029; until then by the
+    // tests only.
+    #[cfg_attr(not(test), allow(dead_code))]
+    Direct,
 }
 
 /// A window title FreeRDP can take as one argument line: no control
@@ -126,6 +145,8 @@ pub enum LaunchError {
     BadPassword,
     /// The app's proxy uses a scheme FreeRDP doesn't support.
     UnsupportedProxy(String),
+    /// Entra sign-in to the desktop needs Azure (`Target::Azure`).
+    EntraNeedsAzure,
     Io(String),
 }
 
@@ -321,12 +342,11 @@ fn launch_with(
     let (terminal, output) = output_terminal().map_err(|e| io_err(&e))?;
     let mut child = spawn_freerdp(
         freerdp,
-        &spec.profile,
+        &spec.target,
         &read_end,
         output,
         proxy,
         proxy_file.as_deref(),
-        spec.login_hint.as_deref(),
     )?;
     drop(read_end);
     if send_args(write_end, &args).is_err() {

@@ -313,10 +313,26 @@ impl ConnectionFile {
         })
     }
 
-    /// Tests only: a file for a local test server, without the gateway a
-    /// parsed file must have (`research/rdp-test-server`).
+    /// A file Deskfeed makes for a Windows machine by host name (ADR 0029):
+    /// only its address, checked like a feed file's `full address`, so no
+    /// other property can get in. With no administrator's file, the user's
+    /// own settings decide the devices.
+    // Used from the screens in step 4 of ADR 0029; until then by the tests
+    // only.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn direct(address: &str) -> Option<Self> {
+        is_host_port(address).then(|| Self::with_address(address))
+    }
+
+    /// Tests only: a file for the local test server
+    /// (`research/rdp-test-server`), whose address may be a socket path,
+    /// which `direct` rightly refuses.
     #[cfg(test)]
     pub fn local_test(address: &str) -> Self {
+        Self::with_address(address)
+    }
+
+    fn with_address(address: &str) -> Self {
         let mut props = BTreeMap::new();
         props.insert("full address".to_owned(), Value::Str(address.to_owned()));
         Self {
@@ -761,5 +777,40 @@ mod tests {
                 ));
             },
         );
+    }
+
+    /// A file Deskfeed makes for a host by name (ADR 0029): only a checked
+    /// address goes in, so nothing can add a property line.
+    #[test]
+    fn a_direct_file_holds_only_a_checked_address() {
+        for ok in [
+            "pc01:3389",
+            "win11.corp.example:3390",
+            "10.0.0.5:3389",
+            "[fe80::1]:3389",
+        ] {
+            let file = ConnectionFile::direct(ok).unwrap();
+            let text = file.to_freerdp_text();
+            assert!(
+                text.starts_with(&format!("full address:s:{ok}\r\n")),
+                "{text}"
+            );
+            assert_eq!(
+                text.lines()
+                    .filter(|l| l.starts_with("full address"))
+                    .count(),
+                1
+            );
+            assert!(!file.remote_app());
+        }
+        for bad in [
+            "pc01:3389\r\nalternate shell:s:cmd.exe",
+            "pc 01:3389",
+            "anna@pc01:3389",
+            "pc01:0",
+            "",
+        ] {
+            assert!(ConnectionFile::direct(bad).is_none(), "{bad:?}");
+        }
     }
 }

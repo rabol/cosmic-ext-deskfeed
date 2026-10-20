@@ -15,14 +15,38 @@ fn spec(logon: LogonSetting, password: Option<&str>, entra_file: bool) -> Launch
         username: Some("anna@example.com".into()),
         password: password.map(|p| Secret::new(p.into())),
         logon,
-        helper: PathBuf::from("/usr/libexec/cosmic-ext-deskfeed/cosmic-ext-deskfeed-signin"),
-        profile: PathBuf::from("/tmp/p"),
-        gateway_token: None,
+        target: Target::Azure {
+            helper: PathBuf::from("/usr/libexec/cosmic-ext-deskfeed/cosmic-ext-deskfeed-signin"),
+            profile: PathBuf::from("/tmp/p"),
+            gateway_token: None,
+            login_hint: Some("anna@example.com".into()),
+        },
         pinned_certificate: None,
         settings: crate::settings::DEFAULTS,
         window_title: String::new(),
         app_id: String::new(),
-        login_hint: Some("anna@example.com".into()),
+    }
+}
+
+/// A Windows machine by host name (ADR 0029), with a password.
+fn direct_spec(address: &str) -> LaunchSpec {
+    LaunchSpec {
+        connection: ConnectionFile::direct(address).unwrap(),
+        target: Target::Direct,
+        username: Some(r"CORP\anna".into()),
+        password: Some(Secret::new("hunter2".into())),
+        logon: LogonSetting::Automatic,
+        pinned_certificate: None,
+        settings: crate::settings::DEFAULTS,
+        window_title: String::new(),
+        app_id: String::new(),
+    }
+}
+
+/// Sets the Azure target's gateway token.
+fn with_token(s: &mut LaunchSpec, token: &str) {
+    if let Target::Azure { gateway_token, .. } = &mut s.target {
+        *gateway_token = Some(BearerToken::new(token.into()));
     }
 }
 
@@ -187,13 +211,44 @@ fn freerdp_gets_the_proxy_the_app_uses() {
     );
 }
 
+/// A Windows machine by host name: none of Azure's arguments, NLA, and
+/// the user's own user name, domain and approved certificate.
+#[test]
+fn direct_arguments_have_nothing_of_azure() {
+    let mut s = direct_spec("pc01:3390");
+    s.logon = LogonSetting::CustomDomain("CORP".into());
+    s.pinned_certificate = Some(format!("{}aa", "aa:".repeat(31)));
+    let a = args(&s);
+    assert!(!a.iter().any(|x| x.starts_with("/gateway:")), "{a:?}");
+    assert!(!a.iter().any(|x| x.starts_with("/azure:")), "{a:?}");
+    assert!(a.contains(&"/sec:nla".to_owned()), "{a:?}");
+    assert!(a.contains(&r"/u:CORP\anna".to_owned()), "{a:?}");
+    assert!(a.contains(&"/d:CORP".to_owned()), "{a:?}");
+    assert!(a.contains(&"/p:hunter2".to_owned()), "{a:?}");
+    assert!(
+        a.iter().any(|x| x.starts_with("/cert:fingerprint:sha256:")),
+        "{a:?}"
+    );
+}
+
+#[test]
+fn entra_sign_in_needs_azure() {
+    let mut s = direct_spec("pc01:3389");
+    s.logon = LogonSetting::EntraSignIn;
+    s.password = None;
+    assert_eq!(
+        build_args(&s, Path::new("/run/x/connection.rdp")).unwrap_err(),
+        LaunchError::EntraNeedsAzure
+    );
+}
+
 #[test]
 fn gateway_token_only_when_well_formed() {
     let mut s = spec(LogonSetting::EntraSignIn, None, false);
-    s.gateway_token = Some(BearerToken::new("eyJ0.eyJh-b_c.sig".into()));
+    with_token(&mut s, "eyJ0.eyJh-b_c.sig");
     assert_eq!(args(&s)[1], "/gateway:type:arm,bearer:eyJ0.eyJh-b_c.sig");
     for bad in ["a,type:rpc", "a b", "", "a:b"] {
-        s.gateway_token = Some(BearerToken::new(bad.into()));
+        with_token(&mut s, bad);
         assert_eq!(args(&s)[1], "/gateway:type:arm", "{bad:?}");
     }
 }
@@ -658,6 +713,47 @@ fn launch_hands_arguments_over_privately() {
     );
 }
 
+/// A direct connection through a fake FreeRDP: nothing of Azure's
+/// sign-in reaches its environment, the password only comes through the
+/// pipe, and the connection file names exactly the host.
+#[test]
+fn a_direct_launch_hands_over_only_the_host() {
+    let fake = Fake::new(|dir| {
+        format!(
+            "out='{out}'\n\
+             echo \"ARGV:$*\" > \"$out\"\n\
+             first=''\n\
+             while IFS= read -r line <&3; do [ -z \"$line\" ] && break; [ -z \"$first\" ] && first=\"$line\"; echo \"ARG:$line\" >> \"$out\"; done\n\
+             sed 's/^/FILE:/' \"$first\" >> \"$out\"\n\
+             env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_' && echo HELPER_ENV >> \"$out\"\n\
+             exit 0",
+            out = dir.join("out.txt").display()
+        )
+    });
+    let (_session, rx) = fake.launch(&direct_spec("pc01:3390"), &FreeRdpProxy::default());
+    ended(&rx);
+    let got = fs::read_to_string(fake.dir().join("out.txt")).unwrap();
+    assert!(got.starts_with("ARGV:/args-from:fd:3\n"), "{got}");
+    assert!(!got.lines().next().unwrap().contains("hunter2"));
+    assert!(got.contains("ARG:/p:hunter2"), "{got}");
+    assert!(
+        !got.contains("ARG:/gateway:") && !got.contains("ARG:/azure:"),
+        "{got}"
+    );
+    assert!(!got.contains("HELPER_ENV"), "{got}");
+    let file: Vec<&str> = got
+        .lines()
+        .filter_map(|l| l.strip_prefix("FILE:"))
+        .collect();
+    assert_eq!(
+        file.iter()
+            .filter(|l| l.starts_with("full address:"))
+            .collect::<Vec<_>>(),
+        [&"full address:s:pc01:3390"]
+    );
+    assert!(!file.iter().any(|l| l.starts_with("gateway")), "{file:?}");
+}
+
 /// FreeRDP's log lines arrive while it runs. `sed` writes through the C
 /// library like FreeRDP: through a pipe the line would wait in its
 /// buffer until `sleep` ends.
@@ -777,9 +873,9 @@ fn stopping_ends_the_whole_process_group() {
     );
 }
 
-/// The app's own launch against a test host without the Azure gateway:
-/// with the real FreeRDP, `/gateway:` taken out, and `adjust` applied.
-fn start_without_gateway(
+/// The app's own launch with the real FreeRDP against a test host
+/// (`Target::Direct`), with `adjust` applied to the arguments.
+fn start_real(
     s: &LaunchSpec,
     dir: &Path,
     adjust: impl FnOnce(Vec<String>) -> Vec<String>,
@@ -794,13 +890,7 @@ fn start_without_gateway(
         move |e| {
             let _ = tx.send(e);
         },
-        |args| {
-            adjust(
-                args.into_iter()
-                    .filter(|a| !a.starts_with("/gateway:"))
-                    .collect(),
-            )
-        },
+        adjust,
     )
     .unwrap();
     (session, rx)
@@ -832,9 +922,7 @@ fn windows_host_remote_app() {
             var("PASSWORD").expect("DESKFEED_TEST_RAIL_PASSWORD"),
         )),
         logon: LogonSetting::Automatic,
-        helper: PathBuf::from("/nonexistent/helper"),
-        profile: dir.join("profile"),
-        gateway_token: None,
+        target: Target::Direct,
         pinned_certificate: None,
         settings: crate::settings::Effective {
             // Set for a desktop; an app must not get them.
@@ -845,10 +933,9 @@ fn windows_host_remote_app() {
         },
         window_title: "Deskfeed RemoteApp test".into(),
         app_id: "io.github.rabol.DeskfeedTest".into(),
-        login_hint: None,
     };
     // A test host's self-signed certificate.
-    let (session, rx) = start_without_gateway(&s, dir, |mut args| {
+    let (session, rx) = start_real(&s, dir, |mut args| {
         assert!(args.contains(&"/multimon".to_owned()), "{args:?}");
         assert!(!args.contains(&"+f".to_owned()), "{args:?}");
         args.push("/cert:ignore".to_owned());
@@ -929,9 +1016,7 @@ fn local_test_server_session() {
         username: Some("test".into()),
         password: Some(Secret::new("test".into())),
         logon: LogonSetting::EmptyDomain,
-        helper: PathBuf::from("/nonexistent/helper"),
-        profile: dir.join("profile"),
-        gateway_token: None,
+        target: Target::Direct,
         // `DESKFEED_TEST_PIN=<sha256>`: connect with that approved
         // certificate instead of `/cert:ignore`.
         pinned_certificate: std::env::var("DESKFEED_TEST_PIN").ok(),
@@ -949,14 +1034,13 @@ fn local_test_server_session() {
         window_title: std::env::var("DESKFEED_TEST_TITLE")
             .unwrap_or_else(|_| "Deskfeed local test \u{2013} t\u{e9}st".into()),
         app_id: "io.github.rabol.DeskfeedTest".into(),
-        login_hint: None,
     };
     // The two arguments the test server can't take: TLS instead of
     // NLA; and without a pin its self-signed certificate is ignored,
     // unless `DESKFEED_TEST_CHECK_CERT=1`.
     let ignore_cert =
         s.pinned_certificate.is_none() && std::env::var("DESKFEED_TEST_CHECK_CERT").is_err();
-    let (session, rx) = start_without_gateway(&s, dir, |args| {
+    let (session, rx) = start_real(&s, dir, |args| {
         args.into_iter()
             .map(|a| {
                 if a == "/sec:nla" {
@@ -1064,14 +1148,16 @@ fn real_freerdp_accepts_all_kept_properties() {
         username: Some("anna@example.com".into()),
         password: Some(Secret::new("pw".into())),
         logon: LogonSetting::EmptyDomain,
-        helper: PathBuf::from("/nonexistent/helper"),
-        profile: dir.join("profile"),
-        gateway_token: None,
+        target: Target::Azure {
+            helper: PathBuf::from("/nonexistent/helper"),
+            profile: dir.join("profile"),
+            gateway_token: None,
+            login_hint: None,
+        },
         pinned_certificate: None,
         settings: crate::settings::DEFAULTS,
         window_title: String::new(),
         app_id: String::new(),
-        login_hint: None,
     };
     let (tx, rx) = std::sync::mpsc::channel();
     let freerdp = find_freerdp().expect("xfreerdp3 installed");

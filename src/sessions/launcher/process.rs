@@ -95,12 +95,11 @@ pub(super) fn output_terminal() -> std::io::Result<(fs::File, OwnedFd)> {
 
 pub(super) fn spawn_freerdp(
     freerdp: &Path,
-    profile: &Path,
+    target: &Target,
     args_pipe: &OwnedFd,
     output: OwnedFd,
     proxy: &FreeRdpProxy,
     proxy_file: Option<&Path>,
-    login_hint: Option<&str>,
 ) -> Result<Child, LaunchError> {
     let read_fd = args_pipe.as_raw_fd();
     let mut cmd = Command::new(freerdp);
@@ -118,18 +117,29 @@ pub(super) fn spawn_freerdp(
     if let Some(file) = proxy_file {
         cmd.env(PROXY_FILE_ENV, file);
     }
-    cmd.env(helper::PROFILE_ENV, profile);
-    // The account's user name for Microsoft's page (ADR 0027). Plain
-    // text only: a NUL would stop the launch.
-    if let Some(name) = login_hint.filter(|n| !n.is_empty() && !n.chars().any(char::is_control)) {
-        cmd.env(LOGIN_HINT_ENV, name);
+    // Only Azure's sign-in goes through the sign-in helper.
+    if let Target::Azure {
+        profile,
+        login_hint,
+        ..
+    } = target
+    {
+        cmd.env(helper::PROFILE_ENV, profile);
+        // The account's user name for Microsoft's page (ADR 0027). Plain
+        // text only: a NUL would stop the launch.
+        if let Some(name) = login_hint
+            .as_deref()
+            .filter(|n| !n.is_empty() && !n.chars().any(char::is_control))
+        {
+            cmd.env(LOGIN_HINT_ENV, name);
+        }
+        // The sign-in window's title in the user's language; the helper has
+        // no translations of its own (signin/src/freerdp.rs, `TITLE_ENV`).
+        cmd.env(
+            helper::TITLE_ENV,
+            safe_title(&crate::fl!("sign-in-window-title")),
+        );
     }
-    // The sign-in window's title in the user's language; the helper has no
-    // translations of its own (signin/src/freerdp.rs, `TITLE_ENV`).
-    cmd.env(
-        helper::TITLE_ENV,
-        safe_title(&crate::fl!("sign-in-window-title")),
-    );
     // Connection steps ("STATE_A --> STATE_B"), so a failure shows where it
     // stopped. This logger prints no names, passwords or tokens (FreeRDP
     // 3.32.2 `libfreerdp/core/rdp.c`). An environment variable, because

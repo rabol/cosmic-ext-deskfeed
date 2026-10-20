@@ -84,15 +84,17 @@ impl AppModel {
             username: signed_in.identity.username.clone(),
             password,
             logon: logon.clone(),
-            helper,
-            profile,
-            gateway_token: (!signed_in.tokens.needs_refresh(Instant::now()))
-                .then(|| signed_in.tokens.access_token.clone()),
+            target: launcher::Target::Azure {
+                helper,
+                profile,
+                gateway_token: (!signed_in.tokens.needs_refresh(Instant::now()))
+                    .then(|| signed_in.tokens.access_token.clone()),
+                login_hint: signed_in.identity.username.clone(),
+            },
             pinned_certificate: self.config.certificate_pins.get(key).cloned(),
             settings,
             window_title: window_title.clone(),
             app_id: <Self as cosmic::Application>::APP_ID.to_owned(),
-            login_hint: signed_in.identity.username.clone(),
         };
         // The kind of setting only; a custom domain's name is tenant data.
         crate::app_log!(
