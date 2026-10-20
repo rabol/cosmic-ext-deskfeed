@@ -34,3 +34,22 @@ Spec §8. For desktops that log on with a Windows password, the password dialog 
 - If Windows rejects it, it is deleted at once and the dialog asks; it is never tried again (ADR 0005).
 - Deleted on sign-out (all of the account's) and with Security → Remembered password → Remove in the desktop's settings.
 - Checked against the session's real keyring (oo7 0.6): store, replace, read, delete; the sign-in list never shows it (`secrets::tests::real_keyring_password`).
+
+## Addendum (2026-10-20): the crates compared properly (ADR 0003 addendum)
+
+The decision above dismissed the crates mainly to avoid new ones. Under the restated rule they were compared against what Deskfeed needs, from their sources (2026-10). Versions: `keyring` 4.2 (with `keyring-core` 1.0 and its zbus store), `oo7` 0.6, `secret-service` 5.2.
+
+| Need | keyring 4 | oo7 0.6 | secret-service 5.2 | ours |
+|---|---|---|---|---|
+| Our attributes and label; search and delete by part of them | partly: its own attribute scheme; ours need a second, non-atomic call | yes, but no search across the service | yes | yes |
+| Unlock prompt with our 2-minute limit, then Dismiss; cancel, no answer and no keyring told apart | **no**: no time limit; cancel and locked look the same | **no time limit**; Dismiss only behind its `unstable` feature | **no**: waits for ever (`util.rs` `exec_prompt_blocking`), the prompt can't be reached to dismiss it | yes |
+| `text/plain` (oo7-daemon 0.6 refuses some types) | forces `application/octet-stream` | yes | yes | yes |
+| New crates | 19–26 | 26 (async only) | 7 | 0 |
+| Test support | a mock with no attributes and no lock or prompt states | none; session bus only | works with our private-bus fake | `fake.rs`, real code paths |
+| Encrypted session (DH) | always | yes | yes | no (`plain`, accepted above) |
+
+Decision: keep our own client. The deciding need is the unlock prompt. With any of the crates, an unlock prompt nobody answers would hold a worker thread for ever; with `keyring`, it would also block every other keyring call. keyring's `MockCredential` couldn't test what matters here: account and password items kept apart, cancel, and no answer. `fake.rs` tests those on the real D-Bus calls.
+
+If an encrypted session is ever wanted, `secret-service` (with `crypto-rust`) is the candidate to revisit: it fits everything except the prompt time limit.
+
+Not verified: any crate against a live daemon (none was run).
