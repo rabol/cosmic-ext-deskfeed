@@ -185,8 +185,8 @@ impl AppModel {
             .desks
             .all_running()
             .map(|(_, r)| r)
-            .filter(|r| r.keep_awake)
-            .map(|r| r.title.clone())
+            .filter(|r| r.start.keep_awake)
+            .map(|r| r.start.title.clone())
             .collect();
         if titles.is_empty() {
             return Subscription::none();

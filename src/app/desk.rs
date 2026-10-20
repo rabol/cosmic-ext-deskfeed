@@ -12,6 +12,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(test)]
+use super::model::Start;
 use super::model::{Connection, Launching, Reconnect, Running};
 use crate::auth::token::Secret;
 use crate::sessions::launcher::{self, LogonSetting};
@@ -221,11 +223,11 @@ impl Desks {
     /// The account's sessions running or starting.
     pub(super) fn open_count_for(&self, account: &str) -> usize {
         self.all_running()
-            .filter(|(_, r)| r.account == account)
+            .filter(|(_, r)| r.start.account == account)
             .count()
             + self
                 .all_launching()
-                .filter(|(_, l)| l.account == account)
+                .filter(|(_, l)| l.start.account == account)
                 .count()
     }
 
@@ -287,14 +289,16 @@ mod tests {
 
     fn launching(account: &str) -> Launching {
         Launching {
-            attempt: 1,
+            start: Start {
+                attempt: 1,
+                account: account.into(),
+                title: "Desk".into(),
+                grabs_shortcuts: false,
+                keep_awake: false,
+                remote_app: false,
+            },
             deadline: std::time::Duration::from_secs(60),
-            account: account.into(),
             stop: false,
-            title: "Desk".into(),
-            grabs_shortcuts: false,
-            keep_awake: false,
-            remote_app: false,
         }
     }
 

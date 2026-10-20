@@ -114,7 +114,11 @@ impl AppModel {
                 }
                 // A session still starting removes the files once more
                 // when it has been stopped (`launched`).
-                if !self.desks.all_launching().any(|(_, l)| l.account == id) {
+                if !self
+                    .desks
+                    .all_launching()
+                    .any(|(_, l)| l.start.account == id)
+                {
                     self.signing_out.remove(&id);
                 }
                 if self.quit == Quit::Stopping {
@@ -861,13 +865,13 @@ impl AppModel {
         keys.extend(
             self.desks
                 .all_running()
-                .filter(|(_, r)| r.account == id)
+                .filter(|(_, r)| r.start.account == id)
                 .map(|(k, _)| k.clone()),
         );
         keys.extend(
             self.desks
                 .all_launching()
-                .filter(|(_, l)| l.account == id)
+                .filter(|(_, l)| l.start.account == id)
                 .map(|(k, _)| k.clone()),
         );
         let mut sessions = Vec::new();

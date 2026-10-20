@@ -119,14 +119,18 @@ pub struct ResourceView {
     pub(super) icon: Option<Url>,
 }
 
-/// A FreeRDP session and the account it belongs to (sign-out ends it even
-/// if its desktop has left the list).
-pub(super) struct Running {
+/// What a FreeRDP start was asked for, kept while it starts and while it
+/// runs.
+// Independent facts about one start; a bitflag type would only hide them.
+#[allow(clippy::struct_excessive_bools)]
+pub(super) struct Start {
     /// Its connection attempt; events of other attempts are ignored.
     pub(super) attempt: u64,
+    /// Its account (sign-out ends it even if its desktop has left the
+    /// list).
     pub(super) account: String,
-    pub(super) session: launcher::Session,
-    /// Its window's title, to find the window (Show).
+    /// Its window's title, as FreeRDP got it (`launcher::safe_title`), to
+    /// find the window (Show).
     pub(super) title: String,
     /// Started with "Send shortcuts … to the desktop": its row says how
     /// to get them back.
@@ -137,22 +141,20 @@ pub(super) struct Running {
     pub(super) remote_app: bool,
 }
 
+/// A running FreeRDP session.
+pub(super) struct Running {
+    pub(super) start: Start,
+    pub(super) session: launcher::Session,
+}
+
 /// A FreeRDP start in progress.
-// Independent facts about one start; a bitflag type would only hide them.
-#[allow(clippy::struct_excessive_bools)]
 pub(super) struct Launching {
-    pub(super) attempt: u64,
+    pub(super) start: Start,
     /// How long it may take to connect (spec §8: every attempt ends).
     pub(super) deadline: std::time::Duration,
-    pub(super) account: String,
     /// Stop it as soon as it has started (disconnected or signed out
     /// meanwhile).
     pub(super) stop: bool,
-    /// Its window's title, as FreeRDP got it (`launcher::safe_title`).
-    pub(super) title: String,
-    pub(super) grabs_shortcuts: bool,
-    pub(super) keep_awake: bool,
-    pub(super) remote_app: bool,
 }
 
 /// What a sign-out couldn't remove, to try again (spec §6: report that

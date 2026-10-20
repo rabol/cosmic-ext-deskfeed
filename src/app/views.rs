@@ -272,7 +272,7 @@ impl AppModel {
                     if self
                         .desks
                         .running(&r.key)
-                        .is_some_and(|s| s.grabs_shortcuts)
+                        .is_some_and(|s| s.start.grabs_shortcuts)
                     {
                         fl!("status-connected-shortcuts")
                     } else {

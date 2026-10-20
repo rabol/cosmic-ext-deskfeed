@@ -93,7 +93,7 @@ impl AppModel {
         let ended = self
             .desks
             .running(key)
-            .map(|r| (r.attempt, r.remote_app, r.account.clone()));
+            .map(|r| (r.start.attempt, r.start.remote_app, r.start.account.clone()));
         // What belonged to this attempt goes (`Desk::end_attempt`).
         let crate::app::desk::EndedAttempt {
             used_saved_password: used_saved,
@@ -259,13 +259,17 @@ impl AppModel {
         let running = self
             .desks
             .all_running()
-            .filter(|(k, r)| r.remote_app && r.account == account && *k != key && !leaving(k))
-            .map(|(k, r)| (k.as_str(), r.attempt));
+            .filter(|(k, r)| {
+                r.start.remote_app && r.start.account == account && *k != key && !leaving(k)
+            })
+            .map(|(k, r)| (k.as_str(), r.start.attempt));
         let launching = self
             .desks
             .all_launching()
-            .filter(|(k, l)| l.remote_app && l.account == account && *k != key && !leaving(k))
-            .map(|(k, l)| (k.as_str(), l.attempt));
+            .filter(|(k, l)| {
+                l.start.remote_app && l.start.account == account && *k != key && !leaving(k)
+            })
+            .map(|(k, l)| (k.as_str(), l.start.attempt));
         decide::moved_to(end, was_connected, attempt, running.chain(launching)).map(str::to_owned)
     }
 

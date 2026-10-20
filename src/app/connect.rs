@@ -139,7 +139,7 @@ impl AppModel {
                     && self
                         .desks
                         .running(&key)
-                        .is_some_and(|r| r.attempt == attempt)
+                        .is_some_and(|r| r.start.attempt == attempt)
                 {
                     return self.session_event(&key, event);
                 }

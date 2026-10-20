@@ -119,14 +119,16 @@ impl AppModel {
         let deadline =
             std::time::Duration::from_secs(u64::from(settings.timeout_secs) + 2 * 180 + 60);
         self.desks.at(key).launching = Some(Launching {
-            attempt,
+            start: Start {
+                attempt,
+                account: account.to_owned(),
+                title: title.clone(),
+                grabs_shortcuts: settings.system_shortcuts,
+                keep_awake: settings.keep_awake,
+                remote_app,
+            },
             deadline,
-            account: account.to_owned(),
             stop: false,
-            title: title.clone(),
-            grabs_shortcuts: settings.system_shortcuts,
-            keep_awake: settings.keep_awake,
-            remote_app,
         });
         // Starting FreeRDP writes files and hands over the arguments: not on
         // the UI thread. Its events follow once it has started.
@@ -206,7 +208,10 @@ impl AppModel {
 
     /// The time to connect is up: end the attempt if it hasn't connected.
     pub(super) fn connect_deadline(&mut self, key: &str, attempt: u64) {
-        if let Some(r) = self.desks.running(key).filter(|r| r.attempt == attempt)
+        if let Some(r) = self
+            .desks
+            .running(key)
+            .filter(|r| r.start.attempt == attempt)
             && !matches!(self.desks.conn(key), Some(Connection::Connected))
         {
             crate::app_log!("connecting took too long; ending FreeRDP");
@@ -228,7 +233,7 @@ impl AppModel {
         if self
             .desks
             .launching(&key)
-            .is_none_or(|l| l.attempt != attempt)
+            .is_none_or(|l| l.start.attempt != attempt)
         {
             // Nobody expects it any more.
             if let Ok(session) = result {
@@ -237,15 +242,11 @@ impl AppModel {
             return Task::none();
         }
         let Launching {
-            title,
+            start,
             deadline,
-            account: owner,
             stop,
-            grabs_shortcuts,
-            keep_awake,
-            remote_app,
-            ..
         } = self.desks.at(&key).launching.take().expect("checked above");
+        let owner = start.account.clone();
         let current = self.account(account).is_some_and(|a| a.epoch == epoch);
         match result {
             Ok(session) if self.quit != Quit::Stopping && self.signing_out.contains(&owner) => {
@@ -269,15 +270,7 @@ impl AppModel {
                 } else if !wanted {
                     session.disconnect();
                 }
-                self.desks.at(&key).running = Some(Running {
-                    attempt,
-                    account: owner,
-                    session,
-                    title,
-                    grabs_shortcuts,
-                    keep_awake,
-                    remote_app,
-                });
+                self.desks.at(&key).running = Some(Running { start, session });
                 if wanted {
                     return cosmic::task::future(async move {
                         tokio::time::sleep(deadline).await;
@@ -307,7 +300,7 @@ impl AppModel {
     /// Brings a running session's window to the front (COSMIC switches to
     /// its workspace), in the background.
     pub(super) fn show_session(&self, key: &str) -> Task<cosmic::Action<Message>> {
-        let Some(title) = self.desks.running(key).map(|r| r.title.clone()) else {
+        let Some(title) = self.desks.running(key).map(|r| r.start.title.clone()) else {
             return Task::none();
         };
         cosmic::task::future(async move {
