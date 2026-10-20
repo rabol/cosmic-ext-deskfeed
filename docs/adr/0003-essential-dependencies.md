@@ -73,3 +73,14 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
     - `tray-icon` 0.26: 14 new crates, including GTK 3 and libappindicator, plus a GTK main loop;
     - our own code: about 470 lines plus tests, already working on COSMIC, including the token and the panel's tray going away.
   - Kept: our own code. Look again if `ksni` gains the activation token.
+- **`proptest` 1.12, test-only (2026-10-20):** the engine under `testkit::random_inputs` (ADR 0023), which now shrinks a failing input to the fewest and smallest edits that still fail.
+  - Options compared:
+
+    | | proptest 1.12 (`std` only) | arbtest 0.3 | quickcheck 1.1 |
+    |---|---|---|---|
+    | new crates | 5 | 2 | 3 |
+    | shrinking | automatic, on our own edit lists | only in a separate "minimize" run | through an `Arbitrary` trait per type |
+    | fixed seed for repeatable runs | yes | yes | no stable seed setting |
+
+    Our own engine had no shrinking: a failure showed the first mangled input, often kilobytes long.
+  - Chosen: proptest. The mangling rules, the pieces that upset parsers, the one-second limit and the `DESKFEED_RANDOM_*` variables stay as before; the callers didn't change.

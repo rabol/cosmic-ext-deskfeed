@@ -35,3 +35,7 @@ Once it was clear that nightly is needed only on the machine that runs the fuzze
 - First run, 5 minutes per target (nightly 2026-10-18, cargo-fuzz 0.13.2): `feed` 3.7 million inputs, 3 442 code edges found and still rising slowly; `rdpfile` 9.5 million inputs, 683 edges, flat after the first minute. No crash and no failed check.
 - Other parsers (the sign-in callback, tokens, FreeRDP's output) depend on more of the app and stay with the random-input tests.
 
+
+## Update (2026-10-20): proptest underneath
+
+`testkit::random_inputs` keeps its rules and its signature, but proptest now generates the inputs and shrinks a failing one (ADR 0003). `testkit` is no longer standard library only.

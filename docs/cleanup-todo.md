@@ -178,7 +178,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 - [ ] **Hand-written code where a mature crate fits** (owner, 2026-10-20: "keep minimal does not mean handcode everything"). Weigh each honestly — crate if it replaces real code or a tricky format and is widely used; record it in an ADR:
   - test HTTP fakes → `mockito` (decided; one small raw server stays for hostile cases);
   - test temp folders → `tempfile` (done 2026-10-20);
-  - `testkit::random_inputs` → `proptest` (shrinks failing inputs);
+  - `testkit::random_inputs` → `proptest` (shrinks failing inputs) (done 2026-10-20);
   - the tray's StatusNotifierItem/dbusmenu code (`tray.rs`, ~470 lines) → `ksni` (kept 2026-10-20: `ksni` lacks COSMIC's activation token, so the window couldn't take focus from the tray; `tray-icon` brings GTK 3);
   - local time via `localtime_r` (`views.rs`) → a time crate, if one is already in the tree (done 2026-10-20: `jiff`, which also replaced the log's hand-written calendar).
 - [ ] **Two tiny workspace crates** (`lines/`, `testkit/`): sharing code with the helper is a real need, but one crate is enough. Merge them into the common crate from §2, with the random-input tool behind a feature. Effort S, risk low.
