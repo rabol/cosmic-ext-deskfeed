@@ -47,6 +47,8 @@ mod launch;
 mod model;
 mod password;
 mod quit;
+#[cfg(test)]
+mod routing_check;
 mod session;
 mod settings_ui;
 mod views;
