@@ -210,6 +210,9 @@ add-account = Add account
 unnamed-account = Account
 loading-accounts = Loading saved accounts…
 sign-in-needed = Sign in to see this account's desktops.
+# On the page of an account that needs signing in again: removes the
+# account from Deskfeed (what "Sign out" does for a signed-in one).
+remove-account = Remove account
 
 # Settings
 account-settings = Account settings
