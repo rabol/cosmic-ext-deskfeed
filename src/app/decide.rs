@@ -79,6 +79,7 @@ pub(super) fn end_outcome(
                 | SessionEnd::AppRefused(_)
                 | SessionEnd::ProxyAuthRefused
                 | SessionEnd::WrongAccount
+                | SessionEnd::HostTimedOut
         )
     {
         return EndOutcome::Failed;
@@ -128,6 +129,7 @@ pub(super) fn reconnects(
     match end {
         SessionEnd::ConnectionLost => was_connected || reconnecting,
         SessionEnd::DnsFailed
+        | SessionEnd::HostTimedOut
         | SessionEnd::TlsFailed
         | SessionEnd::Failed { .. }
         | SessionEnd::Crashed => reconnecting,
@@ -426,6 +428,7 @@ mod tests {
         // While reconnecting, network-type failures are tried again ...
         for end in [
             SessionEnd::DnsFailed,
+            SessionEnd::HostTimedOut,
             SessionEnd::Failed { code: 147 },
             SessionEnd::Crashed,
             SessionEnd::ConnectionLost,
@@ -545,6 +548,35 @@ mod tests {
                 "{end:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_slow_host_is_not_a_failed_sign_in() {
+        // Seen 2026-10-20: the host didn't finish the logon within the
+        // time allowed. An error on the row, never "Entra sign-in failed"
+        // (that would offer a password logon), however often it happens.
+        let entra = Some(&LogonSetting::EntraSignIn);
+        for earlier in [0, 1, 5] {
+            assert_eq!(
+                end_outcome(&SessionEnd::HostTimedOut, false, entra, entra, earlier),
+                EndOutcome::Failed
+            );
+        }
+        // Not retried at once; during reconnecting it is, like the network.
+        assert!(!reconnects(
+            &SessionEnd::HostTimedOut,
+            false,
+            false,
+            entra,
+            false
+        ));
+        assert!(reconnects(
+            &SessionEnd::HostTimedOut,
+            false,
+            true,
+            entra,
+            false
+        ));
     }
 
     #[test]

@@ -39,6 +39,12 @@ pub(super) const PROXY_ANSWER_MARKER: &str = "[http_proxy_connect]: HTTP Proxy: 
 pub(super) const WRONG_ACCOUNT_MARKER: &str =
     "cosmic-ext-deskfeed-signin: signed in as a different account";
 
+/// The session host didn't finish the logon within `/timeout`
+/// (`connection.c`, `rdp_client_wait_for_activation`). FreeRDP then exits
+/// with its generic 131 (`XF_EXIT_CONN_FAILED`); seen 2026-10-20 on the
+/// owner's host right after the previous session closed.
+pub(super) const ACTIVATION_TIMEOUT_MARKER: &str = "ERRCONNECT_ACTIVATION_TIMEOUT";
+
 pub(super) const MAX_LOG_LINES: usize = 60;
 
 pub(super) const STATE_LOGGER: &str = "com.freerdp.core.rdp";
@@ -78,6 +84,9 @@ pub enum SessionEnd {
     /// `size - 1` on `winpr_asprintf`'s length, which has no NUL; still so
     /// on FreeRDP's master branch, 2026-10-19).
     ProxyAuthRefused,
+    /// The session host didn't finish the logon in time
+    /// (`ACTIVATION_TIMEOUT_MARKER`): the server's side, not the sign-in.
+    HostTimedOut,
     /// The user signed in to the desktop as a different account than the
     /// app's, and the sign-in helper refused it (review U1).
     WrongAccount,
@@ -207,6 +216,8 @@ pub(super) struct Log {
     pub(super) proxy_auth: bool,
     /// The sign-in helper refused another account (`WRONG_ACCOUNT_MARKER`).
     pub(super) wrong_account: bool,
+    /// The host didn't finish the logon in time (`ACTIVATION_TIMEOUT_MARKER`).
+    pub(super) activation_timeout: bool,
     /// The certificate FreeRDP is describing (`Certificate details for`).
     pub(super) certificate: Option<CertificateInfo>,
     /// A complete description (it has a well-formed thumbprint).
@@ -327,6 +338,9 @@ impl Log {
         }
         if line.starts_with(WRONG_ACCOUNT_MARKER) {
             self.wrong_account = true;
+        }
+        if line.contains(ACTIVATION_TIMEOUT_MARKER) {
+            self.activation_timeout = true;
         }
         self.read_certificate(line);
         if line.contains("[ERROR]") || line.contains("[WARN]") || is_state_change(line) {

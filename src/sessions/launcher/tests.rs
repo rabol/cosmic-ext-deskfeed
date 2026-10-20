@@ -669,6 +669,11 @@ fn reports_crash_and_failure_codes() {
              echo '[ERROR][x] - ERRCONNECT_LOGON_FAILURE [0x00020014]'; exit 131",
             SessionEnd::WrongAccount,
         ),
+        // The host didn't finish the logon in time (as on 2026-10-20).
+        (
+            "echo '[ERROR][com.freerdp.core] - [rdp_client_wait_for_activation]: ERRCONNECT_ACTIVATION_TIMEOUT [0x0002001C]'; exit 131",
+            SessionEnd::HostTimedOut,
+        ),
         ("exit 140", SessionEnd::DnsFailed),
     ] {
         let fake = dir.join("fake");

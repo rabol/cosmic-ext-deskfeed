@@ -107,6 +107,7 @@ status-reconnecting = Connection lost. Reconnecting, attempt { $attempt } of { $
 stop = Stop
 error-connection-lost = The connection was lost. Select Connect to connect again.
 status-moved = Its windows are in { $app }'s connection
+error-host-timed-out = The desktop didn't finish signing you in on its side in time. It may still be closing your previous session. Try again in a minute; if it keeps happening, allow more time in Settings → Time to wait for the desktop.
 error-wrong-account = You signed in to the desktop with a different account than this one, so Deskfeed stopped the connection. Connect again and pick the account shown in Deskfeed.
 error-proxy-password = The proxy needs a user name and password, and the remote desktop client (FreeRDP) can't send them correctly yet: a known FreeRDP bug. Signing in still works through the proxy; connecting to desktops doesn't, until FreeRDP is fixed.
 error-session-replaced = Another connection took over this session, so this one ended. Select Connect to take it back.

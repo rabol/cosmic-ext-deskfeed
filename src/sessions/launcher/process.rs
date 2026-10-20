@@ -343,6 +343,9 @@ pub(super) fn supervise(
             _ if log.wrong_account && !log.connected => SessionEnd::WrongAccount,
             _ if log.proxy_auth => SessionEnd::ProxyAuthRefused,
             _ if log.replaced && status.code().is_some() => SessionEnd::Replaced,
+            _ if log.activation_timeout && !log.connected && !log.logon_failure => {
+                SessionEnd::HostTimedOut
+            }
             _ => classify_exit(status.code(), log.logon_failure, log.connected && log.lost),
         };
         ended.store(true, std::sync::atomic::Ordering::SeqCst);
