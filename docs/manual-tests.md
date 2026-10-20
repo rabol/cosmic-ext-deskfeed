@@ -43,7 +43,7 @@ Install the current build first (`just install`, or the package).
 
 ### Lists
 
-10. **Search, favorites, last update.** Type part of a desktop's name in the search field, mark a desktop as a favorite (heart), and look at the "Updated …" line. *Expected:* the list narrows, the favorite shows at the top under Favorites, and the time is right.
+10. **Search, favorites, last update.** Type part of a desktop's name in the search field, mark a desktop as a favorite (the outline star), and look at the "Updated …" line. *Expected:* the list narrows, the favorite shows at the top under Favorites with a filled star, and the time is right. Select the filled star: it goes back to an outline and leaves Favorites.
 11. **Offline list.** Turn networking off and start Deskfeed. *Expected:* the last list shows, marked "Offline list from …", with Connect turned off.
 
 ### Only when available

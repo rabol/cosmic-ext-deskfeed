@@ -336,7 +336,15 @@ impl AppModel {
             _ => kind,
         };
         let favorite = self.config.favorites.contains(&r.key);
-        let favorite = widget::button::icon(widget::icon::from_name("emblem-favorite-symbolic"))
+        // A filled star for a favorite, an outline one otherwise: the
+        // owner found one icon for both states unclear (2026-10-20). Both
+        // come from COSMIC's icon theme through its Pop fallback.
+        let star = if favorite {
+            "starred-symbolic"
+        } else {
+            "non-starred-symbolic"
+        };
+        let favorite = widget::button::icon(widget::icon::from_name(star))
             .selected(favorite)
             .tooltip(if favorite {
                 fl!("favorite-remove")
