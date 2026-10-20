@@ -22,7 +22,7 @@ Install the current build first (`just install`, or the package).
 
 ### Background and tray (ADR 0017)
 
-3. **Connect from the tray with the window closed.** Turn on Settings → Background, close the window, use the tray menu's "Connect …". *Expected:* the desktop connects without the window opening. A password question or a failure opens the window. The connected desktop has a check mark, and the top of the menu says "1 connected".
+3. **Connect from the tray with the window closed.** Turn on Settings → Background, close the window, use the tray menu's "Connect …". *Expected:* Microsoft's sign-in window appears (your organization asks for a sign-in on every connection); sign in there. Deskfeed's own window stays closed, and the desktop connects. The tray menu then shows a check mark on that desktop and "1 connected" at the top. If the connection fails, Deskfeed's window opens and says why.
 4a. **Quit from the window.** With Settings → Background on, open the Account menu. *Expected:* Quit at the bottom, showing Ctrl+Q. With nothing connected, Quit (and Ctrl+Q) closes Deskfeed completely: no tray icon left. With a desktop connected, it asks first ("Disconnect and quit", "Keep running in the background", Cancel). Closing the window still only hides it.
 4. **Start when you log in.** Turn on Settings → Background → Start when you log in. Log out and back in. *Expected:* only the tray icon appears, no window.
 
@@ -30,9 +30,9 @@ Install the current build first (`just install`, or the package).
 
 5. **System shortcuts** (ADR 0018). In a connected desktop, press Super. *Expected:* Windows' Start menu opens. Press Right Ctrl, then Super. *Expected:* COSMIC's launcher opens.
 6. **Keep the screen on** (ADR 0019). Turn on Settings → Display → Keep the screen on in full screen. Use a desktop full screen and wait past your screen-off time. *Expected:* the screen stays on. With another window in front, it blanks as usual.
-7. **Reconnect after a lost connection** (ADR 0014). With a connected desktop, turn Wi-Fi off for about 30 seconds, then on. *Expected:* the row shows "Reconnecting (1 of 5)" and the desktop comes back by itself. Stop ends the attempts.
+7. **Reconnect after a lost connection** (ADR 0014). With a connected desktop, turn Wi-Fi off for about 30 seconds, then on. *Expected:* the row shows "Reconnecting (1 of 5)". Microsoft's sign-in window appears (your organization asks for a sign-in on every connection); sign in within 3 minutes (FreeRDP's limit per sign-in page). The desktop then comes back to the same Windows session. Selecting Stop instead ends the attempts.
 8. **Display scaling** (ADR 0015). On a monitor with scaling other than 100 %, connect a desktop. *Expected:* text in Windows is the same size as in COSMIC's apps.
-9. **Camera** (ADR 0013), on a desktop whose administrator allows cameras. Turn on the Camera setting, connect, open Windows' Camera app. *Expected:* the camera works. Unplug and plug it back in: note what happens.
+9. **Camera** (ADR 0013). Turn on the Camera setting for a desktop and connect. If the row says "Camera not shared: your organization doesn't allow cameras on this desktop" (or only specific cameras), this test doesn't apply to you: tell me, and I'll remove it. Otherwise open Windows' Camera app. *Expected:* the camera works. Unplug it and plug it back in, and note what happens (FreeRDP 3.32.2 doesn't notice a camera plugged in later, so it may be gone until you reconnect).
 
 ### Administrator policy (ADR 0021)
 
@@ -47,9 +47,8 @@ Install the current build first (`just install`, or the package).
 10. **Search, favorites, last update.** Type part of a desktop's name in the search field, mark a desktop as a favorite (the outline star), and look at the "Updated …" line. *Expected:* the list narrows, the favorite shows at the top under Favorites with a filled star, and the time is right. Select the filled star: it goes back to an outline and leaves Favorites.
 11. **Offline list.** Turn networking off and start Deskfeed. *Expected:* the last list shows, marked "Offline list from …", with Connect turned off.
 
-### Only when available
+### Longer runs
 
-12. **Remembered Windows password** (ADR 0009 addendum), on a desktop that asks for a Windows password. Tick "Remember this password", connect, disconnect, connect again. *Expected:* no password question the second time.
 14. **Stability** (spec §8, §13): a few hours of use with a desktop open, including idle time, changing audio devices, plugging in a monitor, and sleep.
 
 ## Done
