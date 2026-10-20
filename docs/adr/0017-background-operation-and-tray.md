@@ -61,4 +61,4 @@ Until now the item registered again when the panel's tray (the StatusNotifierWat
 
 ## Update (2026-10-20): ksni serves the tray
 
-`src/tray.rs` no longer implements StatusNotifierItem and dbusmenu itself: `ksni` does, pinned to a git revision until its 0.3.7 release (ADR 0003). Unchanged for the app: the menu it builds, the events it hears, COSMIC's activation token on clicks, and the 5-second grace before `Unavailable` when the panel's tray goes away. The tests now run in a child process on a private bus, since ksni uses only the session bus.
+`src/tray.rs` no longer implements StatusNotifierItem and dbusmenu itself: `ksni` does, pinned to a git revision until its 0.3.7 release (ADR 0003). Unchanged for the app: the menu it builds, the events it hears, COSMIC's activation token on clicks, and the 5-second grace before `Unavailable` when the panel's tray goes away. The tests now run in a child process on a private bus, since ksni uses only the session bus. Checked on the live COSMIC session on 2026-10-20: focus from the icon and from the menu, the check mark and Show for a connected desktop, and a panel restart.

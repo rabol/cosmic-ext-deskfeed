@@ -40,12 +40,6 @@ Install the current build first (`just install`, or the package).
    - *Expected:* Quit at the bottom, showing Ctrl+Q.
    - Quit, or Ctrl+Q, closes Deskfeed completely: no tray icon left.
 
-4b. **The tray after the switch to ksni** (the real panel and focus; ADR 0017 update). Turn on Settings → Background and close the window.
-   - Click the tray icon. Without touching the mouse, press Tab. *Expected:* the window opens, and Tab highlights one of its buttons (the keyboard goes to Deskfeed). Signed in or not.
-   - Close it, open the tray menu and select Show Deskfeed, then press Tab. *Expected:* the same.
-   - With a desktop connected: it shows a check mark in the menu, and selecting it brings it to the front.
-   - Restart the panel (`killall cosmic-panel`). *Expected:* the icon comes back within a few seconds, and the window does not pop up.
-
 4. **Start when you log in** (COSMIC's autostart). Turn on Settings → Background → Start when you log in. Log out and back in. *Expected:* only the tray icon appears, no window.
 
 ### Desktop sessions
@@ -91,6 +85,7 @@ Install the current build first (`just install`, or the package).
 
 ## Done
 
+- 2026-10-20: the tray on ksni (4b): a click on the icon and "Show Deskfeed" give the window the keyboard; a connected desktop has a check mark and comes to the front; after `killall cosmic-panel` the icon returns and the window stays closed.
 - 2026-10-20: clipboard works after the fix (`9cd5e5c`): text copied both ways.
 - 2026-10-20: sign in again after reinstalling: one Microsoft sign-in page, then the desktop list.
 - 2026-10-20: every desktop still connects after the stricter connection-file checks (ADR 0024).
