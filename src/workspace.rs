@@ -91,6 +91,37 @@ impl std::fmt::Display for MoveError {
     }
 }
 
+fn no_wayland(e: impl std::fmt::Display) -> MoveError {
+    MoveError::NoWayland(e.to_string())
+}
+
+/// Connects to the compositor and binds the window list, window
+/// management, workspaces, outputs and seats.
+fn connect() -> Result<(cctk::wayland_client::EventQueue<State>, State), MoveError> {
+    let conn = Connection::connect_to_env().map_err(no_wayland)?;
+    let (globals, queue) = registry_queue_init::<State>(&conn).map_err(no_wayland)?;
+    let qh = queue.handle();
+    let registry = RegistryState::new(&globals);
+    let info = ToplevelInfoState::try_new(&registry, &qh)
+        .ok_or(MoveError::Unsupported("toplevel info"))?;
+    let manager = ToplevelManagerState::try_new(&registry, &qh)
+        .ok_or(MoveError::Unsupported("toplevel management"))?;
+    let workspaces = WorkspaceState::new(&registry, &qh);
+    let outputs = OutputState::new(&globals, &qh);
+    let seats = SeatState::new(&globals, &qh);
+    let state = State {
+        registry,
+        outputs,
+        info,
+        manager,
+        workspaces,
+        seats,
+        can_move: false,
+        can_activate: false,
+    };
+    Ok((queue, state))
+}
+
 /// Whether the compositor offers what [`move_to_new_workspace`] needs:
 /// the window list, window management with `move_to_ext_workspace`
 /// (version 4), and workspaces. Only looks at the advertised globals.
@@ -123,36 +154,12 @@ pub fn move_to_new_workspace(
     wait: Duration,
     cancel: &Arc<AtomicBool>,
 ) -> Result<(), MoveError> {
-    let conn = Connection::connect_to_env().map_err(|e| MoveError::NoWayland(e.to_string()))?;
-    let (globals, mut queue) =
-        registry_queue_init::<State>(&conn).map_err(|e| MoveError::NoWayland(e.to_string()))?;
-    let qh = queue.handle();
-    let registry = RegistryState::new(&globals);
-    let info = ToplevelInfoState::try_new(&registry, &qh)
-        .ok_or(MoveError::Unsupported("toplevel info"))?;
-    let manager = ToplevelManagerState::try_new(&registry, &qh)
-        .ok_or(MoveError::Unsupported("toplevel management"))?;
-    if manager.manager.version() < 4 {
+    let (mut queue, mut state) = connect()?;
+    if state.manager.manager.version() < 4 {
         return Err(MoveError::Unsupported("move_to_ext_workspace (v4)"));
     }
-    let workspaces = WorkspaceState::new(&registry, &qh);
-    let outputs = OutputState::new(&globals, &qh);
-    let seats = SeatState::new(&globals, &qh);
-    let mut state = State {
-        registry,
-        outputs,
-        info,
-        manager,
-        workspaces,
-        seats,
-        can_move: false,
-        can_activate: false,
-    };
     let roundtrip = |queue: &mut cctk::wayland_client::EventQueue<State>, state: &mut State| {
-        queue
-            .roundtrip(state)
-            .map(|_| ())
-            .map_err(|e| MoveError::NoWayland(e.to_string()))
+        queue.roundtrip(state).map(|_| ()).map_err(no_wayland)
     };
     roundtrip(&mut queue, &mut state)?;
     roundtrip(&mut queue, &mut state)?;
@@ -231,50 +238,13 @@ pub fn move_to_new_workspace(
 
 /// Brings the window with `app_id` and `title` to the front (COSMIC
 /// switches to its workspace). Blocking; call from `spawn_blocking`.
+///
+/// Connects, finds the window, asks COSMIC to activate it, then waits up
+/// to a second for COSMIC to report it activated.
 pub fn focus(app_id: &str, title: &str) -> Result<(), MoveError> {
-    with_window(app_id, title, |state, toplevel, seat| {
-        state.manager.manager.activate(toplevel, seat);
-    })?;
-    Ok(())
-}
-
-/// Connects, finds the window, runs `act` on it, then waits up to a
-/// second for it to be activated.
-fn with_window(
-    app_id: &str,
-    title: &str,
-    act: impl FnOnce(
-        &mut State,
-        &cctk::cosmic_protocols::toplevel_info::v1::client::zcosmic_toplevel_handle_v1::ZcosmicToplevelHandleV1,
-        &wl_seat::WlSeat,
-    ),
-) -> Result<(), MoveError> {
-    let conn = Connection::connect_to_env().map_err(|e| MoveError::NoWayland(e.to_string()))?;
-    let (globals, mut queue) =
-        registry_queue_init::<State>(&conn).map_err(|e| MoveError::NoWayland(e.to_string()))?;
-    let qh = queue.handle();
-    let registry = RegistryState::new(&globals);
-    let info = ToplevelInfoState::try_new(&registry, &qh)
-        .ok_or(MoveError::Unsupported("toplevel info"))?;
-    let manager = ToplevelManagerState::try_new(&registry, &qh)
-        .ok_or(MoveError::Unsupported("toplevel management"))?;
-    let workspaces = WorkspaceState::new(&registry, &qh);
-    let outputs = OutputState::new(&globals, &qh);
-    let seats = SeatState::new(&globals, &qh);
-    let mut state = State {
-        registry,
-        outputs,
-        info,
-        manager,
-        workspaces,
-        seats,
-        can_move: false,
-        can_activate: false,
-    };
+    let (mut queue, mut state) = connect()?;
     for _ in 0..2 {
-        queue
-            .roundtrip(&mut state)
-            .map_err(|e| MoveError::NoWayland(e.to_string()))?;
+        queue.roundtrip(&mut state).map_err(no_wayland)?;
     }
     if !state.can_activate {
         return Err(MoveError::Unsupported("activate capability"));
@@ -308,17 +278,13 @@ fn with_window(
             return Err(MoveError::WindowNotFound);
         }
         std::thread::sleep(POLL);
-        queue
-            .roundtrip(&mut state)
-            .map_err(|e| MoveError::NoWayland(e.to_string()))?;
+        queue.roundtrip(&mut state).map_err(no_wayland)?;
     };
-    act(&mut state, &toplevel, &seat);
+    state.manager.manager.activate(&toplevel, &seat);
     // Confirm it: COSMIC reports the window as activated.
     let until = Instant::now() + Duration::from_secs(1);
     loop {
-        queue
-            .roundtrip(&mut state)
-            .map_err(|e| MoveError::NoWayland(e.to_string()))?;
+        queue.roundtrip(&mut state).map_err(no_wayland)?;
         let active = state.info.toplevels().any(|t| {
             t.app_id == app_id
                 && t.title == title
@@ -346,33 +312,10 @@ pub fn watch_fullscreen_focus(
     mut changed: impl FnMut(bool),
 ) -> Result<(), MoveError> {
     use zcosmic_toplevel_handle_v1::State as S;
-    let conn = Connection::connect_to_env().map_err(|e| MoveError::NoWayland(e.to_string()))?;
-    let (globals, mut queue) =
-        registry_queue_init::<State>(&conn).map_err(|e| MoveError::NoWayland(e.to_string()))?;
-    let qh = queue.handle();
-    let registry = RegistryState::new(&globals);
-    let info = ToplevelInfoState::try_new(&registry, &qh)
-        .ok_or(MoveError::Unsupported("toplevel info"))?;
-    let manager = ToplevelManagerState::try_new(&registry, &qh)
-        .ok_or(MoveError::Unsupported("toplevel management"))?;
-    let workspaces = WorkspaceState::new(&registry, &qh);
-    let outputs = OutputState::new(&globals, &qh);
-    let seats = SeatState::new(&globals, &qh);
-    let mut state = State {
-        registry,
-        outputs,
-        info,
-        manager,
-        workspaces,
-        seats,
-        can_move: false,
-        can_activate: false,
-    };
+    let (mut queue, mut state) = connect()?;
     let mut last = None;
     while wanted() {
-        queue
-            .roundtrip(&mut state)
-            .map_err(|e| MoveError::NoWayland(e.to_string()))?;
+        queue.roundtrip(&mut state).map_err(no_wayland)?;
         let now = state.info.toplevels().any(|t| {
             t.app_id == app_id
                 && titles.contains(&t.title)
@@ -567,25 +510,7 @@ mod tests {
     fn close_a_real_window() {
         use super::*;
         let app_id = std::env::var("MOVE_APP_ID").unwrap();
-        let conn = Connection::connect_to_env().unwrap();
-        let (globals, mut queue) = registry_queue_init::<State>(&conn).unwrap();
-        let qh = queue.handle();
-        let registry = RegistryState::new(&globals);
-        let info = ToplevelInfoState::try_new(&registry, &qh).unwrap();
-        let manager = ToplevelManagerState::try_new(&registry, &qh).unwrap();
-        let workspaces = WorkspaceState::new(&registry, &qh);
-        let outputs = OutputState::new(&globals, &qh);
-        let seats = SeatState::new(&globals, &qh);
-        let mut state = State {
-            registry,
-            outputs,
-            info,
-            manager,
-            workspaces,
-            seats,
-            can_move: false,
-            can_activate: false,
-        };
+        let (mut queue, mut state) = connect().unwrap();
         let until = Instant::now() + Duration::from_secs(3);
         let toplevel = loop {
             queue.roundtrip(&mut state).unwrap();
@@ -612,25 +537,7 @@ mod tests {
         use super::*;
         let app_id = std::env::var("WATCH_APP_ID").unwrap();
         let secs: u64 = std::env::var("WATCH_SECS").map_or(12, |s| s.parse().unwrap());
-        let conn = Connection::connect_to_env().unwrap();
-        let (globals, mut queue) = registry_queue_init::<State>(&conn).unwrap();
-        let qh = queue.handle();
-        let registry = RegistryState::new(&globals);
-        let info = ToplevelInfoState::try_new(&registry, &qh).unwrap();
-        let manager = ToplevelManagerState::try_new(&registry, &qh).unwrap();
-        let workspaces = WorkspaceState::new(&registry, &qh);
-        let outputs = OutputState::new(&globals, &qh);
-        let seats = SeatState::new(&globals, &qh);
-        let mut state = State {
-            registry,
-            outputs,
-            info,
-            manager,
-            workspaces,
-            seats,
-            can_move: false,
-            can_activate: false,
-        };
+        let (mut queue, mut state) = connect().unwrap();
         let start = Instant::now();
         let mut last = None;
         while start.elapsed() < Duration::from_secs(secs) {

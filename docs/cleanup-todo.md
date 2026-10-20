@@ -83,7 +83,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 
 ## 3. Duplication and needless pieces (cheap)
 
-- [ ] **Wayland setup copy-pasted 5 times** (`src/workspace.rs:128-152, 228-250, 327-347` and tests); `map_err(NoWayland)` about 10 times. *Simpler:* `fn connect()` + `From` for the error. Effort S, risk low.
+- [x] **Wayland setup copy-pasted 5 times** (Done 2026-10-20: `connect()`, `no_wayland`; `with_window` folded into `focus`) (`src/workspace.rs:128-152, 228-250, 327-347` and tests); `map_err(NoWayland)` about 10 times. *Simpler:* `fn connect()` + `From` for the error. Effort S, risk low.
 - [x] **`Running` and `Launching` share 6 fields** (Done 2026-10-20: both hold a `Start`) (`src/app/model.rs:124-160`). *Simpler:* `Running { start: Launching, session }`. Effort S, risk low.
 - [ ] **"Renew, try, renew again on 401" written twice** (`src/app/account_flow.rs:552-575`, `src/app/connect.rs:~236-255`). *Simpler:* one helper taking a closure. Effort M, risk med.
 - [ ] **About 24 `spawn_blocking` blocks with four different fallbacks** (`"task"`, `error-generic`, `Err(())`, `unwrap_or_default`). The §1 bug is one of them. *Simpler:* one helper with an explicit error. Effort S–M, risk low.
