@@ -37,6 +37,10 @@ Install the current build first (`just install`, or the package).
 
 15. **Clipboard** (fix 2026-10-20: it never switched on before). Install the new build. On a desktop, set Clipboard to "Both ways" (any level), connect, and copy text both ways. *Expected:* it works. Then set it to "Only to the desktop", reconnect: copying into the desktop works, copying out doesn't. If the clipboard is off although you set it on, the desktop's row says "Clipboard off: your organization doesn't allow it" when that's the reason.
 
+### Settings
+
+16. **"Changes apply the next time you connect".** Connect a desktop, then open that desktop's settings. *Expected:* below the page's explanation, a separate line says it's connected and changes apply the next time you connect it. Its account's settings and View → Settings say connected desktops keep their settings until you connect again. With nothing connected, neither note shows.
+
 ### Lists
 
 10. **Search, favorites, last update.** Type part of a desktop's name in the search field, mark a desktop as a favorite (heart), and look at the "Updated …" line. *Expected:* the list narrows, the favorite shows at the top under Favorites, and the time is right.

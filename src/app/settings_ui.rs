@@ -264,7 +264,7 @@ impl AppModel {
                     )),
             );
         settings_column(
-            fl!("app-settings-hint"),
+            open_note(fl!("app-settings-hint"), self.desks.open_count() > 0, false),
             Page::WithAccount,
             number,
             toggle,
@@ -299,7 +299,11 @@ impl AppModel {
         let id_number = id.to_owned();
         let id_choice = id.to_owned();
         rows.view(
-            fl!("account-settings-hint"),
+            open_note(
+                fl!("account-settings-hint"),
+                self.desks.open_count_for(id) > 0,
+                false,
+            ),
             Page::WithAccount,
             move |t, i| Message::AccountToggle(id_toggle.clone(), t, i),
             move |n, v| Message::AccountNumber(id_number.clone(), n, v),
@@ -369,15 +373,32 @@ impl AppModel {
                 fl!("desktop-settings-hint", account = account.label()),
             ),
         };
+        let open = self.desks.running(key).is_some() || self.desks.launching(key).is_some();
         rows.view_with(
             pin,
-            hint,
+            open_note(hint, open, true),
             page,
             move |t, i| Message::DesktopToggle(key_toggle.clone(), t, i),
             move |n, v| Message::DesktopNumber(key_number.clone(), n, v),
             move |c, i| Message::DesktopChoice(key_choice.clone(), c, i),
         )
     }
+}
+
+/// A page's hint, plus a note while desktops it applies to are open:
+/// settings reach FreeRDP only when a connection starts (its arguments
+/// and connection file), so an open session keeps the old ones (owner,
+/// 2026-10-20: the clipboard setting seemed not to work).
+fn open_note(hint: String, open: bool, this_desktop: bool) -> String {
+    if !open {
+        return hint;
+    }
+    let note = if this_desktop {
+        fl!("settings-apply-next-connect")
+    } else {
+        fl!("settings-apply-next-connect-open")
+    };
+    format!("{hint}\n\n{note}")
 }
 
 /// An account or desktop page: each setting follows the level above or

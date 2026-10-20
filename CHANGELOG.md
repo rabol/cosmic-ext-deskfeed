@@ -13,6 +13,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Added
 
+- Settings pages say when a desktop they apply to is connected: changes reach it the next time it connects.
 - The sign-in for a desktop now has your account filled in (ADR 0026, review U1).
 - A desktop that doesn't finish signing you in on its side in time now says so, instead of "failed with code 131", and this no longer leads to a password logon being offered.
 - RemoteApps (preview): apps from the feed connect and open as ordinary windows, grouped under Deskfeed in the dock, on every monitor. Settings that only fit a desktop (full screen, keyboard, workspace, keep the screen on) are left out for apps. When Windows won't start an app, the row says why. Checked against a Windows host, not yet with an AVD RemoteApp (ADR 0020).
