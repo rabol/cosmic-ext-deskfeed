@@ -19,6 +19,10 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Camera | off | A, Ac, C | `settings.rs` | Done |
 | Clipboard: off, both directions, only to the desktop, only to this computer | off | A, Ac, C | `settings.rs` `Choice::Clipboard` | Done |
 | Copy files through the clipboard (in the clipboard's direction) | off | A, Ac, C | `settings.rs` `Toggle::ClipboardFiles` | Done |
+| Window size when it opens (share of the monitor) | FreeRDP's 1024 × 768 | A, Ac, C | `settings.rs` `Choice::WindowSize` | Done (ADR 0029 follow-up); not for RemoteApps or full screen |
+| Color depth | 32-bit | A, Ac, C | `settings.rs` `Choice::ColorDepth` | Done (ADR 0029 follow-up) |
+| Network type | Automatic | A, Ac, C | `settings.rs` `Choice::Network` | Done (ADR 0029 follow-up) |
+| Span as one screen (with all monitors in full screen) | off | A, Ac, C | `settings.rs` `Toggle::SpanMonitors` | Done (ADR 0029 follow-up); not tested with two monitors |
 | Keep the screen on in full screen | off | A, Ac, C | `settings.rs` `Toggle::KeepAwake`, `awake.rs` | Done (ADR 0019) |
 | Send shortcuts like Super and Alt+Tab to the desktop | on (`+grab-keyboard`) | A, Ac, C | `settings.rs` `Toggle::SystemShortcuts` | Done (ADR 0018) |
 | Ctrl+Alt+Enter switches full screen | on (`+toggle-fullscreen`) | A, Ac, C | `settings.rs` `Toggle::FullscreenKey` | Done (ADR 0018 addendum) |

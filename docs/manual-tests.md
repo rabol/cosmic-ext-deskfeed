@@ -110,6 +110,10 @@ These need a real Windows machine and its certificate. Before them, in Windows (
    - Once connected it has a check mark and brings its window to the front.
    - Star it in the window: it appears under Favorites at the top of the Connections page, and first in its tray group.
 
+23. **Window size, color depth, network type** (a real desktop or the Windows machine). In a desktop's settings, set Window size to 70 % of the monitor, Color depth to 16-bit and Network type to Slow broadband, then connect.
+   - *Expected:* with COSMIC's tiling off (floating window), the window opens at about 70 % of the monitor; with tiling on, COSMIC sizes it. Colors look coarser (gradients show bands). It connects as before.
+   - Set them back to their first entries (or "Account setting") and connect: as before these settings existed.
+
 ### How things look
 
 16. **"Changes apply the next time you connect"**. Connect a desktop and open its settings.

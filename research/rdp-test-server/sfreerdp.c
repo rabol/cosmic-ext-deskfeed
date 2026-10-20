@@ -894,6 +894,18 @@ static BOOL tf_peer_activate(freerdp_peer* client)
 	 * (TS_UD_CS_CORE desktopScaleFactor). */
 	WLog_INFO(TAG, "DESKFEED-TEST client desktop scale %" PRIu32 " %%",
 	          freerdp_settings_get_uint32(settings, FreeRDP_DesktopScaleFactor));
+	/* Deskfeed test addition: the size, colour depth and connection type
+	 * the client asked for (TS_UD_CS_CORE desktopWidth/Height,
+	 * highColorDepth, connectionType), and whether it sent a monitor
+	 * layout (TS_UD_CS_MONITOR). */
+	WLog_INFO(TAG,
+	          "DESKFEED-TEST client asked for %" PRIu32 "x%" PRIu32 ", %" PRIu32
+	          " bpp, connection type %" PRIu32 ", %" PRIu32 " monitors",
+	          freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth),
+	          freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight),
+	          freerdp_settings_get_uint32(settings, FreeRDP_ColorDepth),
+	          freerdp_settings_get_uint32(settings, FreeRDP_ConnectionType),
+	          freerdp_settings_get_uint32(settings, FreeRDP_MonitorCount));
 
 	context->activated = TRUE;
 	// PACKET_COMPR_TYPE_8K;

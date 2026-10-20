@@ -155,6 +155,9 @@ settings! {
     toggles {
         Fullscreen fullscreen = false,
         AllMonitors all_monitors = false,
+        /// With all monitors in full screen: one wide screen (`+span`)
+        /// instead of one per monitor (ADR 0029, compared with Remmina).
+        SpanMonitors span_monitors = false,
         NewWorkspace new_workspace = false,
         Sound sound = true,
         Microphone microphone = false,
@@ -201,6 +204,19 @@ settings! {
         /// Which way copy and paste works: one of `clipboard::*`.
         Clipboard clipboard as "clipboard_mode" = clipboard::OFF,
             options [clipboard::OFF, clipboard::BOTH, clipboard::TO_DESKTOP, clipboard::TO_COMPUTER],
+        /// A desktop's window size when it opens, in percent of the monitor
+        /// (`/size:N%`, FreeRDP measures the monitor it opens on,
+        /// `client/X11/xf_monitor.c`); 0 keeps FreeRDP's 1024 × 768. The
+        /// desktop follows the window afterwards (`/dynamic-resolution`).
+        WindowSize window_size = 0, options [0, 50, 60, 70, 80, 90, 100],
+        /// Bits per pixel (`/bpp:`, the values FreeRDP 3.32.2 accepts);
+        /// 32 is FreeRDP's own default, and only 32 asks Windows for a
+        /// 32-bit session (`libfreerdp/core/gcc.c`).
+        ColorDepth color_depth = 32, options [32, 24, 16, 15, 8],
+        /// The connection type Windows adjusts to: one of `network::*`.
+        Network network = network::AUTO,
+            options [network::AUTO, network::LAN, network::WAN, network::BROADBAND_HIGH,
+                     network::BROADBAND_LOW, network::MODEM],
     }
 }
 
@@ -212,6 +228,31 @@ pub mod clipboard {
     pub const TO_DESKTOP: u32 = 2;
     /// From the desktop to this computer only.
     pub const TO_COMPUTER: u32 = 3;
+}
+
+/// `Choice::Network` values. Their names are FreeRDP's (`/network:`,
+/// `client/common/cmdline.c` `parse_network_options`); the bandwidths in
+/// the labels are MS-RDPBCGR's (`TS_UD_CS_CORE` `connectionType`).
+pub mod network {
+    /// FreeRDP measures it (its default: `CONNECTION_TYPE_AUTODETECT`).
+    pub const AUTO: u32 = 0;
+    pub const LAN: u32 = 1;
+    pub const WAN: u32 = 2;
+    pub const BROADBAND_HIGH: u32 = 3;
+    pub const BROADBAND_LOW: u32 = 4;
+    pub const MODEM: u32 = 5;
+
+    /// FreeRDP's name for a type other than `AUTO`.
+    pub fn freerdp_name(value: u32) -> Option<&'static str> {
+        Some(match value {
+            LAN => "lan",
+            WAN => "wan",
+            BROADBAND_HIGH => "broadband-high",
+            BROADBAND_LOW => "broadband-low",
+            MODEM => "modem",
+            _ => return None,
+        })
+    }
 }
 
 impl Choice {
@@ -313,15 +354,35 @@ impl Effective {
         if fullscreen {
             args.push("+f".to_owned());
         }
+        // A window's starting size; full screen and an app's windows take
+        // the monitors' size instead.
+        if !fullscreen && !remote_app && self.window_size > 0 {
+            args.push(format!("/size:{}%", self.window_size));
+        }
         // `/multimon` only takes effect in full screen, or for a RemoteApp.
+        // `+span` covers every monitor on its own, as one screen
+        // (`xf_monitor.c` checks `UseMultimon || SpanMonitors`), and then
+        // no per-monitor layout is sent (`gcc.c`).
+        let span = fullscreen && self.all_monitors && self.span_monitors && !remote_app;
         args.push(
-            if remote_app || (fullscreen && self.all_monitors) {
+            if remote_app || (fullscreen && self.all_monitors && !span) {
                 "/multimon"
             } else {
                 "-multimon"
             }
             .to_owned(),
         );
+        if span {
+            args.push("+span".to_owned());
+        }
+        // FreeRDP's defaults (32 bits, network detected) need no argument,
+        // so they stay exactly as without these settings.
+        if self.color_depth != 32 {
+            args.push(format!("/bpp:{}", self.color_depth));
+        }
+        if let Some(name) = network::freerdp_name(self.network) {
+            args.push(format!("/network:{name}"));
+        }
         if self.sound {
             args.extend(["/audio-mode:redirect".to_owned(), "/sound".to_owned()]);
         } else {
@@ -537,6 +598,52 @@ mod tests {
         assert!(a.contains(&"+f".into()) && a.contains(&"/multimon".into()));
     }
 
+    /// Expectations from FreeRDP 3.32.2's sources (`client/common/cmdline.c`,
+    /// `client/X11/xf_monitor.c`, `libfreerdp/core/gcc.c`), not the code.
+    #[test]
+    fn window_size_color_depth_network_and_span() {
+        let has = |a: &[String], x: &str| a.iter().any(|y| y == x);
+        let starts = |a: &[String], p: &str| a.iter().any(|y| y.starts_with(p));
+        // The defaults add nothing: FreeRDP's own 1024 × 768, 32 bits and
+        // detected network, as before these settings.
+        let d = DEFAULTS.freerdp_args();
+        for p in ["/size:", "/bpp:", "/network:", "+span"] {
+            assert!(!starts(&d, p), "{p} in {d:?}");
+        }
+        let mut e = DEFAULTS;
+        e.window_size = 80;
+        e.color_depth = 16;
+        e.network = network::WAN;
+        let a = e.freerdp_args();
+        assert!(has(&a, "/size:80%") && has(&a, "/bpp:16") && has(&a, "/network:wan"));
+        // Full screen and an app's windows have no window size; colour
+        // and network still apply to an app.
+        e.fullscreen = true;
+        assert!(!starts(&e.freerdp_args(), "/size:"));
+        e.fullscreen = false;
+        let app = e.freerdp_app_args();
+        assert!(!starts(&app, "/size:") && has(&app, "/bpp:16") && has(&app, "/network:wan"));
+        // Span: only with all monitors in full screen, instead of the
+        // per-monitor layout.
+        let mut e = DEFAULTS;
+        e.span_monitors = true;
+        e.all_monitors = true;
+        assert!(!has(&e.freerdp_args(), "+span"), "windowed");
+        e.fullscreen = true;
+        let a = e.freerdp_args();
+        assert!(has(&a, "+span") && has(&a, "-multimon") && !has(&a, "/multimon"));
+        e.all_monitors = false;
+        assert!(!has(&e.freerdp_args(), "+span"), "one monitor");
+        // An app's windows keep every monitor, never spanned.
+        e.all_monitors = true;
+        let app = e.freerdp_app_args();
+        assert!(has(&app, "/multimon") && !has(&app, "+span"));
+        // Every network type has FreeRDP's name; Automatic passes none.
+        for &v in Choice::Network.options() {
+            assert_eq!(network::freerdp_name(v).is_none(), v == network::AUTO);
+        }
+    }
+
     #[test]
     fn a_remote_app_gets_ordinary_windows_on_every_monitor() {
         let mut e = DEFAULTS;
@@ -613,7 +720,9 @@ mod tests {
 
     /// The keys a settings file holds, by setting. Changing one loses
     /// what users saved under the old key.
-    const SAVED_KEYS: [&str; 18] = [
+    // Extended 2026-10-20 with span_monitors, window_size, color_depth and
+    // network (ADR 0029, compared with Remmina); existing keys unchanged.
+    const SAVED_KEYS: [&str; 22] = [
         "timeout_secs",
         "fullscreen",
         "all_monitors",
@@ -632,6 +741,10 @@ mod tests {
         "reconnect",
         "reconnect_attempts",
         "scale",
+        "span_monitors",
+        "window_size",
+        "color_depth",
+        "network",
     ];
 
     /// Every key, read the way cosmic-config reads it, lands in its own
@@ -657,6 +770,10 @@ mod tests {
             reconnect: Some(true),
             reconnect_attempts: Some(3),
             scale: Some(175),
+            span_monitors: Some(true),
+            window_size: Some(80),
+            color_depth: Some(16),
+            network: Some(4),
         )";
         let s: ConnectionSettings = ron::from_str(saved).unwrap();
         let toggles = [
@@ -671,6 +788,7 @@ mod tests {
             (Toggle::KeepAwake, true),
             (Toggle::FullscreenKey, false),
             (Toggle::Reconnect, true),
+            (Toggle::SpanMonitors, true),
         ];
         for (t, on) in toggles {
             assert_eq!(s.toggle(t), Some(on), "{t:?}");
@@ -687,6 +805,9 @@ mod tests {
         }
         assert_eq!(s.choice(Choice::Clipboard), Some(clipboard::TO_DESKTOP));
         assert_eq!(s.choice(Choice::Scale), Some(175));
+        assert_eq!(s.choice(Choice::WindowSize), Some(80));
+        assert_eq!(s.choice(Choice::ColorDepth), Some(16));
+        assert_eq!(s.choice(Choice::Network), Some(network::BROADBAND_LOW));
         // Written: exactly the saved keys.
         let written = ron::to_string(&s).unwrap();
         let mut keys: Vec<&str> = written

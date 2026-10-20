@@ -1000,6 +1000,14 @@ fn windows_host_remote_app() {
 /// end as a lost connection within that time (stop the server);
 /// the window's tiling and the server's resize log
 /// are checked from outside.
+/// A number from the environment, or `default`.
+fn env_u32(name: &str, default: u32) -> u32 {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
 #[test]
 #[ignore = "needs xfreerdp3 and the local test server"]
 fn local_test_server_session() {
@@ -1028,6 +1036,14 @@ fn local_test_server_session() {
             fullscreen: std::env::var("DESKFEED_TEST_FULLSCREEN").is_ok_and(|v| v == "1"),
             // "Automatic", resolved as `app/connect.rs` does.
             scale: crate::display::resolve_percent(0),
+            // `DESKFEED_TEST_WINDOW_SIZE`, `_BPP`, `_NETWORK` (a
+            // `settings::network` value), `_SPAN=1` (with all monitors in
+            // full screen): the server logs what the client asked for.
+            window_size: env_u32("DESKFEED_TEST_WINDOW_SIZE", 0),
+            color_depth: env_u32("DESKFEED_TEST_BPP", 32),
+            network: env_u32("DESKFEED_TEST_NETWORK", 0),
+            all_monitors: std::env::var("DESKFEED_TEST_SPAN").is_ok_and(|v| v == "1"),
+            span_monitors: std::env::var("DESKFEED_TEST_SPAN").is_ok_and(|v| v == "1"),
             ..crate::settings::DEFAULTS
         },
         // `DESKFEED_TEST_TITLE`: another title, for two sessions at once.

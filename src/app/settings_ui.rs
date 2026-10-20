@@ -490,10 +490,12 @@ fn settings_column<'a>(
         .title(fl!("settings-connection"))
         .add(number(Number::Timeout))
         .add(toggle(Toggle::Reconnect))
-        .add(number(Number::ReconnectAttempts));
+        .add(number(Number::ReconnectAttempts))
+        .add(choice(Choice::Network));
     let display = widget::settings::section()
         .title(fl!("settings-display"))
-        .add(choice(Choice::Scale));
+        .add(choice(Choice::Scale))
+        .add(choice(Choice::ColorDepth));
     // An app's windows are ordinary windows on every monitor; full
     // screen, workspaces and the keyboard grab belong to a desktop's
     // window (`Effective::freerdp_app_args`).
@@ -501,7 +503,9 @@ fn settings_column<'a>(
     let display = if desktop {
         display
             .add(toggle(Toggle::Fullscreen))
+            .add(choice(Choice::WindowSize))
             .add(toggle(Toggle::AllMonitors))
+            .add(toggle(Toggle::SpanMonitors))
             .add(toggle(Toggle::NewWorkspace))
             .add(toggle(Toggle::KeepAwake))
     } else {
@@ -568,6 +572,9 @@ fn choice_text(c: Choice) -> (String, String) {
     match c {
         Choice::Scale => (fl!("setting-scale"), fl!("setting-scale-desc")),
         Choice::Clipboard => (fl!("setting-clipboard"), fl!("setting-clipboard-desc")),
+        Choice::WindowSize => (fl!("setting-window-size"), fl!("setting-window-size-desc")),
+        Choice::ColorDepth => (fl!("setting-color-depth"), fl!("setting-color-depth-desc")),
+        Choice::Network => (fl!("setting-network"), fl!("setting-network-desc")),
     }
 }
 
@@ -580,6 +587,15 @@ fn choice_label(c: Choice, value: u32) -> String {
         (Choice::Clipboard, settings::clipboard::TO_DESKTOP) => fl!("clipboard-to-desktop"),
         (Choice::Clipboard, settings::clipboard::TO_COMPUTER) => fl!("clipboard-to-computer"),
         (Choice::Clipboard, _) => fl!("off"),
+        (Choice::WindowSize, 0) => fl!("window-size-default"),
+        (Choice::WindowSize, v) => fl!("window-size-percent", value = v),
+        (Choice::ColorDepth, v) => fl!("color-depth-bits", value = v),
+        (Choice::Network, settings::network::LAN) => fl!("network-lan"),
+        (Choice::Network, settings::network::WAN) => fl!("network-wan"),
+        (Choice::Network, settings::network::BROADBAND_HIGH) => fl!("network-broadband-high"),
+        (Choice::Network, settings::network::BROADBAND_LOW) => fl!("network-broadband-low"),
+        (Choice::Network, settings::network::MODEM) => fl!("network-modem"),
+        (Choice::Network, _) => fl!("network-auto"),
     }
 }
 
@@ -615,6 +631,7 @@ pub(super) fn toggle_text(t: Toggle) -> (String, String) {
             fl!("setting-all-monitors"),
             fl!("setting-all-monitors-desc"),
         ),
+        Toggle::SpanMonitors => (fl!("setting-span"), fl!("setting-span-desc")),
         Toggle::NewWorkspace => (
             fl!("setting-new-workspace"),
             fl!("setting-new-workspace-desc"),

@@ -10,7 +10,7 @@ Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md)
 
 ## Next
 
-- **Plain RDP connections, after the first version** ([ADR 0029](adr/0029-plain-rdp-connections.md#compared-with-remmina-follow-up-steps)): connection settings for window size, color depth, network type and spanning monitors. Waiting on the owner: shared folder, smartcard logon, restricted admin mode. Later decisions: RD Gateway, importing `.rdp` files.
+- **Plain RDP connections, after the first version** ([ADR 0029](adr/0029-plain-rdp-connections.md#compared-with-remmina-follow-up-steps)): waiting on the owner for shared folder, smartcard logon and restricted admin mode. Later decisions: RD Gateway, importing `.rdp` files.
 
 ## Open questions
 

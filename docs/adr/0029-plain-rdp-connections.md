@@ -86,14 +86,14 @@ A Windows machine or VM the owner sets up. In Windows: Settings → System → R
 
 The owner compared the form with Remmina's RDP profile (2026-10-20). The first version has Server, User name, Password and Domain. The rest of Remmina's fields, with what FreeRDP 3.32.2 offers for each and what Deskfeed would do. None of this is built; each line is its own step.
 
-**Connection settings** (on the settings levels, so for AVD desktops too, not only for saved connections):
+**Connection settings** (on the settings levels, so for AVD desktops too, not only for saved connections). Built 2026-10-20: window size, color depth, network type and span; each default passes no argument, so FreeRDP behaves as before. Checked against FreeRDP 3.32.2 with the local test server ([compatibility](../compatibility.md)); `/multimon:force` left out, see below.
 
 | Remmina | FreeRDP | Plan |
 |---|---|---|
-| Resolution (initial window size, client resolution, custom) | `/size:WxH`, `/dynamic-resolution` | A "window size" choice next to full screen. |
+| Resolution (initial window size, client resolution, custom) | `/size:N%`, `/dynamic-resolution` | A "window size" choice next to full screen: FreeRDP's 1024 × 768 or a share of the monitor; the desktop already follows the window (`/dynamic-resolution`). No custom size: with tiling on, COSMIC sizes the window anyway. |
 | Color depth | `/bpp:` | A choice; the default stays FreeRDP's. |
 | Network connection type | `/network:` (`modem` … `lan`, `auto`) | A choice, default `auto`. |
-| Span, force multi monitor | `/span`, `/multimon:force` | Options of the existing "all monitors" setting. |
+| Span, force multi monitor | `+span`, `/multimon:force` | Span: a toggle under "all monitors" (one wide screen instead of one per monitor). Force: left out. It only sends the monitor layout to a server that didn't announce support for it, and FreeRDP itself warns it "may break connectivity" (`libfreerdp/core/gcc.c`). |
 | List monitor IDs | `/list:monitor`, `/monitors:` | Already on the roadmap: choosing specific monitors (needs a second monitor to test). |
 | Keyboard mapping | `/kbd:` | Only if the automatic layout turns out wrong for someone; FreeRDP takes it from the system. |
 

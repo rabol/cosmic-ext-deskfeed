@@ -13,6 +13,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Added
 
+- New connection settings, for desktops and saved connections alike: window size when it opens (a share of the monitor), color depth, network type, and "Span as one screen" with all monitors in full screen. Their defaults keep FreeRDP's behaviour as before.
 - Plain RDP connections: **Add connection** saves a Windows machine by host name (server, user name, optional domain and password), listed under **Connections** in the sidebar and in the tray. It connects directly with NLA (no gateway), asks for the password or uses the remembered one, and asks before trusting an unknown certificate. Settings follow the app's, per connection. Removing one deletes its password, certificate, settings and favorite, asking first while it's connected. No RD Gateway or `.rdp` import yet (ADR 0029).
 - Quit in the Account menu, and Ctrl+Q: quits Deskfeed even when closing the window keeps it running in the background (asking first while desktops are connected).
 - Settings pages say when a desktop they apply to is connected: changes reach it the next time it connects.

@@ -368,3 +368,22 @@ remove-connection-title = Remove { $connection }?
 remove-connection-body = This connection is open. Removing it disconnects it.
 certificate-untrusted-body-direct = The certificate of "{ $title }" couldn't be verified. Windows PCs often make their own certificate, so this is common the first time. Only trust it if you expect this machine to answer; to be sure, compare the fingerprint with the one the machine shows.
 certificate-changed-body-direct = "{ $title }" now shows a different certificate than the one you approved. This can mean someone is intercepting the connection, or that the machine was reinstalled. If you didn't expect a change, don't connect. To approve the new one, first remove the approved certificate in the connection's settings.
+
+## Display and network settings (ADR 0029, compared with Remmina)
+setting-window-size = Window size
+setting-window-size-desc = How large a desktop's window opens, as a share of the monitor; the desktop follows when the window is resized. With tiling on, COSMIC sizes the window instead. Not used in full screen.
+window-size-default = 1024 × 768
+window-size-percent = { $value } % of the monitor
+setting-color-depth = Color depth
+setting-color-depth-desc = Fewer colors need less bandwidth on a slow connection. 32-bit is full color.
+color-depth-bits = { $value }-bit
+setting-span = Span as one screen
+setting-span-desc = With "Use all monitors" in full screen: Windows sees one wide screen instead of one per monitor. For older Windows versions or apps that don't handle several monitors.
+setting-network = Network type
+setting-network-desc = Windows adjusts image quality and effects to the connection. Automatic measures it.
+network-auto = Automatic
+network-lan = LAN (10 Mbit/s or more)
+network-wan = WAN (10 Mbit/s or more, high latency)
+network-broadband-high = Broadband (2–10 Mbit/s)
+network-broadband-low = Slow broadband (256 kbit/s–2 Mbit/s)
+network-modem = Modem (56 kbit/s)
