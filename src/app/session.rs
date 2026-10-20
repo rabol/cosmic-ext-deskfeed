@@ -54,13 +54,15 @@ impl AppModel {
                     let ticket = crate::accounts::password_ticket(&id, &key);
                     save_task = cosmic::task::future(async move {
                         let owner = key.clone();
-                        let result = tokio::task::spawn_blocking(move || {
-                            crate::accounts::save_password(
-                                &identity, &owner, &title, &password, ticket,
-                            )
-                        })
-                        .await
-                        .unwrap_or_else(|_| Err("task".into()));
+                        let result = off_ui(
+                            move || {
+                                crate::accounts::save_password(
+                                    &identity, &owner, &title, &password, ticket,
+                                )
+                            },
+                            Err("task".into()),
+                        )
+                        .await;
                         Message::PasswordSaved(key, id, ticket, result)
                     });
                 }

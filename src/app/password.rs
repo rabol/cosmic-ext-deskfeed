@@ -59,11 +59,11 @@ impl AppModel {
         let account = account.to_owned();
         cosmic::task::future(async move {
             let owner = key.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                crate::secrets::load_password(&identity, &owner).map_err(|e| e.to_string())
-            })
-            .await
-            .unwrap_or_else(|_| Err("task".into()));
+            let result = off_ui(
+                move || crate::secrets::load_password(&identity, &owner).map_err(|e| e.to_string()),
+                Err("task".into()),
+            )
+            .await;
             Message::SavedPasswordLoaded(account, epoch, key, logon, connection, result)
         })
     }
@@ -136,14 +136,12 @@ impl AppModel {
         let forget = crate::accounts::note_forget(&id, key);
         let key = key.to_owned();
         Task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                crate::accounts::forget_password(&identity, &key, forget)
-            })
+            let deleted = off_ui(
+                move || crate::accounts::forget_password(&identity, &key, forget).is_ok(),
+                false,
+            )
             .await;
-            crate::app_log!(
-                "remembered password deleted: {:?}",
-                result.map(|r| r.is_ok())
-            );
+            crate::app_log!("remembered password deleted: {deleted}");
         })
         .discard()
     }

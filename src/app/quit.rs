@@ -68,10 +68,13 @@ impl AppModel {
             crate::app_log!("quitting: ending {} session(s)", sessions.len());
         }
         cosmic::task::future(async move {
-            let _ = tokio::task::spawn_blocking(move || {
-                launcher::stop_all(&sessions, launcher::STOP_GRACE);
-                launcher::clean_stale_runtime_dirs();
-            })
+            off_ui(
+                move || {
+                    launcher::stop_all(&sessions, launcher::STOP_GRACE);
+                    launcher::clean_stale_runtime_dirs();
+                },
+                (),
+            )
             .await;
             Message::ReadyToQuit
         })

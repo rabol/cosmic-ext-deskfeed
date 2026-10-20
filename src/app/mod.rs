@@ -248,9 +248,7 @@ impl cosmic::Application for AppModel {
         app.rebuild_nav(&Page::Add);
         let title = app.update_title();
         let load = cosmic::task::future(async {
-            let result = tokio::task::spawn_blocking(accounts::load_saved)
-                .await
-                .unwrap_or_else(|_| Err(fl!("error-generic")));
+            let result = off_ui(accounts::load_saved, Err(fl!("error-generic"))).await;
             Message::SavedLoaded(result)
         });
         let deps = app.check_dependencies();
@@ -713,9 +711,11 @@ impl AppModel {
                 self.diagnostics_status = None;
                 let inputs = self.diagnostics_inputs();
                 return cosmic::task::future(async move {
-                    let text = tokio::task::spawn_blocking(move || diagnostics::build(&inputs))
-                        .await
-                        .unwrap_or_default();
+                    let text = off_ui(
+                        move || diagnostics::build(&inputs),
+                        "The report couldn't be built; see the log.".to_owned(),
+                    )
+                    .await;
                     Message::DiagnosticsReady(text)
                 });
             }
@@ -731,13 +731,17 @@ impl AppModel {
                         .file_name("deskfeed-diagnostics.txt".to_owned());
                     let result = match dialog.save_file().await {
                         Ok(response) => match response.url().and_then(|u| u.to_file_path().ok()) {
-                            Some(path) => tokio::task::spawn_blocking(move || {
-                                diagnostics::save(&path, &text)
-                                    .map(|()| path.display().to_string())
-                                    .map_err(|e| Some(e.kind().to_string()))
-                            })
-                            .await
-                            .unwrap_or_else(|_| Err(Some("task".into()))),
+                            Some(path) => {
+                                off_ui(
+                                    move || {
+                                        diagnostics::save(&path, &text)
+                                            .map(|()| path.display().to_string())
+                                            .map_err(|e| Some(e.kind().to_string()))
+                                    },
+                                    Err(Some("task".into())),
+                                )
+                                .await
+                            }
                             None => Err(Some("no file chosen".into())),
                         },
                         Err(cosmic::dialog::file_chooser::Error::Cancelled) => Err(None),
@@ -886,15 +890,23 @@ impl AppModel {
         cosmic::task::future(async move {
             // A check that crashed reports every dependency as unusable,
             // never an empty (all-clear) list.
-            let checks = tokio::task::spawn_blocking(deps::check_all)
-                .await
-                .unwrap_or_else(|e| {
-                    crate::app_log!("dependency check failed: {e}");
-                    deps::not_checked(&fl!("deps-check-failed"))
-                });
+            let checks = off_ui(
+                deps::check_all,
+                deps::not_checked(&fl!("deps-check-failed")),
+            )
+            .await;
             Message::DependenciesChecked(checks)
         })
     }
+}
+
+/// Runs blocking work off the UI thread. If it panics, the panic is logged
+/// and `crashed` is returned: a crash never passes for a normal result.
+async fn off_ui<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static, crashed: T) -> T {
+    tokio::task::spawn_blocking(work).await.unwrap_or_else(|e| {
+        crate::app_log!("bug: background work failed: {e}");
+        crashed
+    })
 }
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
@@ -948,5 +960,16 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::OpenLogFolder => Message::OpenLogFolder,
             MenuAction::Quit => Message::QuitChosen,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn crashed_work_gives_the_fallback_not_a_normal_result() {
+        assert_eq!(super::off_ui(|| 3, 7).await, 3);
+        let crashed: Result<Vec<u8>, String> =
+            super::off_ui(|| panic!("simulated crash"), Err("crashed".into())).await;
+        assert_eq!(crashed, Err("crashed".to_owned()));
     }
 }

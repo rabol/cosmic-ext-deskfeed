@@ -136,26 +136,28 @@ impl AppModel {
         let started = {
             let (account, key) = (account.to_owned(), key.to_owned());
             cosmic::task::future(async move {
-                let result = tokio::task::spawn_blocking(move || {
-                    let mut spec = spec;
-                    spec.settings.scale = crate::display::resolve_percent(spec.settings.scale);
-                    launcher::launch(&spec, move |e| {
-                        let _ = tx.unbounded_send(e);
-                    })
-                    .map_err(|e| match e {
-                        launcher::LaunchError::FreeRdpMissing => fl!("error-freerdp-missing"),
-                        launcher::LaunchError::UnsupportedProxy(scheme) => {
-                            fl!("error-proxy-unsupported", scheme = scheme)
-                        }
-                        launcher::LaunchError::BadPassword => fl!("error-password-chars"),
-                        other => {
-                            crate::app_log!("FreeRDP didn't start: {other:?}");
-                            fl!("error-launch")
-                        }
-                    })
-                })
-                .await
-                .unwrap_or_else(|_| Err(fl!("error-generic")));
+                let result = off_ui(
+                    move || {
+                        let mut spec = spec;
+                        spec.settings.scale = crate::display::resolve_percent(spec.settings.scale);
+                        launcher::launch(&spec, move |e| {
+                            let _ = tx.unbounded_send(e);
+                        })
+                        .map_err(|e| match e {
+                            launcher::LaunchError::FreeRdpMissing => fl!("error-freerdp-missing"),
+                            launcher::LaunchError::UnsupportedProxy(scheme) => {
+                                fl!("error-proxy-unsupported", scheme = scheme)
+                            }
+                            launcher::LaunchError::BadPassword => fl!("error-password-chars"),
+                            other => {
+                                crate::app_log!("FreeRDP didn't start: {other:?}");
+                                fl!("error-launch")
+                            }
+                        })
+                    },
+                    Err(fl!("error-generic")),
+                )
+                .await;
                 Message::Launched(account, epoch, key, attempt, result)
             })
         };
@@ -188,20 +190,19 @@ impl AppModel {
         let key = key.to_owned();
         let mine = stop.clone();
         cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                crate::workspace::move_to_new_workspace(
-                    <AppModel as cosmic::Application>::APP_ID,
-                    &title,
-                    wait,
-                    &stop,
-                )
-            })
+            let result = off_ui(
+                move || {
+                    crate::workspace::move_to_new_workspace(
+                        <AppModel as cosmic::Application>::APP_ID,
+                        &title,
+                        wait,
+                        &stop,
+                    )
+                    .map_err(|e| e.to_string())
+                },
+                Err("task".to_owned()),
+            )
             .await;
-            let result = match result {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => Err(e.to_string()),
-                Err(_) => Err("task".to_owned()),
-            };
             Message::WorkspaceMoved(key, mine, result)
         })
     }
@@ -254,12 +255,14 @@ impl AppModel {
                 // files once more in case its sign-in helper wrote any.
                 return cosmic::task::future(async move {
                     let id = owner.clone();
-                    let result = tokio::task::spawn_blocking(move || {
-                        launcher::stop_all(&[session], launcher::STOP_GRACE);
-                        accounts::remove_files(&owner)
-                    })
-                    .await
-                    .unwrap_or(Err(()));
+                    let result = off_ui(
+                        move || {
+                            launcher::stop_all(&[session], launcher::STOP_GRACE);
+                            accounts::remove_files(&owner)
+                        },
+                        Err(()),
+                    )
+                    .await;
                     Message::SignOutFilesRemoved(id, result)
                 });
             }
@@ -304,12 +307,14 @@ impl AppModel {
             return Task::none();
         };
         cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                crate::workspace::focus(<Self as cosmic::Application>::APP_ID, &title)
-                    .map_err(|e| e.to_string())
-            })
-            .await
-            .unwrap_or_else(|_| Err("task".into()));
+            let result = off_ui(
+                move || {
+                    crate::workspace::focus(<Self as cosmic::Application>::APP_ID, &title)
+                        .map_err(|e| e.to_string())
+                },
+                Err("task".into()),
+            )
+            .await;
             Message::SessionShown(result)
         })
     }

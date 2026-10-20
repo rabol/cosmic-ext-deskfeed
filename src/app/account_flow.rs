@@ -55,10 +55,11 @@ impl AppModel {
                 let (signed_in, sign_in) = (signed_in.clone(), a.sign_in);
                 let started = accounts::sign_out_count(&id);
                 return cosmic::task::future(async move {
-                    let result =
-                        tokio::task::spawn_blocking(move || accounts::save(&signed_in, started))
-                            .await
-                            .unwrap_or_else(|_| Err(fl!("error-generic")));
+                    let result = off_ui(
+                        move || accounts::save(&signed_in, started),
+                        Err(fl!("error-generic")),
+                    )
+                    .await;
                     Message::Saved(id, sign_in, result)
                 });
             }
@@ -172,7 +173,7 @@ impl AppModel {
         if let (Some(store), Some(known)) = (self.cache.clone(), known) {
             tasks.push(
                 Task::future(async move {
-                    let _ = tokio::task::spawn_blocking(move || store.remove_others(&known)).await;
+                    off_ui(move || store.remove_others(&known), ()).await;
                 })
                 .discard(),
             );
@@ -191,10 +192,7 @@ impl AppModel {
         let id = id.to_owned();
         cosmic::task::future(async move {
             let owner = id.clone();
-            let cached = tokio::task::spawn_blocking(move || store.load(&owner, keep))
-                .await
-                .ok()
-                .flatten();
+            let cached = off_ui(move || store.load(&owner, keep), None).await;
             Message::CacheLoaded(id, epoch, cached)
         })
     }
@@ -223,11 +221,12 @@ impl AppModel {
         // Read now: a sign-out before the save runs stops it.
         let started = accounts::sign_out_count(&id);
         Task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                accounts::save_cache(&store, &id, &list, started)
-            })
+            let result = off_ui(
+                move || accounts::save_cache(&store, &id, &list, started),
+                Ok(()),
+            )
             .await;
-            if let Ok(Err(e)) = result {
+            if let Err(e) = result {
                 crate::app_log!("offline desktop list not saved: {e}");
             }
         })
@@ -252,10 +251,11 @@ impl AppModel {
         // Read now: a sign-out before the restore runs stops it.
         let started = accounts::sign_out_count(&id);
         cosmic::task::future(async move {
-            let outcome =
-                tokio::task::spawn_blocking(move || accounts::restore(&http, &stored, started))
-                    .await
-                    .unwrap_or_else(|_| Restore::Retry(fl!("error-generic")));
+            let outcome = off_ui(
+                move || accounts::restore(&http, &stored, started),
+                Restore::Retry(fl!("error-generic")),
+            )
+            .await;
             Message::Restored(id, generation, outcome)
         })
     }
@@ -362,19 +362,21 @@ impl AppModel {
         );
         cosmic::task::future(async move {
             let used = profile.clone();
-            let result = tokio::task::spawn_blocking(move || {
-                signin::sign_in(
-                    &http,
-                    &ClientConfig::public_remote_desktop(),
-                    &helper,
-                    &profile,
-                    login_hint.as_deref(),
-                    time,
-                    &cancel,
-                )
-            })
-            .await
-            .unwrap_or(Err(SignInError::HelperFailed(signin::HelperProblem::Task)));
+            let result = off_ui(
+                move || {
+                    signin::sign_in(
+                        &http,
+                        &ClientConfig::public_remote_desktop(),
+                        &helper,
+                        &profile,
+                        login_hint.as_deref(),
+                        time,
+                        &cancel,
+                    )
+                },
+                Err(SignInError::HelperFailed(signin::HelperProblem::Task)),
+            )
+            .await;
             Message::SignInFinished(
                 origin,
                 generation,
@@ -466,9 +468,11 @@ impl AppModel {
         accounts::signed_in(&signed_in, started);
         let save_id = id.clone();
         let save = cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || accounts::save(&signed_in, started))
-                .await
-                .unwrap_or_else(|_| Err(fl!("error-generic")));
+            let result = off_ui(
+                move || accounts::save(&signed_in, started),
+                Err(fl!("error-generic")),
+            )
+            .await;
             Message::Saved(save_id, generation, result)
         });
         Task::batch([save, self.load_resources(&id)])
@@ -512,35 +516,40 @@ impl AppModel {
         let started = accounts::sign_out_count(&id);
         let owner = id.clone();
         cosmic::task::future(async move {
-            let result = tokio::task::spawn_blocking(move || {
-                // No more requests once the account signed out.
-                let wanted = || accounts::sign_out_count(&owner) == started;
-                // An expired access token would only get "session expired".
-                let signed_in = accounts::renew_if_needed(&http, signed_in, started)?;
-                let (feeds, signed_in) =
-                    match discovery::discover(&http, &signed_in.tokens.access_token, &wanted) {
-                        // Refused although it looked valid: renew once and retry.
-                        Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
-                            crate::app_log!("desktop list: access token refused; renewing");
-                            let renewed = accounts::renew_now(&http, signed_in, started)?;
-                            let feeds =
-                                discovery::discover(&http, &renewed.tokens.access_token, &wanted)
-                                    .map_err(refused_or_shown)?;
-                            (feeds, renewed)
-                        }
-                        other => (
-                            other.map_err(|e| StepError::Show(describe_fetch_error(&e)))?,
-                            signed_in,
-                        ),
-                    };
-                let list = feeds
-                    .into_iter()
-                    .map(|f| workspace_view(&signed_in, f))
-                    .collect();
-                Ok((list, signed_in))
-            })
-            .await
-            .unwrap_or_else(|_| Err(StepError::Show(fl!("error-generic"))));
+            let result = off_ui(
+                move || {
+                    // No more requests once the account signed out.
+                    let wanted = || accounts::sign_out_count(&owner) == started;
+                    // An expired access token would only get "session expired".
+                    let signed_in = accounts::renew_if_needed(&http, signed_in, started)?;
+                    let (feeds, signed_in) =
+                        match discovery::discover(&http, &signed_in.tokens.access_token, &wanted) {
+                            // Refused although it looked valid: renew once and retry.
+                            Err(FetchError::Http(HttpError::Status { status: 401, .. })) => {
+                                crate::app_log!("desktop list: access token refused; renewing");
+                                let renewed = accounts::renew_now(&http, signed_in, started)?;
+                                let feeds = discovery::discover(
+                                    &http,
+                                    &renewed.tokens.access_token,
+                                    &wanted,
+                                )
+                                .map_err(refused_or_shown)?;
+                                (feeds, renewed)
+                            }
+                            other => (
+                                other.map_err(|e| StepError::Show(describe_fetch_error(&e)))?,
+                                signed_in,
+                            ),
+                        };
+                    let list = feeds
+                        .into_iter()
+                        .map(|f| workspace_view(&signed_in, f))
+                        .collect();
+                    Ok((list, signed_in))
+                },
+                Err(StepError::Show(fl!("error-generic"))),
+            )
+            .await;
             Message::Discovered(id, epoch, generation, result)
         })
     }
@@ -651,31 +660,33 @@ impl AppModel {
         let started = accounts::sign_out_count(&id);
         let owner = id.clone();
         cosmic::task::future(async move {
-            let icons = tokio::task::spawn_blocking(move || {
-                let mut icons = Vec::new();
-                let mut refused = 0;
-                for url in missing {
-                    // No more requests once the account signed out.
-                    if accounts::sign_out_count(&owner) != started {
-                        break;
+            let icons = off_ui(
+                move || {
+                    let mut icons = Vec::new();
+                    let mut refused = 0;
+                    for url in missing {
+                        // No more requests once the account signed out.
+                        if accounts::sign_out_count(&owner) != started {
+                            break;
+                        }
+                        let fetched = http
+                            .get(&url, Role::Icon, Some(&signed_in.tokens.access_token))
+                            .ok()
+                            .filter(|resp| icons::check_png(&resp.body).is_ok());
+                        match fetched {
+                            Some(resp) => icons.push((url, resp.body)),
+                            None => refused += 1,
+                        }
                     }
-                    let fetched = http
-                        .get(&url, Role::Icon, Some(&signed_in.tokens.access_token))
-                        .ok()
-                        .filter(|resp| icons::check_png(&resp.body).is_ok());
-                    match fetched {
-                        Some(resp) => icons.push((url, resp.body)),
-                        None => refused += 1,
-                    }
-                }
-                crate::app_log!(
-                    "Desktop icons: {} loaded, {refused} failed or refused",
-                    icons.len()
-                );
-                icons
-            })
-            .await
-            .unwrap_or_default();
+                    crate::app_log!(
+                        "Desktop icons: {} loaded, {refused} failed or refused",
+                        icons.len()
+                    );
+                    icons
+                },
+                Vec::new(),
+            )
+            .await;
             Message::IconsLoaded(id, epoch, icons)
         })
     }
@@ -756,9 +767,7 @@ impl AppModel {
             let id = retry.id.clone();
             tasks.push(cosmic::task::future(async move {
                 let owner = id.clone();
-                let result = tokio::task::spawn_blocking(move || accounts::remove_files(&owner))
-                    .await
-                    .unwrap_or(Err(()));
+                let result = off_ui(move || accounts::remove_files(&owner), Err(())).await;
                 Message::SignOutFilesRemoved(id, result)
             }));
         }
@@ -843,15 +852,17 @@ impl AppModel {
             let id = id.to_owned();
             cosmic::task::future(async move {
                 let owner = id.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    if let Some(cancel) = sign_in {
-                        cancel.cancel_and_wait(launcher::STOP_GRACE);
-                    }
-                    launcher::stop_all(&sessions, launcher::STOP_GRACE);
-                    accounts::remove_files(&owner)
-                })
-                .await
-                .unwrap_or(Err(()));
+                let result = off_ui(
+                    move || {
+                        if let Some(cancel) = sign_in {
+                            cancel.cancel_and_wait(launcher::STOP_GRACE);
+                        }
+                        launcher::stop_all(&sessions, launcher::STOP_GRACE);
+                        accounts::remove_files(&owner)
+                    },
+                    Err(()),
+                )
+                .await;
                 Message::SignOutFilesRemoved(id, result)
             })
         };
@@ -871,9 +882,11 @@ fn keyring_cleanup(
         let kept = identity.clone();
         // The saved sign-in and the remembered passwords, under the
         // account's lock like their saves.
-        let result = tokio::task::spawn_blocking(move || accounts::delete(&identity))
-            .await
-            .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));
+        let result = off_ui(
+            move || accounts::delete(&identity),
+            Err(fl!("error-sign-out-incomplete")),
+        )
+        .await;
         Message::SignOutFinished(id, Box::new(kept), result)
     })
 }
