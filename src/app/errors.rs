@@ -4,6 +4,7 @@
 
 #[allow(clippy::wildcard_imports)] // see app/mod.rs
 use super::*;
+use crate::auth::signin::HelperProblem;
 use crate::sessions::launcher::AppRefusal;
 
 pub(super) fn describe_sign_in_error(e: SignInError) -> SignInFailure {
@@ -21,8 +22,8 @@ pub(super) fn describe_sign_in_error(e: SignInError) -> SignInFailure {
         }
         SignInError::Token(TokenError::ConsentRequired { .. }) => fl!("error-consent-required"),
         SignInError::Token(TokenError::Transient(_)) => fl!("error-network"),
-        SignInError::HelperFailed(reason) if reason == "tls_error" => fl!("error-tls"),
-        SignInError::HelperFailed(reason) if reason == "no_display" => fl!("error-no-display"),
+        SignInError::HelperFailed(HelperProblem::Tls) => fl!("error-tls"),
+        SignInError::HelperFailed(HelperProblem::NoDisplay) => fl!("error-no-display"),
         // Spec §12: technical details go to the details area, which is
         // the log (View → Diagnostics shows it).
         other => {
@@ -212,6 +213,25 @@ pub(super) fn refused_or_shown_http(e: HttpError) -> StepError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn helper_problems_get_their_own_words() {
+        let text = |p| {
+            describe_sign_in_error(SignInError::HelperFailed(p))
+                .0
+                .unwrap()
+        };
+        assert_eq!(text(HelperProblem::Tls), fl!("error-tls"));
+        assert_eq!(text(HelperProblem::NoDisplay), fl!("error-no-display"));
+        // Anything else: the general text; the details go to the log.
+        for other in [
+            HelperProblem::NoReply,
+            HelperProblem::Other("something_new".into()),
+        ] {
+            assert_eq!(text(other), fl!("error-sign-in-generic"));
+        }
+        assert_eq!(describe_sign_in_error(SignInError::Cancelled).0, None);
+    }
 
     #[test]
     fn device_compliance_is_explained() {

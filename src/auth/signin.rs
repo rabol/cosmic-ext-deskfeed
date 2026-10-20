@@ -45,8 +45,10 @@ impl std::fmt::Debug for SignedIn {
 pub enum SignInError {
     /// The helper binary isn't installed next to the app.
     HelperMissing,
-    /// The helper couldn't start or failed (no display, TLS error, …).
-    HelperFailed(String),
+    /// The helper couldn't start or failed.
+    HelperFailed(HelperProblem),
+    /// No secure random numbers for the sign-in request.
+    NoRandom,
     Cancelled,
     Timeout,
     /// The identity provider refused (policy, consent, …).
@@ -57,6 +59,44 @@ pub enum SignInError {
     Callback(CallbackError),
     Token(TokenError),
     IdToken(IdTokenError),
+}
+
+/// Why the sign-in helper failed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelperProblem {
+    /// The app's proxy couldn't be handed over.
+    Proxy,
+    /// It couldn't be started (the I/O error's kind).
+    Start(String),
+    /// It ended without an answer.
+    NoReply,
+    /// Its answer wasn't the protocol's.
+    BadReply,
+    /// The app's background task for it stopped.
+    Task,
+    /// The helper's own reasons (`signin/src/protocol.rs`): the sign-in
+    /// page couldn't connect securely, or there's no display.
+    Tls,
+    NoDisplay,
+    /// Any other reason it gave: short, plain characters only.
+    Other(String),
+}
+
+impl HelperProblem {
+    /// A reason from the helper's answer.
+    fn reported(reason: &str) -> Self {
+        match reason {
+            "tls_error" => Self::Tls,
+            "no_display" => Self::NoDisplay,
+            other => Self::Other(
+                other
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .take(32)
+                    .collect(),
+            ),
+        }
+    }
 }
 
 /// Cancels a running sign-in.
@@ -177,8 +217,8 @@ pub fn sign_in(
 ) -> Result<SignedIn, SignInError> {
     // As long as the window may stay open: a fixed 10 minutes refused
     // sign-ins that finished in minutes 11–15.
-    let mut attempt = Attempt::for_window(config.clone(), time)
-        .map_err(|_| SignInError::HelperFailed("random".into()))?;
+    let mut attempt =
+        Attempt::for_window(config.clone(), time).map_err(|_| SignInError::NoRandom)?;
     let reply = run_helper(
         helper,
         profile,
@@ -229,10 +269,10 @@ fn run_helper(
     // The app's proxy, from a private file; removed when this
     // sign-in ends.
     let proxy = crate::sessions::launcher::HelperProxy::new()
-        .map_err(|_| SignInError::HelperFailed("proxy".into()))?;
+        .map_err(|_| SignInError::HelperFailed(HelperProblem::Proxy))?;
     proxy.apply(&mut cmd);
     let mut child = crate::sessions::launcher::spawn_tied(cmd)
-        .map_err(|e| SignInError::HelperFailed(e.kind().to_string()))?;
+        .map_err(|e| SignInError::HelperFailed(HelperProblem::Start(e.kind().to_string())))?;
     cancel.started(child.id());
     let mut stdin = child.stdin.take().expect("piped");
     let stdout = child.stdout.take().expect("piped");
@@ -279,9 +319,10 @@ fn run_helper(
         return Err(SignInError::Cancelled);
     }
     if wrote.is_err() || read.is_err() || line.is_empty() {
-        return Err(SignInError::HelperFailed("no reply".into()));
+        return Err(SignInError::HelperFailed(HelperProblem::NoReply));
     }
-    serde_json::from_str(line.trim_end()).map_err(|_| SignInError::HelperFailed("bad reply".into()))
+    serde_json::from_str(line.trim_end())
+        .map_err(|_| SignInError::HelperFailed(HelperProblem::BadReply))
 }
 
 /// Blocks until the child `pid` has exited, leaving it unreaped.
@@ -329,13 +370,7 @@ fn callback_url(config: &ClientConfig, reply: &Reply) -> Result<Url, SignInError
             Reply::Cancelled => return Err(SignInError::Cancelled),
             Reply::Timeout => return Err(SignInError::Timeout),
             Reply::Failed { reason } => {
-                return Err(SignInError::HelperFailed(
-                    reason
-                        .chars()
-                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
-                        .take(32)
-                        .collect(),
-                ));
+                return Err(SignInError::HelperFailed(HelperProblem::reported(reason)));
             }
         }
     }
@@ -402,15 +437,33 @@ mod tests {
         );
         assert_eq!(
             run(r#"read line; echo '{"status":"failed","reason":"no_display"}'"#).unwrap_err(),
-            SignInError::HelperFailed("no_display".into())
+            SignInError::HelperFailed(HelperProblem::NoDisplay)
         );
         assert_eq!(
             run("exit 1").unwrap_err(),
-            SignInError::HelperFailed("no reply".into())
+            SignInError::HelperFailed(HelperProblem::NoReply)
         );
         assert_eq!(
             run("read line; echo garbage").unwrap_err(),
-            SignInError::HelperFailed("bad reply".into())
+            SignInError::HelperFailed(HelperProblem::BadReply)
+        );
+    }
+
+    #[test]
+    fn the_helpers_reasons_are_read_and_cleaned() {
+        assert_eq!(HelperProblem::reported("tls_error"), HelperProblem::Tls);
+        assert_eq!(
+            HelperProblem::reported("no_display"),
+            HelperProblem::NoDisplay
+        );
+        // Anything else is kept short and plain, for the log.
+        assert_eq!(
+            HelperProblem::reported("bad thing\n<b>!"),
+            HelperProblem::Other("badthingb".into())
+        );
+        assert_eq!(
+            HelperProblem::reported(&"x".repeat(100)),
+            HelperProblem::Other("x".repeat(32))
         );
     }
 

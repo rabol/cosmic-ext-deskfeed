@@ -392,7 +392,7 @@ impl AppModel {
                 )
             })
             .await
-            .unwrap_or(Err(SignInError::HelperFailed("task".into())));
+            .unwrap_or(Err(SignInError::HelperFailed(signin::HelperProblem::Task)));
             Message::SignInFinished(
                 origin,
                 generation,
