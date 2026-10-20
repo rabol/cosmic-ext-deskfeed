@@ -54,25 +54,33 @@ build-release *args: (build-debug '--release' args)
 # Compiles release profile with vendored dependencies
 build-vendored *args: vendor-extract (build-release '--frozen --offline' args)
 
-# Runs a clippy check
+# The strict lint check, as CI runs it
 check *args:
-    cargo clippy --all-features --locked --workspace {{args}} -- -W clippy::pedantic
-
-# Runs a clippy check with JSON message format
-check-json: (check '--message-format=json')
+    cargo clippy --locked --workspace --all-targets {{args}} -- -D warnings -W clippy::pedantic
 
 # Runs all tests
 test *args:
     cargo test --locked --workspace {{args}}
 
-# Run the application for testing purposes
+# In CI's order (.github/workflows/ci.yml): formatting, the strict lint
+# check, the tests, the dependency check. CI's rust-analyzer step needs
+# its pinned download and runs there only.
+# Runs everything CI checks
+ci:
+    cargo fmt --all --check
+    just check
+    just test
+    cargo deny --locked check
+
+# Developer-only: needs rustup's nightly toolchain and cargo-fuzz
+# (CONTRIBUTING.md, ADR 0023 addendum). New inputs go to
+# fuzz/target/corpus-<target>.
 # Coverage-guided fuzzing of a parser (feed, rdpfile) for some seconds
-# (ADR 0023 addendum). Developer-only: needs rustup's nightly toolchain and
-# cargo-fuzz (CONTRIBUTING.md). New inputs go to fuzz/target/corpus-<target>.
 fuzz target="feed" seconds="300":
     mkdir -p fuzz/target/corpus-{{target}}
     cargo +nightly fuzz run {{target}} fuzz/target/corpus-{{target}} fuzz/corpus/{{target}} -- -max_total_time={{seconds}} -rss_limit_mb=2048
 
+# Run the application for testing purposes
 run *args:
     env RUST_BACKTRACE=full cargo run --release --locked {{args}}
 
@@ -109,13 +117,13 @@ vendor-extract:
     rm -rf vendor
     tar pxf vendor.tar
 
-# Bump cargo version, create git commit, and create tag
+# The internal crates lines/ and testkit/ keep their version. The tag is
+# `v<version>`, which the AUR package downloads.
+# Sets the app's and the sign-in helper's version, commits and tags it
 tag version:
-    find -type f -name Cargo.toml -exec sed -i '0,/^version/s/^version.*/version = "{{version}}"/' '{}' \; -exec git add '{}' \;
-    cargo check
-    cargo clean
-    git add Cargo.lock
+    sed -i '0,/^version/s/^version.*/version = "{{version}}"/' Cargo.toml signin/Cargo.toml
+    cargo check --workspace
+    git add Cargo.toml signin/Cargo.toml Cargo.lock
     git commit -m 'release: {{version}}'
-    git commit --amend
-    git tag -a {{version}} -m ''
+    git tag -a v{{version}} -m 'Deskfeed {{version}}'
 

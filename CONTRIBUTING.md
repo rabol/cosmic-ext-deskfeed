@@ -22,7 +22,8 @@ The checks CI runs, besides the ones below: `cargo deny --locked check` (depende
 ```sh
 just build-debug
 just test
-just check            # clippy, pedantic
+just check            # the strict lint check, as CI runs it
+just ci               # everything CI checks, in its order
 cargo fmt --all
 ```
 

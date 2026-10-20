@@ -84,7 +84,8 @@ Design details: [specs.md](./specs.md) and the [architecture decision records](.
 ```sh
 just build-debug      # build app and sign-in helper
 just test             # run the tests
-just check            # clippy, pedantic
+just check            # the strict lint check, as CI runs it
+just ci               # everything CI checks, in its order
 just run              # run a release build
 ```
 

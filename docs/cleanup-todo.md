@@ -176,7 +176,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - Effort M, risk low.
 - [ ] **Four hand-written fake HTTP servers and ~14 temp-dir naming schemes.** *Simpler:* one configurable test server in `test_util`, and `tempfile` (already in Cargo.lock) as a dev-dependency (an ADR line per the minimal-dependencies rule). Effort S, risk low.
 - [ ] **Two tiny workspace crates** (`lines/`, `testkit/`): sharing code with the helper is a real need, but one crate is enough. Merge them into the common crate from §2, with the random-input tool behind a feature. Effort S, risk low.
-- [ ] **`justfile`.**
+- [x] **`justfile`.** (Done 2026-10-20: `just ci`; `check` as CI; comments on the right recipes; `check-json` gone; `tag` bumps only the app and the helper, tags `v<version>` as the AUR package expects, no interactive amend.)
   - A doc comment sits on the wrong recipe.
   - `just check` doesn't match CI.
   - There's no single command that runs CI's gates.
