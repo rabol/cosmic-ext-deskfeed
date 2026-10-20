@@ -45,7 +45,10 @@ SYSTEM = """## System software (not part of this repository)
 
 def crates(edges: str) -> set[str]:
     out = subprocess.run(
-        ["cargo", "tree", "--workspace", "--locked", "-e", edges, "--prefix", "none",
+        # The two programs, not `--workspace`: testkit is a member, but
+        # only the tests use it.
+        ["cargo", "tree", "-p", "cosmic-ext-deskfeed", "-p", "cosmic-ext-deskfeed-signin",
+         "--locked", "-e", edges, "--prefix", "none",
          "--format", "{p}", "--target", TARGET],
         check=True, capture_output=True, text=True,
     ).stdout
