@@ -9,18 +9,24 @@ impl AppModel {
     /// Quitting: asked, confirmed, cancelled, done.
     pub(super) fn quit_message(&mut self, message: &Message) -> Task<cosmic::Action<Message>> {
         match (message, self.quit) {
+            (Message::QuitChosen, Quit::No) => {
+                self.quit_chosen = true;
+                return self.quit_message(&Message::QuitRequested);
+            }
             (Message::QuitRequested, Quit::No) => {
-                let idle = self.desks.open_count() == 0;
-                // Closing with background operation: nothing to ask.
-                if idle && self.can_run_in_background() && !self.quit_from_tray {
-                    return self.hide_window();
+                let step = decide::quit_step(
+                    self.desks.open_count() == 0,
+                    self.can_run_in_background(),
+                    std::mem::take(&mut self.quit_chosen),
+                );
+                match step {
+                    decide::QuitStep::Hide => return self.hide_window(),
+                    decide::QuitStep::Now => {
+                        self.quit = Quit::Stopping;
+                        return self.continue_quit();
+                    }
+                    decide::QuitStep::Ask => self.quit = Quit::Asking,
                 }
-                self.quit_from_tray = false;
-                if idle {
-                    self.quit = Quit::Stopping;
-                    return self.continue_quit();
-                }
-                self.quit = Quit::Asking;
             }
             (Message::QuitToBackground, Quit::Asking) => {
                 self.quit = Quit::No;

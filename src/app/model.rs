@@ -416,6 +416,9 @@ pub enum Message {
     ),
     /// The window's close button or the desktop asked the app to close.
     QuitRequested,
+    /// Quit from the menu, Ctrl+Q or the tray: quits even with background
+    /// operation on (asking first while desktops are open).
+    QuitChosen,
     QuitConfirm,
     QuitCancel,
     /// All sessions have ended: exit.

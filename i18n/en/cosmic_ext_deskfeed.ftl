@@ -238,6 +238,7 @@ setting-autostart = Start when you log in
 setting-autostart-desc = With "Keep running in the background" on, Deskfeed starts with only its icon in the panel; otherwise its window opens.
 tray-show = Show Deskfeed
 tray-quit = Quit
+quit = Quit
 tray-connect = Connect { $title }
 tray-connected = { $count ->
     [one] 1 connected

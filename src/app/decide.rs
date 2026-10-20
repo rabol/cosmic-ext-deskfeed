@@ -100,6 +100,28 @@ pub(super) fn end_outcome(
     }
 }
 
+/// What closing or quitting does (spec §5, ADR 0017).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum QuitStep {
+    /// Close to the background: the window goes, Deskfeed keeps running.
+    Hide,
+    /// Quit now: nothing is open.
+    Now,
+    /// Ask first: desktops are open (disconnect, keep running, cancel).
+    Ask,
+}
+
+/// `idle`: nothing connected or starting. `background`: background
+/// operation is on and a tray is there. `chosen`: Quit was chosen (menu,
+/// Ctrl+Q, tray) rather than the window being closed.
+pub(super) fn quit_step(idle: bool, background: bool, chosen: bool) -> QuitStep {
+    match (idle, background && !chosen) {
+        (true, true) => QuitStep::Hide,
+        (true, false) => QuitStep::Now,
+        (false, _) => QuitStep::Ask,
+    }
+}
+
 /// Whether Windows refused the credentials: a password that ended like
 /// this is never sent again by itself (ADR 0005). A remembered one is
 /// deleted (ADR 0009 addendum: "If Windows rejects it, it is deleted").
@@ -561,6 +583,26 @@ mod tests {
                 EndOutcome::Failed,
                 "{end:?}"
             );
+        }
+    }
+
+    #[test]
+    fn closing_and_quitting() {
+        use QuitStep::{Ask, Hide, Now};
+        // Closing the window with background operation: hides, never asks
+        // while idle (ADR 0017).
+        assert_eq!(quit_step(true, true, false), Hide);
+        // Choosing Quit really quits, even with background operation (the
+        // owner couldn't quit from the window, 2026-10-20).
+        assert_eq!(quit_step(true, true, true), Now);
+        // Without background operation, closing quits.
+        assert_eq!(quit_step(true, false, false), Now);
+        assert_eq!(quit_step(true, false, true), Now);
+        // Open desktops: always asked first (spec §5), however it started.
+        for background in [true, false] {
+            for chosen in [true, false] {
+                assert_eq!(quit_step(false, background, chosen), Ask);
+            }
         }
     }
 

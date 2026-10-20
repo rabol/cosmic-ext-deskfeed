@@ -23,6 +23,7 @@ Install the current build first (`just install`, or the package).
 ### Background and tray (ADR 0017)
 
 3. **Connect from the tray with the window closed.** Turn on Settings → Background, close the window, use the tray menu's "Connect …". *Expected:* the desktop connects without the window opening. A password question or a failure opens the window. The connected desktop has a check mark, and the top of the menu says "1 connected".
+4a. **Quit from the window.** With Settings → Background on, open the Account menu. *Expected:* Quit at the bottom, showing Ctrl+Q. With nothing connected, Quit (and Ctrl+Q) closes Deskfeed completely: no tray icon left. With a desktop connected, it asks first ("Disconnect and quit", "Keep running in the background", Cancel). Closing the window still only hides it.
 4. **Start when you log in.** Turn on Settings → Background → Start when you log in. Log out and back in. *Expected:* only the tray icon appears, no window.
 
 ### Desktop sessions

@@ -13,6 +13,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Added
 
+- Quit in the Account menu, and Ctrl+Q: quits Deskfeed even when closing the window keeps it running in the background (asking first while desktops are connected).
 - Settings pages say when a desktop they apply to is connected: changes reach it the next time it connects.
 - The sign-in for a desktop now has your account filled in (ADR 0026, review U1).
 - A desktop that doesn't finish signing you in on its side in time now says so, instead of "failed with code 131", and this no longer leads to a password logon being offered.

@@ -127,6 +127,7 @@ impl AppModel {
                 }
             }
             Message::QuitRequested
+            | Message::QuitChosen
             | Message::QuitToBackground
             | Message::QuitConfirm
             | Message::QuitCancel

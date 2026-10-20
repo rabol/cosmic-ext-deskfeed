@@ -112,8 +112,9 @@ pub struct AppModel {
     tray: Option<crate::tray::Handle>,
     /// Why there is no tray, when background operation is on.
     tray_unavailable: Option<String>,
-    /// The tray's Quit: really quit, not close to the background.
-    quit_from_tray: bool,
+    /// Quit was chosen (menu, Ctrl+Q, tray): really quit, not close to the
+    /// background.
+    quit_chosen: bool,
     /// The menu the tray shows now (sent again only when it changes).
     tray_menu: Option<Vec<crate::tray::TrayItem>>,
     /// "Start when you log in" (its autostart entry is there).
@@ -203,7 +204,7 @@ impl cosmic::Application for AppModel {
             core,
             context_page: ContextPage::default(),
             about,
-            key_binds: HashMap::new(),
+            key_binds: key_binds(),
             config,
             config_handler,
             http: Arc::new(Http::new(EndpointPolicy::azure_public())),
@@ -221,7 +222,7 @@ impl cosmic::Application for AppModel {
             search: String::new(),
             tray: None,
             tray_unavailable: None,
-            quit_from_tray: false,
+            quit_chosen: false,
             tray_menu: None,
             autostart: crate::autostart::enabled(),
             diagnostics: None,
@@ -285,6 +286,8 @@ impl cosmic::Application for AppModel {
                     vec![
                         menu::Item::Button(fl!("add-account"), None, MenuAction::AddAccount),
                         menu::Item::Button(fl!("sign-out"), None, MenuAction::SignOut),
+                        menu::Item::Divider,
+                        menu::Item::Button(fl!("quit"), None, MenuAction::Quit),
                     ],
                 ),
             ),
@@ -540,6 +543,22 @@ impl cosmic::Application for AppModel {
             // Closing from the desktop (window menu, keyboard shortcut,
             // dock); the window's own close button goes to `on_app_exit`.
             cosmic::iced::window::close_requests().map(|_| Message::QuitRequested),
+            // Shortcuts (`key_binds`) while the window has the keyboard.
+            cosmic::iced::event::listen_with(|event, _status, _window| {
+                let cosmic::iced::Event::Keyboard(cosmic::iced::keyboard::Event::KeyPressed {
+                    key,
+                    modifiers,
+                    physical_key,
+                    ..
+                }) = event
+                else {
+                    return None;
+                };
+                key_binds()
+                    .into_iter()
+                    .find(|(bind, _)| bind.matches(modifiers, &key, Some(&physical_key)))
+                    .map(|(_, action)| menu::action::MenuAction::message(&action))
+            }),
             // Full-screen sessions that keep the screen on (`awake.rs`).
             self.awake_subscription(),
             // Started again: show the window (`single.rs`).
@@ -876,6 +895,21 @@ pub enum MenuAction {
     AddAccount,
     SignOut,
     OpenLogFolder,
+    Quit,
+}
+
+/// Keyboard shortcuts, shown in the menu (`menu::items`) and handled in
+/// `subscription`. Ctrl+Q quits, as in COSMIC's own apps (Files, Text
+/// Editor, Terminal).
+fn key_binds() -> HashMap<menu::KeyBind, MenuAction> {
+    use menu::key_bind::Modifier;
+    HashMap::from([(
+        menu::KeyBind {
+            modifiers: vec![Modifier::Ctrl],
+            key: cosmic::iced::keyboard::Key::Character("q".into()),
+        },
+        MenuAction::Quit,
+    )])
 }
 
 impl menu::action::MenuAction for MenuAction {
@@ -890,6 +924,7 @@ impl menu::action::MenuAction for MenuAction {
             MenuAction::AddAccount => Message::AddAccount,
             MenuAction::SignOut => Message::SignOutSelected,
             MenuAction::OpenLogFolder => Message::OpenLogFolder,
+            MenuAction::Quit => Message::QuitChosen,
         }
     }
 }
