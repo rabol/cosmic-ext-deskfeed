@@ -22,24 +22,12 @@ impl AppModel {
             .unwrap_or_default();
         let (logon, custom_domain) = logon_index(remembered);
         let error = self.desks.get_mut(&key).and_then(|d| d.last_failure.take());
-        // What was typed last time for this desktop, else the account's.
-        let username = self
-            .config
-            .windows_usernames
-            .get(&key)
-            .cloned()
-            .or_else(|| {
-                self.account(account)
-                    .and_then(|a| a.identity.username.clone())
-            })
-            .unwrap_or_default();
         self.desks.set_conn(&key, Connection::AwaitingUser);
         let dialog = PasswordDialog {
             account: account.to_owned(),
             key,
             title,
             connection,
-            username,
             password: String::new(),
             password_hidden: true,
             logon,
@@ -179,11 +167,6 @@ impl AppModel {
             LOGON_ENTRA => LogonSetting::EntraSignIn,
             _ => LogonSetting::Automatic,
         };
-        let username = d.username.trim().to_owned();
-        if logon.needs_password() && !valid_windows_user(&username) {
-            d.error = Some(fl!("error-bad-windows-user"));
-            return Task::none();
-        }
         let password = if logon.needs_password() {
             if d.password.is_empty() {
                 d.error = Some(fl!("error-password-empty"));
@@ -199,40 +182,12 @@ impl AppModel {
         };
         let d = self.dialog.take().expect("checked above");
         self.withdraw_dialogs(|_| false);
-        if logon.needs_password() {
-            self.remember_windows_user(&d.account, &d.key, &username);
-        }
         // Kept only until the connection works (`session_event`).
         self.desks.at(&d.key).pending_password = match (&password, d.remember) {
             (Some(p), true) => Some(p.clone()),
             _ => None,
         };
         self.launch(&d.account, &d.key, &d.connection, logon, password)
-    }
-
-    /// Keeps the Windows user name typed for a desktop, when it isn't just
-    /// the account's own.
-    pub(super) fn remember_windows_user(&mut self, account: &str, key: &str, username: &str) {
-        let own = self
-            .account(account)
-            .and_then(|a| a.identity.username.as_deref())
-            == Some(username);
-        let mut map = self.config.windows_usernames.clone();
-        if own {
-            map.remove(key);
-        } else {
-            map.insert(key.to_owned(), username.to_owned());
-        }
-        if map == self.config.windows_usernames {
-            return;
-        }
-        match &self.config_handler {
-            Some(handler) => {
-                let _ = self.config.set_windows_usernames(handler, map);
-            }
-            // Not saved, but still used for this connection.
-            None => self.config.windows_usernames = map,
-        }
     }
 
     pub(super) fn remember_logon(&mut self, key: &str, logon: LogonSetting) {

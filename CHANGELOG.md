@@ -6,6 +6,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Fixed
 
+- The password dialog no longer has a Windows user name field: Azure Virtual Desktop replaces the name with its own anyway, so a typed name was ignored. The domain can still be chosen in the logon setting (ADR 0005 addendum).
 - A failed connection now explains itself instead of only "ended with an error (code 131)": FreeRDP's reason in plain words when it gives one (for example "the desktop refused the sign-in", "the desktop is starting up"), otherwise how far the connection got. The code and FreeRDP's error name stay in the message for support.
 - A remembered Windows password is now deleted when Windows refuses it for any reason (locked out, expired, disabled), not only for a wrong password, so it isn't sent again.
 - The clipboard never worked in a desktop since clipboard directions were added, whatever the setting said: FreeRDP turned it off from the connection file and the direction setting didn't turn it back on. It now follows the setting.
@@ -19,7 +20,6 @@ All notable changes are listed here. The project uses [semantic versioning](http
 - If the panel's tray goes away while Deskfeed's window is closed, the window opens, so there is always a way back; the tray icon returns when the panel's tray does.
 - Saving a diagnostics report over an existing file makes that file private too; the sign-in window refuses an oversized sign-in answer early.
 - Connection files are checked property by property (type, range, and the form of host names); properties FreeRDP never uses are no longer passed on (ADR 0024, review F04).
-- The password dialog has an editable Windows user name, filled in from the account; the name typed for a desktop is remembered for it (review F09).
 - Signing out can no longer be undone by work that was already under way: a token renewal, a remembered password or the offline list saved just after sign-out stays deleted. Forget password works the same way against a save on its way (review F01, F05).
 - Two desktops asking for a password at once each get their dialog, one after the other; before, one could stay stuck "waiting for your password". A desktop that is preparing or waiting for its password can be cancelled from its row.
 - A proxy's user name and password no longer go into the environment of FreeRDP or the sign-in window (ADR 0008 addendum). A proxy that needs a password can't be used for desktop connections because of a FreeRDP bug; the row now says so.

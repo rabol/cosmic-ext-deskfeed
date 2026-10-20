@@ -52,3 +52,9 @@ The owner's host pool rejected password logon with `0x52E` for every domain sett
 - **Every desktop tries Entra sign-in first**, unless the user picked a password setting for it. Entra sign-in sends no password, so trying it can't count toward an account lockout; the retry rule above (no automatic retries with credentials) still holds.
 - If Entra sign-in fails, the app does not retry by itself. The desktop row says it didn't work, and the next Connect opens the password dialog with the reason and the other logon settings.
 - The setting that connects is remembered per desktop, as before. The dropdown now labels Entra sign-in as recommended and the AzureAD-domain password logon as "Password (standard)".
+
+## Addendum (2026-10-20): no user-name field
+
+The external review (F09) asked for an editable Windows user name, and one was added on 2026-10-19. The test audit found that it contradicts this ADR. For a password logon, FreeRDP 3.32.2 replaces the user name with the AVD service's `redirectedUsername` whenever the service sends one (`libfreerdp/core/gateway/arm.c`, `arm_fill_rdstls`, lines 909–913). So a typed name would be ignored, and only a `DOMAIN\` part would have counted. Whether the service always sends that field isn't verified: the owner's password-logon host pool rejects password logons on the host side.
+
+The owner decided to follow this ADR: no user-name field. The dialog shows the account it applies to, `/u:` is always the account's name, and the domain is chosen with the logon setting (Automatic, Empty domain, Custom domain). The saved per-desktop user names (`windows_usernames`) are no longer read.

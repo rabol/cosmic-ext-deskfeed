@@ -54,7 +54,7 @@ Fixed the same day, each with a test that fails without the fix where a test is 
 - F04: connection-file rules (ADR 0024).
 - F06, F08: password dialogs take turns; Cancel; requests stop after sign-out.
 - F07: the argument handover never blocks.
-- F09: editable Windows user name.
+- F09: decided against an editable Windows user name (owner, 2026-10-20). For a password logon the AVD service's `redirectedUsername` replaces the name (FreeRDP 3.32.2 `arm.c`), so only the domain is offered, as ADR 0005 decided (addendum).
 - F11: the sign-in time limit.
 - F12: SIGKILL on app death (ADR 0022 addendum).
 - F13: the strict lint gate.

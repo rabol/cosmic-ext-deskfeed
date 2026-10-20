@@ -37,11 +37,6 @@ impl AppModel {
                 };
                 return self.connection_file_ready(&id, key, result);
             }
-            Message::WindowsUserInput(s) => {
-                if let Some(d) = &mut self.dialog {
-                    d.username = s;
-                }
-            }
             Message::PasswordInput(PasswordText(s)) => {
                 if let Some(d) = &mut self.dialog {
                     d.password = s;

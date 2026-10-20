@@ -221,8 +221,6 @@ pub(super) struct PasswordDialog {
     pub(super) key: String,
     pub(super) title: String,
     pub(super) connection: Arc<ConnectionFile>,
-    /// The Windows user name to send, pre-filled (spec §8: editable).
-    pub(super) username: String,
     pub(super) password: String,
     pub(super) password_hidden: bool,
     pub(super) logon: usize,
@@ -311,7 +309,6 @@ pub enum Message {
         String,
         Result<(Arc<ConnectionFile>, Arc<SignedIn>), StepError>,
     ),
-    WindowsUserInput(String),
     PasswordInput(PasswordText),
     TogglePasswordVisible,
     LogonSelected(usize),
@@ -573,46 +570,6 @@ pub(super) fn migrate_keys<V: Clone + PartialEq>(
     (out != *map).then_some(out)
 }
 
-/// A Windows user name FreeRDP can send: `name`, `name@domain` (UPN) or
-/// `DOMAIN\name` (also `.\name` for a local account), printable, bounded.
-pub(super) fn valid_windows_user(u: &str) -> bool {
-    let printable = !u.is_empty()
-        && u.len() <= 256
-        && u.trim() == u
-        && !u.chars().any(|c| {
-            c.is_control()
-                || matches!(
-                    c,
-                    '"' | '/'
-                        | '['
-                        | ']'
-                        | ':'
-                        | ';'
-                        | '|'
-                        | '='
-                        | ','
-                        | '+'
-                        | '*'
-                        | '?'
-                        | '<'
-                        | '>'
-                )
-        });
-    if !printable {
-        return false;
-    }
-    match (u.split_once('\\'), u.split_once('@')) {
-        (Some(_), Some(_)) => false,
-        (Some((domain, name)), None) => {
-            !name.is_empty() && !name.contains('\\') && (domain == "." || valid_domain(domain))
-        }
-        (None, Some((name, domain))) => {
-            !name.is_empty() && !domain.contains('@') && valid_domain(domain)
-        }
-        (None, None) => true,
-    }
-}
-
 pub(super) fn valid_domain(d: &str) -> bool {
     !d.is_empty()
         && d.len() <= 255
@@ -665,37 +622,6 @@ pub(super) fn workspace_view(account: &SignedIn, feed: discovery::WorkspaceFeed)
 mod tests {
     use super::*;
 
-    #[test]
-    fn windows_user_names() {
-        for good in [
-            "anna",
-            "anna@example.com",
-            "CORP\\anna",
-            ".\\localadmin",
-            "anna.example",
-            "first last",
-        ] {
-            assert!(valid_windows_user(good), "{good}");
-        }
-        for bad in [
-            "",
-            " anna",
-            "anna ",
-            "CORP\\",
-            "\\anna",
-            "@example.com",
-            "anna@",
-            "a@b@c",
-            "CORP\\anna@example.com",
-            "CORP\\x\\anna",
-            "anna\nx",
-            "an:na",
-            "bad domain\\anna",
-        ] {
-            assert!(!valid_windows_user(bad), "{bad:?}");
-        }
-        assert!(!valid_windows_user(&"a".repeat(257)));
-    }
     use crate::auth::token::TokenSet;
     use crate::service::http::BearerToken;
 

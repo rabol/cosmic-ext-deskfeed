@@ -77,17 +77,11 @@ impl AppModel {
             .unwrap_or_default();
         let spec = LaunchSpec {
             connection: (**connection).clone(),
-            // Password logons send the name typed for this desktop (spec
-            // §8); Entra sign-in uses the account's.
-            username: if logon.needs_password() {
-                self.config
-                    .windows_usernames
-                    .get(key)
-                    .cloned()
-                    .or_else(|| signed_in.identity.username.clone())
-            } else {
-                signed_in.identity.username.clone()
-            },
+            // Always the account's name. For a password logon the AVD
+            // service's `redirectedUsername` replaces it anyway (FreeRDP
+            // 3.32.2 `gateway/arm.c`, `arm_fill_rdstls`); only the domain
+            // is the user's choice (logon setting, ADR 0005).
+            username: signed_in.identity.username.clone(),
             password,
             logon: logon.clone(),
             helper,

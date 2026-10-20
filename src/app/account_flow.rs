@@ -743,9 +743,6 @@ impl AppModel {
         if let Some(map) = migrate_keys(&self.config.desktop_settings, pairs) {
             let _ = self.config.set_desktop_settings(handler, map);
         }
-        if let Some(map) = migrate_keys(&self.config.windows_usernames, pairs) {
-            let _ = self.config.set_windows_usernames(handler, map);
-        }
     }
 
     /// Takes renewed tokens for the account entry `epoch`, when they are
