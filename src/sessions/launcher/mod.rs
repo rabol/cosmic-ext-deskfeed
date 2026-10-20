@@ -119,9 +119,6 @@ pub enum Target {
     /// A Windows machine by host name (ADR 0029): the connection file
     /// (`ConnectionFile::direct`) names it; no gateway and no Azure
     /// sign-in; the password over NLA only.
-    // Started from the screens in step 4 of ADR 0029; until then by the
-    // tests only.
-    #[cfg_attr(not(test), allow(dead_code))]
     Direct,
 }
 

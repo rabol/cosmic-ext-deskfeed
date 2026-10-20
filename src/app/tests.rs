@@ -112,7 +112,7 @@ fn launching(app: &mut AppModel, id: &str, key: &str) {
     app.desks.at(key).launching = Some(Launching {
         start: Start {
             attempt: 1,
-            account: id.into(),
+            owner: id.into(),
             title: "Win 11".into(),
             grabs_shortcuts: false,
             keep_awake: false,
@@ -138,23 +138,23 @@ fn sign_out_with_a_desktop_open_asks_first() {
 
     let _ = app.update(Message::Account(AccountMessage::SignOut("acct-3a".into())));
     assert_eq!(
-        app.sign_out_asking,
-        Some(("acct-3a".to_owned(), Leaving::SignOut))
+        app.leave_asking,
+        Some(Leave::Account("acct-3a".to_owned(), Leaving::SignOut))
     );
     assert!(app.dialog().is_some(), "the sign-out question is shown");
     assert!(app.account("acct-3a").is_some());
 
     // Cancel keeps everything.
-    let _ = app.update(Message::Account(AccountMessage::SignOutCancel));
-    assert!(app.sign_out_asking.is_none());
+    let _ = app.update(Message::Account(AccountMessage::LeaveCancel));
+    assert!(app.leave_asking.is_none());
     assert!(app.dialog().is_none());
     assert!(app.account("acct-3a").is_some());
     assert!(app.desks.launching("k1").is_some_and(|l| !l.stop));
 
     // Disconnect and sign out.
     let _ = app.update(Message::Account(AccountMessage::SignOut("acct-3a".into())));
-    let _ = app.update(Message::Account(AccountMessage::SignOutConfirm));
-    assert!(app.sign_out_asking.is_none());
+    let _ = app.update(Message::Account(AccountMessage::LeaveConfirm));
+    assert!(app.leave_asking.is_none());
     // Owner's decision (2026-10-20): signed out, it stays listed.
     assert!(signed_out(&app, "acct-3a"));
     assert!(app.signing_out.contains("acct-3a"));
@@ -175,7 +175,7 @@ fn sign_out_with_nothing_open_doesnt_ask() {
         "k1",
     );
     let _ = app.update(Message::Account(AccountMessage::SignOut("acct-so".into())));
-    assert!(app.sign_out_asking.is_none());
+    assert!(app.leave_asking.is_none());
     assert!(signed_out(&app, "acct-so"));
 }
 
@@ -603,11 +603,11 @@ mod signed_out_accounts {
         launching(&mut app, "acct-ra", "k1");
         let _ = app.update(Message::Account(AccountMessage::Remove("acct-ra".into())));
         assert_eq!(
-            app.sign_out_asking,
-            Some(("acct-ra".to_owned(), Leaving::Remove))
+            app.leave_asking,
+            Some(Leave::Account("acct-ra".to_owned(), Leaving::Remove))
         );
         assert!(app.dialog().is_some());
-        let _ = app.update(Message::Account(AccountMessage::SignOutConfirm));
+        let _ = app.update(Message::Account(AccountMessage::LeaveConfirm));
         assert!(app.account("acct-ra").is_none());
         assert!(app.desks.launching("k1").is_none_or(|l| l.stop));
     }
@@ -720,6 +720,7 @@ fn the_add_entry_starts_the_sign_in_when_clicked() {
 /// and removing one. Connecting is tested with the launcher.
 mod saved_connections {
     use super::*;
+    use crate::connections::SavedConnection;
 
     fn rdp(app: &mut AppModel, m: RdpMessage) {
         let _ = app.update(Message::Rdp(m));
@@ -881,10 +882,189 @@ mod saved_connections {
         );
         rdp(&mut app, RdpMessage::Save);
         let id = app.config.connections.keys().next().unwrap().clone();
-        assert!(app.config.saved_passwords.contains(&id));
         assert_eq!(app.connection_form.password, "");
         let settings = format!("{:?}", app.config);
         assert!(!settings.contains("s3cret!"));
+        // Marked remembered once the keyring has it, as from the password
+        // dialog; a keyring that fails says so.
+        assert!(!app.config.saved_passwords.contains(&id));
+        let ticket = app.sign_ins.password_ticket(&id, &id);
+        let stored = |result| {
+            Message::Rdp(RdpMessage::PasswordStored {
+                id: id.clone(),
+                ticket,
+                result,
+            })
+        };
+        let _ = app.update(stored(Err("locked".into())));
+        assert!(!app.config.saved_passwords.contains(&id));
+        assert!(app.notice.as_deref().is_some_and(|n| n.contains("locked")));
+        let _ = app.update(stored(Ok(true)));
+        assert!(app.config.saved_passwords.contains(&id));
+    }
+
+    /// A connection added through the form, signed in nowhere: its ID.
+    fn saved(app: &mut AppModel) -> String {
+        add(app, "Office PC", "pc1.example.lan")
+    }
+
+    fn connect(app: &mut AppModel, key: &str) {
+        let _ = app.update(Message::Connection(ConnectionMessage::Connect(key.into())));
+    }
+
+    #[test]
+    fn connecting_asks_for_the_password_without_entra() {
+        let mut app = app();
+        let id = saved(&mut app);
+        connect(&mut app, &id);
+        assert_eq!(app.desks.conn(&id), Some(&Connection::AwaitingUser));
+        let d = app.dialogs.shown().expect("the password dialog");
+        assert_eq!(
+            (d.owner.as_str(), d.key.as_str()),
+            (id.as_str(), id.as_str())
+        );
+        assert_eq!(d.title, "Office PC");
+        assert_ne!(d.logon, LOGON_ENTRA);
+        assert_eq!(
+            d.connection.to_freerdp_text(),
+            ConnectionFile::direct("pc1.example.lan:3389")
+                .unwrap()
+                .to_freerdp_text(),
+            "Deskfeed's own file, naming only the address"
+        );
+        assert!(app.dialog().is_some());
+    }
+
+    #[test]
+    fn connect_with_the_password_starts_freerdp_for_the_connection() {
+        let mut app = app();
+        let id = saved(&mut app);
+        connect(&mut app, &id);
+        let _ = app.update(Message::Connection(ConnectionMessage::PasswordInput(
+            PasswordText("s3cret!".into()),
+        )));
+        let _ = app.update(Message::Connection(ConnectionMessage::DialogConnect));
+        // The launch itself is a task these tests don't run.
+        let l = app.desks.launching(&id).expect("launching");
+        assert_eq!(l.start.owner, id);
+        assert_eq!(l.start.title, "Office PC");
+        assert_eq!(app.desks.conn(&id), Some(&Connection::Connecting));
+    }
+
+    #[test]
+    fn a_remembered_password_is_read_and_a_missing_one_asked_for() {
+        let mut app = app();
+        let id = saved(&mut app);
+        app.config.saved_passwords.insert(id.clone());
+        connect(&mut app, &id);
+        assert_eq!(app.desks.conn(&id), Some(&Connection::Preparing));
+        assert!(app.dialogs.shown().is_none(), "reading the keyring first");
+        let _ = app.update(Message::Connection(
+            ConnectionMessage::SavedPasswordLoaded {
+                owner: id.clone(),
+                epoch: 0,
+                key: id.clone(),
+                logon: LogonSetting::Automatic,
+                connection: Arc::new(ConnectionFile::direct("pc1.example.lan:3389").unwrap()),
+                result: Ok(None),
+            },
+        ));
+        assert!(!app.config.saved_passwords.contains(&id));
+        assert!(
+            app.dialogs.shown().is_some(),
+            "gone from the keyring: asked"
+        );
+    }
+
+    #[test]
+    fn a_hand_edited_connection_is_checked_before_connecting() {
+        let mut app = app();
+        let id = saved(&mut app);
+        for bad in [
+            SavedConnection {
+                host: "pc 1".into(),
+                ..app.config.connections[&id].clone()
+            },
+            SavedConnection {
+                username: String::new(),
+                ..app.config.connections[&id].clone()
+            },
+        ] {
+            app.config.connections.insert(id.clone(), bad);
+            app.desks.clear_conn(&id);
+            connect(&mut app, &id);
+            assert!(
+                matches!(app.desks.conn(&id), Some(Connection::Failed(_))),
+                "refused with a reason"
+            );
+            assert!(app.dialogs.shown().is_none() && app.desks.launching(&id).is_none());
+        }
+    }
+
+    #[test]
+    fn the_logon_that_worked_is_kept_with_the_connection() {
+        let mut app = app();
+        let id = saved(&mut app);
+        let file = Arc::new(ConnectionFile::direct("pc1.example.lan:3389").unwrap());
+        let desk = app.desks.at(&id);
+        desk.connection = Some(Connection::Connecting);
+        desk.pending_logon = Some((LogonSetting::CustomDomain("CORP".into()), file));
+        let _ = app.session_event(&id, SessionEvent::Connected);
+        assert_eq!(
+            app.config.connections[&id].logon,
+            LogonSetting::CustomDomain("CORP".into())
+        );
+        assert!(!app.config.logon_settings.contains_key(&id));
+        assert_eq!(
+            app.config.connections[&id].domain(),
+            "CORP",
+            "the form shows it"
+        );
+    }
+
+    #[test]
+    fn removing_an_open_connection_asks_first() {
+        let mut app = app();
+        let id = saved(&mut app);
+        launching(&mut app, &id, &id);
+        let _ = app.update(Message::Settings(SettingsMessage::OpenDesktopSettings(
+            id.clone(),
+        )));
+        rdp(&mut app, RdpMessage::Remove);
+        assert_eq!(app.leave_asking, Some(Leave::Connection(id.clone())));
+        assert!(app.dialog().is_some());
+        let _ = app.update(Message::Account(AccountMessage::LeaveCancel));
+        assert!(app.config.connections.contains_key(&id), "kept");
+        rdp(&mut app, RdpMessage::Remove);
+        let _ = app.update(Message::Account(AccountMessage::LeaveConfirm));
+        assert!(!app.config.connections.contains_key(&id));
+        assert!(
+            app.desks.launching(&id).is_some_and(|l| l.stop),
+            "stopped as soon as it has started"
+        );
+    }
+
+    #[test]
+    fn its_settings_follow_the_app_and_open_in_the_drawer() {
+        let mut app = app();
+        let id = saved(&mut app);
+        app.config.app_settings.sound = Some(false);
+        // The app's, then the connection's own; no account level.
+        assert!(!app.effective_settings(&id, &id).sound);
+        app.config.desktop_settings.insert(
+            id.clone(),
+            crate::settings::ConnectionSettings {
+                sound: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(app.effective_settings(&id, &id).sound);
+        let _ = app.update(Message::Settings(SettingsMessage::OpenDesktopSettings(
+            id.clone(),
+        )));
+        rdp(&mut app, RdpMessage::OpenSettings);
+        assert_eq!(app.settings_target.as_deref(), Some(id.as_str()));
+        assert_eq!(app.context_page, ContextPage::DesktopSettings);
     }
 
     #[test]
@@ -899,5 +1079,33 @@ mod saved_connections {
         assert!(app.connection_rows.is_empty());
         rdp(&mut app, RdpMessage::Save);
         assert!(app.config.connections.is_empty(), "not brought back");
+    }
+
+    /// An unknown certificate from a saved connection asks with words for a
+    /// machine of one's own, not "Azure didn't vouch for it"; approving it
+    /// pins it to the connection and connects again.
+    #[test]
+    fn its_certificate_is_approved_without_azure_words() {
+        let mut app = app();
+        let id = saved(&mut app);
+        app.desks.set_conn(&id, Connection::Connecting);
+        let certificate = launcher::CertificateInfo {
+            host: "pc1.example.lan".into(),
+            common_name: "pc1".into(),
+            subject: "CN=pc1".into(),
+            issuer: "CN=pc1".into(),
+            valid_from: String::new(),
+            valid_to: String::new(),
+            fingerprint: "aa:bb".into(),
+        };
+        let _ = app.session_ended(&id, &SessionEnd::CertificateNotTrusted(certificate), &[]);
+        let d = app.certificate_dialog.as_ref().expect("asked");
+        assert!(d.direct && d.title == "Office PC");
+        let _ = app.update(Message::Connection(ConnectionMessage::TrustCertificate));
+        assert_eq!(app.config.certificate_pins[&id], "aa:bb");
+        assert!(
+            app.dialogs.shown().is_some(),
+            "connecting again: the password"
+        );
     }
 }

@@ -480,8 +480,6 @@ fn connection_password_attributes(connection: &str) -> HashMap<&str, &str> {
 }
 
 /// Remembers a plain RDP connection's password, replacing an earlier one.
-// Used from the screens in step 4 of ADR 0029; until then by the tests.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn save_connection_password(
     connection: &str,
     title: &str,
@@ -496,13 +494,11 @@ pub fn save_connection_password(
 }
 
 /// A plain RDP connection's remembered password, if there is one.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn load_connection_password(connection: &str) -> Result<Option<Secret>, SecretsError> {
     load_text(&connection_password_attributes(connection))
 }
 
 /// Forgets a plain RDP connection's password (Forget, or removing it).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn delete_connection_password(connection: &str) -> Result<(), SecretsError> {
     Keyring::open()?.delete_matching(&connection_password_attributes(connection))
 }

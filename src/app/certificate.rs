@@ -41,20 +41,13 @@ pub(super) fn certificate_dialog(d: &CertificateDialog) -> Element<'_, Message> 
             ),
         ));
     let mut body = widget::column::with_capacity(5).spacing(space.space_s);
-    match &d.changed_from {
-        None => {
-            body = body.push(widget::text::body(fl!(
-                "certificate-untrusted-body",
-                title = d.title.clone()
-            )));
-        }
-        Some(_) => {
-            body = body.push(widget::text::body(fl!(
-                "certificate-changed-body",
-                title = d.title.clone()
-            )));
-        }
-    }
+    let title = d.title.clone();
+    body = body.push(widget::text::body(match (&d.changed_from, d.direct) {
+        (None, false) => fl!("certificate-untrusted-body", title = title),
+        (None, true) => fl!("certificate-untrusted-body-direct", title = title),
+        (Some(_), false) => fl!("certificate-changed-body", title = title),
+        (Some(_), true) => fl!("certificate-changed-body-direct", title = title),
+    }));
     body = body.push(details);
     body = body.push(widget::text::caption(fl!("certificate-fingerprint")));
     body = body.push(widget::text::monotext(c.fingerprint.clone()));

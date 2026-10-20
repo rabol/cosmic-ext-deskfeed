@@ -258,8 +258,15 @@ impl AppModel {
     }
 
     pub(super) fn desktop_settings_view(&self, key: &str) -> Element<'_, Message> {
-        let Some(account) = self.account_of_resource(key) else {
-            return widget::text::body(fl!("desktop-gone")).into();
+        // A saved plain RDP connection has no account: its settings follow
+        // the app's (ADR 0029).
+        let account = if self.config.connections.contains_key(key) {
+            None
+        } else {
+            let Some(account) = self.account_of_resource(key) else {
+                return widget::text::body(fl!("desktop-gone")).into();
+            };
+            Some(account)
         };
         let own = self
             .config
@@ -267,13 +274,23 @@ impl AppModel {
             .get(key)
             .cloned()
             .unwrap_or_default();
-        let rows = OverrideRows {
-            inherited: self.account_settings(Some(&account.id)),
-            own,
-            labels: (&self.follow_account_on, &self.follow_account_off),
-            reset_label: fl!("use-account-setting"),
-            follow_value: |value: String| fl!("follow-account-value", value = value),
-            follow_choice: |value: String| fl!("follow-account-choice", value = value),
+        let rows: OverrideRows<'_, fn(String) -> String> = match account {
+            Some(account) => OverrideRows {
+                inherited: self.account_settings(Some(&account.id)),
+                own,
+                labels: (&self.follow_account_on, &self.follow_account_off),
+                reset_label: fl!("use-account-setting"),
+                follow_value: |value: String| fl!("follow-account-value", value = value),
+                follow_choice: |value: String| fl!("follow-account-choice", value = value),
+            },
+            None => OverrideRows {
+                inherited: self.account_settings(None),
+                own,
+                labels: (&self.follow_app_on, &self.follow_app_off),
+                reset_label: fl!("use-app-setting"),
+                follow_value: |value: String| fl!("follow-app-value", value = value),
+                follow_choice: |value: String| fl!("follow-app-choice", value = value),
+            },
         };
         let mut security = widget::settings::section().title(fl!("settings-security"));
         let mut any = false;
@@ -304,12 +321,13 @@ impl AppModel {
             any = true;
         }
         let pin = any.then(|| security.into());
-        let (page, hint) = match account.resource(key).map(|r| r.kind) {
-            Some(ResourceKind::RemoteApp) => (
+        let (page, hint) = match account.map(|a| (a, a.resource(key).map(|r| r.kind))) {
+            None => (Page::Desktop, fl!("connection-settings-hint")),
+            Some((account, Some(ResourceKind::RemoteApp))) => (
                 Page::RemoteApp,
                 fl!("app-only-settings-hint", account = account.label()),
             ),
-            _ => (
+            Some((account, _)) => (
                 Page::Desktop,
                 fl!("desktop-settings-hint", account = account.label()),
             ),

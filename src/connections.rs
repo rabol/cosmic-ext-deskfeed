@@ -46,6 +46,11 @@ pub enum ConnectionError {
     /// Not a number from 1 to 65535.
     BadPort,
     BadUserName,
+    /// No user name. NLA needs one, and FreeRDP would ask for it on a
+    /// terminal Deskfeed doesn't have. Checked where a connection is saved
+    /// from the form and before it connects; `check` allows it so that
+    /// the parsing helpers stay testable on their own.
+    NoUserName,
     BadName,
     /// The typed domain isn't one (letters, digits, `.`, `-`, `_`).
     BadDomain,

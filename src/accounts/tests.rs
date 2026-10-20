@@ -306,6 +306,50 @@ fn a_late_forget_keeps_a_password_saved_after_it() {
     assert_eq!(passwords(&keyring), []);
 }
 
+/// A saved connection's password (ADR 0029) has the desktop's guards: a
+/// save queued before a Forget (or removing it) writes nothing, a Forget
+/// deletes only that connection's item, and a desktop's is untouched.
+#[test]
+fn a_connection_password_has_the_same_guards() {
+    let connection_items = |keyring: &FakeKeyring| -> Vec<String> {
+        keyring
+            .items()
+            .into_iter()
+            .filter(|i| {
+                i.attributes
+                    .get("type")
+                    .is_some_and(|t| t == "rdp-password")
+            })
+            .map(|i| i.attributes["connection"].clone())
+            .collect()
+    };
+    let me = identity("00000000-0000-0000-0000-0000000000f8");
+    let pw = Secret::new("hunter2".into());
+    let a = accounts(1);
+    let keyring = FakeKeyring::start(Answer::Unlock);
+    let desk = a.password_ticket(&account_id(&me), "rdp-1");
+    assert_eq!(a.save_password(&me, "rdp-1", "D", &pw, desk), Ok(true));
+    for id in ["rdp-1", "rdp-2"] {
+        let ticket = a.password_ticket(id, id);
+        assert_eq!(a.save_connection_password(id, "PC", &pw, ticket), Ok(true));
+    }
+    assert_eq!(connection_items(&keyring), ["rdp-1", "rdp-2"]);
+    // Queued before a Forget, run after it: nothing written.
+    let ticket = a.password_ticket("rdp-1", "rdp-1");
+    let forget = a.note_forget("rdp-1", "rdp-1");
+    a.forget_connection_password("rdp-1", forget).unwrap();
+    assert_eq!(
+        a.save_connection_password("rdp-1", "PC", &pw, ticket),
+        Ok(false)
+    );
+    assert_eq!(connection_items(&keyring), ["rdp-2"]);
+    // The desktop of the same name is another kind of item.
+    assert_eq!(
+        passwords(&keyring),
+        [(me.object_id.clone(), "rdp-1".to_owned())]
+    );
+}
+
 #[test]
 fn a_cache_save_queued_before_sign_out_writes_nothing() {
     let id = account_id(&identity("00000000-0000-0000-0000-0000000000f6"));

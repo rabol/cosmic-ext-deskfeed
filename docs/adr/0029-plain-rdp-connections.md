@@ -1,6 +1,6 @@
 # 0029. Plain RDP connections ("Add connection")
 
-- Status: Accepted (the owner's answers below, 2026-10-20); being built: steps 1–3 of 5 and step 4a done; 4b (connecting) next. Spec §1 and §13 changed to match.
+- Status: Accepted (the owner's answers below, 2026-10-20); being built: steps 1–4 of 5 done; step 5 (tray, docs, spec) next. Spec §1 and §13 changed to match.
 - Date: 2026-10-20
 
 ## Context
@@ -65,6 +65,8 @@ One commit per step, `just ci` before each, tests before restructuring, each new
 4. **Screens,** in two commits:
    - 4a: the sidebar entries, the Connections page, the Add/edit form (one Server field, `host`, `host:port` or `[IPv6]:port`; user name; an optional password straight to the keyring; domain, empty for automatic), Remove connection. App tests: add → listed and saved; invalid input refused with a message; edit keeps the ID; remove → password, pin, settings and favorite gone; removed elsewhere → the open form closes.
    - 4b: connecting: the password dialog without Entra, or the remembered password; the Direct launch target; settings app → connection; certificate texts without Azure; remove while connected asks first.
+   - How 4b fits in: a row's *owner* is its account, or the saved connection itself (its ID is both its key and its owner's ID, with epoch 0, since removing and adding again gives a new ID). The connect path records owners where it recorded accounts. A connection's password uses the desktops' keyring guards (a save queued before a Forget or removal writes nothing). The logon that worked is kept in the connection, where the form shows it. A user name is required: with NLA, FreeRDP would otherwise ask on a terminal Deskfeed doesn't have.
+   - Not covered by automated tests: a session that finishes starting after its connection was removed is stopped (it needs a real process); manual test 20.
 5. **Tray, docs, spec:** connections in the tray menu; README, CHANGELOG, this ADR to Accepted; spec §1 and §13; manual tests.
 
 Size: about the accounts rework plus the settings pages together, a few thousand lines with tests. RD Gateway or `.rdp` import would add about half again, each.

@@ -45,13 +45,37 @@ impl AppModel {
             }
             RdpMessage::Remove => {
                 if let Some(id) = self.connection_form.editing.clone() {
+                    // Open: ask first (ADR 0029), as for an account.
+                    if self.desks.open_count_for(&id) > 0 {
+                        self.leave_asking = Some(Leave::Connection(id));
+                        return Task::none();
+                    }
                     return self.remove_connection(&id);
                 }
             }
-            RdpMessage::PasswordStored(result) => {
-                // Status only: never the password or the host.
-                crate::app_log!("connection password in the keyring: {:?}", result.is_ok());
+            RdpMessage::OpenSettings => {
+                if let Some(id) = self.connection_form.editing.clone() {
+                    self.settings_target = Some(id);
+                    self.context_page = ContextPage::DesktopSettings;
+                    self.core.window.show_context = true;
+                }
             }
+            RdpMessage::PasswordStored { id, ticket, result } => match result {
+                // Only while nothing changed since: a removal or Forget
+                // meanwhile wins.
+                Ok(true)
+                    if self.config.connections.contains_key(&id)
+                        && self.sign_ins.password_ticket(&id, &id) == ticket =>
+                {
+                    crate::app_log!("connection password remembered");
+                    self.set_saved_password(&id, true);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    crate::app_log!("connection password not remembered ({e})");
+                    self.notice = Some(fl!("connection-password-not-saved", detail = e));
+                }
+            },
         }
         Task::none()
     }
@@ -60,7 +84,14 @@ impl AppModel {
     /// the keyring, never the settings.
     fn save_connection(&mut self) -> Task<cosmic::Action<Message>> {
         let f = &self.connection_form;
-        let saved = match SavedConnection::from_server(&f.name, &f.server, &f.username, &f.domain) {
+        let saved = match SavedConnection::from_server(&f.name, &f.server, &f.username, &f.domain)
+            .and_then(|c| {
+                if c.username.is_empty() {
+                    Err(ConnectionError::NoUserName)
+                } else {
+                    Ok(c)
+                }
+            }) {
             Ok(c) => c,
             Err(e) => {
                 self.connection_form.error = Some(describe_connection_error(e));
@@ -82,29 +113,35 @@ impl AppModel {
         if password.is_empty() {
             return Task::none();
         }
-        self.set_saved_password(&id, true);
+        // Marked remembered once it is in the keyring, as from the
+        // password dialog.
         let password = Secret::new(password);
+        let ticket = self.sign_ins.password_ticket(&id, &id);
+        let sign_ins = self.sign_ins.clone();
         cosmic::task::future(async move {
+            let owner = id.clone();
             let result = off_ui(
                 move || {
-                    crate::secrets::save_connection_password(&id, &title, &password)
+                    sign_ins
+                        .save_connection_password(&owner, &title, &password, ticket)
                         .map_err(|e| keyring_detail(&e))
                 },
                 Err(fl!("error-generic")),
             )
             .await;
-            Message::Rdp(RdpMessage::PasswordStored(result))
+            Message::Rdp(RdpMessage::PasswordStored { id, ticket, result })
         })
     }
 
     /// Removes a saved connection and everything about it: its remembered
     /// password, approved certificate, settings, logon setting and favorite.
-    fn remove_connection(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+    pub(super) fn remove_connection(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
         let mut all = self.config.connections.clone();
         if all.remove(id).is_none() {
             return Task::none();
         }
         save_config!(self, connections, set_connections, all);
+        let ended = self.end_connection(id);
         let mut pins = self.config.certificate_pins.clone();
         if pins.remove(id).is_some() {
             save_config!(self, certificate_pins, set_certificate_pins, pins);
@@ -127,19 +164,40 @@ impl AppModel {
         self.refresh_connection_rows();
         self.rebuild_nav(&Page::Connections);
         if !had_password {
-            return Task::none();
+            return ended;
         }
-        let id = id.to_owned();
-        cosmic::task::future(async move {
-            let result = off_ui(
-                move || {
-                    crate::secrets::delete_connection_password(&id).map_err(|e| keyring_detail(&e))
-                },
-                Err(fl!("error-generic")),
+        Task::batch([ended, self.forget_connection_password(id)])
+    }
+
+    /// Ends whatever a removed connection had going: its session (stopped
+    /// in the background), its dialogs and its row's state.
+    pub(super) fn end_connection(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
+        // One still starting is stopped once it has started (`launched`).
+        let running = self.desks.at(id).sign_out();
+        self.withdraw_dialogs(|d| d.key == id);
+        if self
+            .certificate_dialog
+            .as_ref()
+            .is_some_and(|d| d.key == id)
+        {
+            self.certificate_dialog = None;
+        }
+        if self.context_page == ContextPage::DesktopSettings
+            && self.settings_target.as_deref() == Some(id)
+        {
+            self.core.window.show_context = false;
+        }
+        let Some(session) = running else {
+            return Task::none();
+        };
+        Task::future(async move {
+            off_ui(
+                move || launcher::stop_all(&[session], launcher::STOP_GRACE),
+                (),
             )
             .await;
-            Message::Rdp(RdpMessage::PasswordStored(result))
         })
+        .discard()
     }
 
     /// The saved connections as rows, in title order.
@@ -225,7 +283,7 @@ impl AppModel {
                 ),
             );
         let space = cosmic::theme::spacing();
-        let mut buttons = widget::row::with_capacity(3)
+        let mut buttons = widget::row::with_capacity(4)
             .spacing(space.space_xs)
             .push(widget::button::suggested(fl!("save")).on_press(Message::Rdp(RdpMessage::Save)));
         if f.editing.is_some() {
@@ -233,6 +291,10 @@ impl AppModel {
                 .push(
                     widget::button::standard(fl!("cancel"))
                         .on_press(Message::Rdp(RdpMessage::Cancel)),
+                )
+                .push(
+                    widget::button::standard(fl!("connection-settings"))
+                        .on_press(Message::Rdp(RdpMessage::OpenSettings)),
                 )
                 .push(
                     widget::button::destructive(fl!("remove-connection"))
@@ -260,12 +322,13 @@ impl AppModel {
 }
 
 /// What the form says about a field it refused.
-fn describe_connection_error(e: ConnectionError) -> String {
+pub(super) fn describe_connection_error(e: ConnectionError) -> String {
     match e {
         ConnectionError::NoHost => fl!("error-connection-no-host"),
         ConnectionError::BadHost => fl!("error-connection-host"),
         ConnectionError::BadPort => fl!("error-connection-port"),
         ConnectionError::BadUserName => fl!("error-connection-username"),
+        ConnectionError::NoUserName => fl!("error-connection-no-username"),
         ConnectionError::BadName => fl!("error-connection-name"),
         ConnectionError::BadDomain => fl!("error-connection-domain"),
         // The form has no Entra choice; a hand-edited setting could.

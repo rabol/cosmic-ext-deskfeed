@@ -237,18 +237,9 @@ impl Accounts {
         password: &Secret,
         ticket: PasswordTicket,
     ) -> Result<bool, SecretsError> {
-        let id = account_id(identity);
-        let busy = self.busy(&id);
-        let _busy = busy.lock();
-        if self.password_ticket(&id, desktop) != ticket {
-            crate::app_log!("remembered password: not stored (signed out or forgotten meanwhile)");
-            return Ok(false);
-        }
-        secrets::save_password(identity, desktop, title, password)?;
-        self.with(&id, |a| {
-            a.saved_after.insert(desktop.to_owned(), ticket.forgets);
-        });
-        Ok(true)
+        self.save_guarded(&account_id(identity), desktop, ticket, || {
+            secrets::save_password(identity, desktop, title, password)
+        })
     }
 
     /// Deletes one desktop's remembered password. `forget`: what
@@ -259,12 +250,71 @@ impl Accounts {
         desktop: &str,
         forget: u64,
     ) -> Result<(), SecretsError> {
-        let id = account_id(identity);
-        let busy = self.busy(&id);
+        self.forget_guarded(&account_id(identity), desktop, forget, || {
+            secrets::delete_passwords(identity, Some(desktop))
+        })
+    }
+
+    /// A saved plain RDP connection's password (ADR 0029), with the same
+    /// guards as a desktop's: the connection's ID stands for both the
+    /// account and the desktop.
+    pub fn save_connection_password(
+        &self,
+        connection: &str,
+        title: &str,
+        password: &Secret,
+        ticket: PasswordTicket,
+    ) -> Result<bool, SecretsError> {
+        self.save_guarded(connection, connection, ticket, || {
+            secrets::save_connection_password(connection, title, password)
+        })
+    }
+
+    /// Deletes a saved connection's password (Forget, or removing it).
+    pub fn forget_connection_password(
+        &self,
+        connection: &str,
+        forget: u64,
+    ) -> Result<(), SecretsError> {
+        self.forget_guarded(connection, connection, forget, || {
+            secrets::delete_connection_password(connection)
+        })
+    }
+
+    /// Runs `save` under `id`'s lock, unless `id` signed out or `desktop`'s
+    /// password was forgotten since `ticket`.
+    fn save_guarded(
+        &self,
+        id: &str,
+        desktop: &str,
+        ticket: PasswordTicket,
+        save: impl FnOnce() -> Result<(), SecretsError>,
+    ) -> Result<bool, SecretsError> {
+        let busy = self.busy(id);
         let _busy = busy.lock();
-        // A password saved after this Forget was asked for is the user's
-        // newer choice: keep it.
-        let newer = self.with(&id, |a| {
+        if self.password_ticket(id, desktop) != ticket {
+            crate::app_log!("remembered password: not stored (signed out or forgotten meanwhile)");
+            return Ok(false);
+        }
+        save()?;
+        self.with(id, |a| {
+            a.saved_after.insert(desktop.to_owned(), ticket.forgets);
+        });
+        Ok(true)
+    }
+
+    /// Runs `delete` under `id`'s lock, unless a password was saved after
+    /// this Forget was asked for: that is the user's newer choice.
+    fn forget_guarded(
+        &self,
+        id: &str,
+        desktop: &str,
+        forget: u64,
+        delete: impl FnOnce() -> Result<(), SecretsError>,
+    ) -> Result<(), SecretsError> {
+        let busy = self.busy(id);
+        let _busy = busy.lock();
+        let newer = self.with(id, |a| {
             a.saved_after
                 .get(desktop)
                 .is_some_and(|&saved| saved >= forget)
@@ -272,7 +322,7 @@ impl Accounts {
         if newer {
             return Ok(());
         }
-        secrets::delete_passwords(identity, Some(desktop))
+        delete()
     }
 
     /// All saved sign-ins.

@@ -122,7 +122,7 @@ pub struct AppModel {
     signing_out: HashSet<String>,
     /// The account whose sign-out waits for an answer: it has desktops or
     /// apps open (spec §6).
-    sign_out_asking: Option<(String, Leaving)>,
+    leave_asking: Option<Leave>,
     /// What the last sign-out couldn't remove.
     cleanup_retry: Option<CleanupRetry>,
     /// The last list check (monotonic and wall clock), to notice sleep.
@@ -405,11 +405,7 @@ impl cosmic::Application for AppModel {
             }
             ContextPage::DesktopSettings => {
                 let key = self.settings_target.clone().unwrap_or_default();
-                let title = self
-                    .account_of_resource(&key)
-                    .and_then(|a| a.resource(&key))
-                    .map(|r| r.title.clone())
-                    .unwrap_or_default();
+                let title = self.title_of(&key);
                 context_drawer::context_drawer(
                     self.desktop_settings_view(&key),
                     Message::App(AppMessage::ToggleContextPage(ContextPage::DesktopSettings)),
@@ -428,17 +424,26 @@ impl cosmic::Application for AppModel {
         if self.quit == Quit::Asking {
             return Some(self.quit_dialog());
         }
-        if let Some((id, leaving)) = &self.sign_out_asking {
-            return Some(self.sign_out_dialog(id, *leaving));
+        if let Some(leave) = &self.leave_asking {
+            return Some(self.leave_dialog(leave));
         }
         if let Some(d) = &self.certificate_dialog {
             return Some(certificate::certificate_dialog(d));
         }
         let d = self.dialogs.shown()?;
-        let account = self
-            .account(&d.account)
-            .and_then(|a| a.identity.username.clone())
-            .unwrap_or_default();
+        let saved = self.config.connections.get(&d.key);
+        let account = match saved {
+            Some(c) => c.username.clone(),
+            None => self
+                .account(&d.owner)
+                .and_then(|a| a.identity.username.clone())
+                .unwrap_or_default(),
+        };
+        // A plain RDP connection has no Entra choice (ADR 0029: NLA only).
+        let logon_labels = match saved {
+            Some(_) => &self.logon_labels[..LOGON_ENTRA],
+            None => &self.logon_labels[..],
+        };
         let space = cosmic::theme::spacing();
         let mut controls = widget::column::with_capacity(6).spacing(space.space_s);
         if let Some(e) = &d.error {
@@ -464,11 +469,9 @@ impl cosmic::Application for AppModel {
         controls = controls.push(
             widget::column::with_capacity(2)
                 .push(widget::text::caption(fl!("logon-setting")))
-                .push(widget::dropdown(
-                    &self.logon_labels,
-                    Some(d.logon),
-                    |logon| Message::Connection(ConnectionMessage::LogonSelected(logon)),
-                ))
+                .push(widget::dropdown(logon_labels, Some(d.logon), |logon| {
+                    Message::Connection(ConnectionMessage::LogonSelected(logon))
+                }))
                 .spacing(space.space_xxs),
         );
         if d.logon == LOGON_CUSTOM {
@@ -487,7 +490,10 @@ impl cosmic::Application for AppModel {
                     }),
             );
         }
-        controls = controls.push(widget::text::caption(fl!("password-explainer")));
+        controls = controls.push(widget::text::caption(match saved {
+            Some(_) => fl!("connection-password-explainer"),
+            None => fl!("password-explainer"),
+        }));
 
         Some(
             widget::dialog()
@@ -642,7 +648,7 @@ impl AppModel {
             counter: 0,
             desks: desk::Desks::default(),
             signing_out: HashSet::new(),
-            sign_out_asking: None,
+            leave_asking: None,
             cleanup_retry: None,
             last_check: None,
             search: String::new(),
@@ -797,7 +803,15 @@ impl AppModel {
                 // Saved connections changed elsewhere (another instance, or
                 // the settings file edited): the list and sidebar follow.
                 let connections_changed = config.connections != self.config.connections;
+                let removed: Vec<String> = self
+                    .config
+                    .connections
+                    .keys()
+                    .filter(|id| !config.connections.contains_key(*id))
+                    .cloned()
+                    .collect();
                 self.config = *config;
+                let ended: Vec<_> = removed.iter().map(|id| self.end_connection(id)).collect();
                 if connections_changed {
                     // Saving a form for a connection removed elsewhere
                     // would bring it back.
@@ -810,6 +824,7 @@ impl AppModel {
                     let page = self.selected_page().unwrap_or(Page::Add);
                     self.rebuild_nav(&page);
                 }
+                return Task::batch(ended);
             }
             AppMessage::LaunchUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
@@ -865,6 +880,48 @@ impl AppModel {
     /// The account whose desktop list contains `key`.
     fn account_of_resource(&self, key: &str) -> Option<&Account> {
         self.accounts.iter().find(|a| a.resource(key).is_some())
+    }
+
+    // A row belongs to an owner: the account whose list has it, or a saved
+    // plain RDP connection (ADR 0029), whose ID is both its key and its
+    // owner's ID. Work for a row records its owner and the owner's epoch;
+    // a connection's epoch is always 0, since removing it and adding it
+    // again gives it a new ID.
+
+    /// The owner of row `key`.
+    fn owner_of(&self, key: &str) -> Option<String> {
+        if self.config.connections.contains_key(key) {
+            return Some(key.to_owned());
+        }
+        self.account_of_resource(key).map(|a| a.id.clone())
+    }
+
+    /// The owner's current epoch; `None` once it is gone.
+    fn owner_epoch(&self, owner: &str) -> Option<u64> {
+        if self.config.connections.contains_key(owner) {
+            return Some(0);
+        }
+        self.account(owner).map(|a| a.epoch)
+    }
+
+    /// Row `key`'s title, or empty when it is gone.
+    fn title_of(&self, key: &str) -> String {
+        if let Some(c) = self.config.connections.get(key) {
+            return c.title().to_owned();
+        }
+        self.account_of_resource(key)
+            .and_then(|a| a.resource(key))
+            .map(|r| r.title.clone())
+            .unwrap_or_default()
+    }
+
+    /// The logon setting row `key` starts with: a saved connection's own,
+    /// or the one remembered for a desktop.
+    fn logon_of(&self, key: &str) -> Option<&LogonSetting> {
+        match self.config.connections.get(key) {
+            Some(c) => Some(&c.logon),
+            None => self.config.logon_settings.get(key),
+        }
     }
 
     /// Shows the first account, or "Add account" when there is none.

@@ -143,9 +143,9 @@ pub struct ResourceView {
 pub(super) struct Start {
     /// Its connection attempt; events of other attempts are ignored.
     pub(super) attempt: u64,
-    /// Its account (sign-out ends it even if its desktop has left the
-    /// list).
-    pub(super) account: String,
+    /// Its owner: the account (sign-out ends it even if its desktop has
+    /// left the list), or the saved connection (ADR 0029).
+    pub(super) owner: String,
     /// Its window's title, as FreeRDP got it (`launcher::safe_title`), to
     /// find the window (Show).
     pub(super) title: String,
@@ -258,6 +258,9 @@ pub(super) struct Reconnect {
 pub(super) struct CertificateDialog {
     pub(super) key: String,
     pub(super) title: String,
+    /// A saved plain RDP connection's (ADR 0029): no broker vouched for it,
+    /// and there is no administrator to ask.
+    pub(super) direct: bool,
     pub(super) certificate: launcher::CertificateInfo,
     /// The approved fingerprint it differs from; then it can't be trusted
     /// here.
@@ -265,7 +268,8 @@ pub(super) struct CertificateDialog {
 }
 
 pub(super) struct PasswordDialog {
-    pub(super) account: String,
+    /// The row's owner: its account, or the saved connection.
+    pub(super) owner: String,
     pub(super) key: String,
     pub(super) title: String,
     pub(super) connection: Arc<ConnectionFile>,
@@ -312,10 +316,18 @@ pub enum RdpMessage {
     Save,
     /// Back to the list without saving.
     Cancel,
-    /// Removes the connection being edited.
+    /// Removes the connection being edited (asking first while it's open).
     Remove,
-    /// The keyring stored or deleted a connection's password (for the log).
-    PasswordStored(Result<(), String>),
+    /// The connection settings of the one being edited, in the drawer.
+    OpenSettings,
+    /// The password given in the form reached the keyring (`Ok(true)`),
+    /// was dropped because the connection was removed meanwhile
+    /// (`Ok(false)`), or couldn't be stored.
+    PasswordStored {
+        id: String,
+        ticket: crate::accounts::PasswordTicket,
+        result: Result<bool, String>,
+    },
 }
 
 /// The "Add connection" form's text fields.
@@ -398,9 +410,10 @@ pub enum AccountMessage {
     SignOutSelected,
     /// Signs the account out and takes it off the list.
     Remove(String),
-    /// The sign-out question: disconnect its sessions and sign out.
-    SignOutConfirm,
-    SignOutCancel,
+    /// The question while something leaving is open (`Leave`): disconnect
+    /// and go ahead, or keep everything.
+    LeaveConfirm,
+    LeaveCancel,
     /// The keyring part of a sign-out, with the identity to try again.
     SignOutFinished {
         account: String,
@@ -444,7 +457,8 @@ pub enum ConnectionMessage {
     DialogCancel,
     /// FreeRDP started, or why not.
     Launched {
-        account: String,
+        /// The row's owner (account or saved connection) and its epoch.
+        owner: String,
         epoch: u64,
         key: String,
         attempt: u64,
@@ -452,7 +466,8 @@ pub enum ConnectionMessage {
     },
     /// An event from a running session.
     Session {
-        account: String,
+        /// The row's owner (account or saved connection) and its epoch.
+        owner: String,
         epoch: u64,
         key: String,
         attempt: u64,
@@ -467,7 +482,8 @@ pub enum ConnectionMessage {
     ToggleRememberPassword(bool),
     /// A remembered password was read.
     SavedPasswordLoaded {
-        account: String,
+        /// The row's owner (account or saved connection) and its epoch.
+        owner: String,
         epoch: u64,
         key: String,
         logon: LogonSetting,
@@ -478,7 +494,7 @@ pub enum ConnectionMessage {
     /// under, and whether it was stored.
     PasswordSaved {
         key: String,
-        account: String,
+        owner: String,
         ticket: crate::accounts::PasswordTicket,
         result: Result<bool, String>,
     },
@@ -588,6 +604,15 @@ pub enum AppMessage {
 pub enum Leaving {
     SignOut,
     Remove,
+}
+
+/// What the "it's open: disconnect first?" question is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Leave {
+    /// Signing out of or removing an account.
+    Account(String, Leaving),
+    /// Removing a saved plain RDP connection (ADR 0029).
+    Connection(String),
 }
 
 /// Why a background step for an account failed.

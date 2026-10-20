@@ -5,6 +5,7 @@
 
 #[allow(clippy::wildcard_imports)] // see app/mod.rs
 use super::*;
+use crate::connections::ConnectionError;
 
 impl AppModel {
     /// Connection messages: connecting, the password dialog, sessions, the workspace move. Routed here by `route`.
@@ -74,7 +75,7 @@ impl AppModel {
             }
             ConnectionMessage::DialogConnect => return self.dialog_connect(),
             ConnectionMessage::Launched {
-                account: id,
+                owner: id,
                 epoch,
                 key,
                 attempt,
@@ -95,7 +96,7 @@ impl AppModel {
                 }
             }
             ConnectionMessage::SavedPasswordLoaded {
-                account,
+                owner: account,
                 epoch,
                 key,
                 logon,
@@ -106,14 +107,14 @@ impl AppModel {
             }
             ConnectionMessage::PasswordSaved {
                 key,
-                account: id,
+                owner: id,
                 ticket,
                 result,
             } => match result {
                 // Only while nothing changed since: a sign-out or Forget
                 // meanwhile wins.
                 Ok(true)
-                    if self.account(&id).is_some()
+                    if self.owner_epoch(&id).is_some()
                         && self.sign_ins.password_ticket(&id, &key) == ticket =>
                 {
                     crate::app_log!("Windows password remembered for a desktop");
@@ -156,7 +157,7 @@ impl AppModel {
                 }
             }
             ConnectionMessage::Session {
-                account: id,
+                owner: id,
                 epoch,
                 key,
                 attempt,
@@ -164,7 +165,7 @@ impl AppModel {
             } => {
                 // Only the current attempt's events: a reader may still
                 // report after its session ended.
-                if self.account(&id).is_some_and(|a| a.epoch == epoch)
+                if self.owner_epoch(&id) == Some(epoch)
                     && self
                         .desks
                         .running(&key)
@@ -248,6 +249,9 @@ impl AppModel {
         {
             return Task::none(); // no accidental duplicate launches
         }
+        if self.config.connections.contains_key(key) {
+            return self.prepare_direct(key);
+        }
         let Some(account) = self.account_of_resource(key) else {
             return Task::none();
         };
@@ -317,11 +321,40 @@ impl AppModel {
         })
     }
 
+    /// Step 1 for a saved plain RDP connection (ADR 0029): the connection
+    /// file is Deskfeed's own, naming only its address; the saved fields are
+    /// checked again, since a settings file can be edited by hand.
+    fn prepare_direct(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
+        let Some(c) = self.config.connections.get(key) else {
+            return Task::none();
+        };
+        let file = match c.check() {
+            Ok(()) if c.username.trim().is_empty() => Err(super::rdp::describe_connection_error(
+                ConnectionError::NoUserName,
+            )),
+            Ok(()) => {
+                ConnectionFile::direct(&c.address()).ok_or_else(|| fl!("error-connection-host"))
+            }
+            Err(e) => Err(super::rdp::describe_connection_error(e)),
+        };
+        let file = match file {
+            Ok(f) => Arc::new(f),
+            Err(e) => {
+                self.desks.take_reconnect(key);
+                self.desks.set_conn(key, Connection::Failed(e));
+                return Task::none();
+            }
+        };
+        self.desks.set_conn(key, Connection::Preparing);
+        let key = key.to_owned();
+        self.connection_file_ready(&key.clone(), key, Ok(file))
+    }
+
     /// Step 2: Entra sign-in first; the Windows password only when chosen or
     /// after Entra sign-in failed.
     pub(super) fn connection_file_ready(
         &mut self,
-        account: &str,
+        owner: &str,
         key: String,
         result: Result<Arc<ConnectionFile>, String>,
     ) -> Task<cosmic::Action<Message>> {
@@ -335,17 +368,17 @@ impl AppModel {
             }
         };
         let remembered = match decide::first_step(
-            self.config.logon_settings.get(&key),
+            self.logon_of(&key),
             self.desks.get(&key).is_some_and(|d| d.entra_failed),
         ) {
             decide::FirstStep::Entra => {
-                return self.launch(account, &key, &connection, LogonSetting::EntraSignIn, None);
+                return self.launch(owner, &key, &connection, LogonSetting::EntraSignIn, None);
             }
             // A remembered password: no dialog (also when reconnecting).
             decide::FirstStep::AskPassword(setting)
                 if setting.needs_password() && self.config.saved_passwords.contains(&key) =>
             {
-                return self.load_saved_password(account, key, connection, setting);
+                return self.load_saved_password(owner, key, connection, setting);
             }
             // Reconnecting never opens the password dialog by itself.
             decide::FirstStep::AskPassword(_) if self.desks.take_reconnect(&key).is_some() => {
@@ -355,7 +388,7 @@ impl AppModel {
             }
             decide::FirstStep::AskPassword(setting) => setting,
         };
-        self.open_password_dialog(account, key, connection, &remembered);
+        self.open_password_dialog(owner, key, connection, &remembered);
         Task::none()
     }
 }

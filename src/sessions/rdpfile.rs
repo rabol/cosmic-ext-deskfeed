@@ -317,9 +317,6 @@ impl ConnectionFile {
     /// only its address, checked like a feed file's `full address`, so no
     /// other property can get in. With no administrator's file, the user's
     /// own settings decide the devices.
-    // Used from the screens in step 4 of ADR 0029; until then by the tests
-    // only.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn direct(address: &str) -> Option<Self> {
         is_host_port(address).then(|| Self::with_address(address))
     }

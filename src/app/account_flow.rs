@@ -130,12 +130,12 @@ impl AppModel {
                     return self.ask_leave(&id, Leaving::SignOut);
                 }
             }
-            AccountMessage::SignOutConfirm => {
-                if let Some((id, leaving)) = self.sign_out_asking.take() {
-                    return self.sign_out(&id, leaving);
-                }
-            }
-            AccountMessage::SignOutCancel => self.sign_out_asking = None,
+            AccountMessage::LeaveConfirm => match self.leave_asking.take() {
+                Some(Leave::Account(id, leaving)) => return self.sign_out(&id, leaving),
+                Some(Leave::Connection(id)) => return self.remove_connection(&id),
+                None => {}
+            },
+            AccountMessage::LeaveCancel => self.leave_asking = None,
             AccountMessage::SignOutFinished {
                 account: id,
                 identity,
@@ -158,11 +158,7 @@ impl AppModel {
                 }
                 // A session still starting removes the files once more
                 // when it has been stopped (`launched`).
-                if !self
-                    .desks
-                    .all_launching()
-                    .any(|(_, l)| l.start.account == id)
-                {
+                if !self.desks.all_launching().any(|(_, l)| l.start.owner == id) {
                     self.signing_out.remove(&id);
                 }
                 if self.quit == Quit::Stopping {
@@ -898,14 +894,41 @@ impl AppModel {
         if self.desks.open_count_for(id) == 0 {
             return self.sign_out(id, leaving);
         }
-        self.sign_out_asking = Some((id.to_owned(), leaving));
+        self.leave_asking = Some(Leave::Account(id.to_owned(), leaving));
         Task::none()
     }
 
-    pub(super) fn sign_out_dialog(&self, id: &str, leaving: Leaving) -> Element<'_, Message> {
+    /// The question while what is leaving is open: an account's desktops
+    /// or apps, or a saved connection.
+    pub(super) fn leave_dialog(&self, leave: &Leave) -> Element<'_, Message> {
+        let (title, body, confirm) = match leave {
+            Leave::Account(id, leaving) => self.sign_out_texts(id, *leaving),
+            Leave::Connection(id) => (
+                fl!("remove-connection-title", connection = self.title_of(id)),
+                fl!("remove-connection-body"),
+                fl!("remove-disconnect"),
+            ),
+        };
+        widget::dialog()
+            .title(title)
+            .body(body)
+            .primary_action(
+                widget::button::destructive(confirm)
+                    .on_press(Message::Account(AccountMessage::LeaveConfirm)),
+            )
+            .secondary_action(
+                widget::button::standard(fl!("cancel"))
+                    .on_press(Message::Account(AccountMessage::LeaveCancel)),
+            )
+            .into()
+    }
+
+    /// Title, text and confirm button for signing out or removing an
+    /// account.
+    fn sign_out_texts(&self, id: &str, leaving: Leaving) -> (String, String, String) {
         let label = self.account(id).map(Account::label).unwrap_or_default();
         let open = u32::try_from(self.desks.open_count_for(id)).unwrap_or(u32::MAX);
-        let (title, body, confirm) = match leaving {
+        match leaving {
             Leaving::SignOut => (
                 fl!("sign-out-title", account = label),
                 fl!("sign-out-body", count = open),
@@ -916,19 +939,7 @@ impl AppModel {
                 fl!("remove-body", count = open),
                 fl!("remove-disconnect"),
             ),
-        };
-        widget::dialog()
-            .title(title)
-            .body(body)
-            .primary_action(
-                widget::button::destructive(confirm)
-                    .on_press(Message::Account(AccountMessage::SignOutConfirm)),
-            )
-            .secondary_action(
-                widget::button::standard(fl!("cancel"))
-                    .on_press(Message::Account(AccountMessage::SignOutCancel)),
-            )
-            .into()
+        }
     }
 
     /// Signs one account out: ends its sessions and deletes its cookies,
@@ -972,13 +983,13 @@ impl AppModel {
         keys.extend(
             self.desks
                 .all_running()
-                .filter(|(_, r)| r.start.account == id)
+                .filter(|(_, r)| r.start.owner == id)
                 .map(|(k, _)| k.clone()),
         );
         keys.extend(
             self.desks
                 .all_launching()
-                .filter(|(_, l)| l.start.account == id)
+                .filter(|(_, l)| l.start.owner == id)
                 .map(|(k, _)| k.clone()),
         );
         let mut sessions = Vec::new();
@@ -988,7 +999,7 @@ impl AppModel {
             sessions.extend(self.desks.at(&key).sign_out());
             self.set_saved_password(&key, false);
         }
-        self.withdraw_dialogs(|d| d.account == id);
+        self.withdraw_dialogs(|d| d.owner == id);
         self.signing_out.insert(id.to_owned());
         match leaving {
             Leaving::Remove => self.select_first_account(),

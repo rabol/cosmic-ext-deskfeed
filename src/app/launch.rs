@@ -13,26 +13,21 @@ impl AppModel {
     #[allow(clippy::too_many_lines)]
     pub(super) fn launch(
         &mut self,
-        account: &str,
+        owner: &str,
         key: &str,
         connection: &Arc<ConnectionFile>,
         logon: LogonSetting,
         password: Option<Secret>,
     ) -> Task<cosmic::Action<Message>> {
-        let Some((signed_in, epoch)) = self
-            .account(account)
-            .and_then(|a| Some((a.signed_in()?.clone(), a.epoch)))
-        else {
+        let Some(epoch) = self.owner_epoch(owner) else {
             return Task::none();
         };
-        let (Some(helper), Some(profile)) =
-            (signin::find_helper(), accounts::prepared_profile(account))
-        else {
-            self.desks
-                .set_conn(key, Connection::Failed(fl!("error-helper-missing")));
+        let Some((target, username, window_title)) = self.launch_target(owner, key) else {
             return Task::none();
         };
-        let mut settings = self.effective_settings(account, key);
+        // A saved connection has no account level: its ID matches no
+        // account's settings, so the app's apply (ADR 0029).
+        let mut settings = self.effective_settings(owner, key);
         // A RemoteApp's windows are ordinary windows (ADR 0020): no full
         // screen to keep awake, no single window to move to a workspace.
         let remote_app = connection.remote_app();
@@ -71,26 +66,12 @@ impl AppModel {
             },
         ));
         self.desks.at(key).note = (!notes.is_empty()).then(|| notes.join(" · "));
-        let window_title = self
-            .account(account)
-            .and_then(|a| Some(format!("{} – {}", a.resource(key)?.title, a.label())))
-            .unwrap_or_default();
         let spec = LaunchSpec {
             connection: (**connection).clone(),
-            // Always the account's name. For a password logon the AVD
-            // service's `redirectedUsername` replaces it anyway (FreeRDP
-            // 3.32.2 `gateway/arm.c`, `arm_fill_rdstls`); only the domain
-            // is the user's choice (logon setting, ADR 0005).
-            username: signed_in.identity.username.clone(),
+            username,
             password,
             logon: logon.clone(),
-            target: launcher::Target::Azure {
-                helper,
-                profile,
-                gateway_token: (!signed_in.tokens.needs_refresh(Instant::now()))
-                    .then(|| signed_in.tokens.access_token.clone()),
-                login_hint: signed_in.identity.username.clone(),
-            },
+            target,
             pinned_certificate: self.config.certificate_pins.get(key).cloned(),
             settings,
             window_title: window_title.clone(),
@@ -119,7 +100,7 @@ impl AppModel {
         self.desks.at(key).launching = Some(Launching {
             start: Start {
                 attempt,
-                account: account.to_owned(),
+                owner: owner.to_owned(),
                 title: title.clone(),
                 grabs_shortcuts: settings.system_shortcuts,
                 keep_awake: settings.keep_awake,
@@ -132,7 +113,7 @@ impl AppModel {
         // the UI thread. Its events follow once it has started.
         let (tx, rx) = mpsc::unbounded();
         let started = {
-            let (account, key) = (account.to_owned(), key.to_owned());
+            let (owner, key) = (owner.to_owned(), key.to_owned());
             cosmic::task::future(async move {
                 let result = off_ui(
                     move || {
@@ -157,7 +138,7 @@ impl AppModel {
                 )
                 .await;
                 Message::Connection(ConnectionMessage::Launched {
-                    account,
+                    owner,
                     epoch,
                     key,
                     attempt,
@@ -166,10 +147,10 @@ impl AppModel {
             })
         };
         let events = {
-            let (account, key) = (account.to_owned(), key.to_owned());
+            let (owner, key) = (owner.to_owned(), key.to_owned());
             cosmic::task::stream(rx.map(move |e| {
                 Message::Connection(ConnectionMessage::Session {
-                    account: account.clone(),
+                    owner: owner.clone(),
                     epoch,
                     key: key.clone(),
                     attempt,
@@ -182,6 +163,50 @@ impl AppModel {
             return session;
         }
         Task::batch([session, self.mover(key, title, &settings)])
+    }
+
+    /// Where FreeRDP connects, as whom, and its window's title: a saved
+    /// plain RDP connection directly (ADR 0029), a desktop through Azure.
+    /// `None` when it can't start (the row says why, if there is a reason
+    /// to give).
+    fn launch_target(
+        &mut self,
+        owner: &str,
+        key: &str,
+    ) -> Option<(launcher::Target, Option<String>, String)> {
+        if let Some(c) = self.config.connections.get(key) {
+            // Its own user name; no gateway, no Azure sign-in.
+            return Some((
+                launcher::Target::Direct,
+                Some(c.username.clone()),
+                c.title().to_owned(),
+            ));
+        }
+        let a = self.account(owner)?;
+        let signed_in = a.signed_in().cloned()?;
+        let window_title = a
+            .resource(key)
+            .map(|r| format!("{} – {}", r.title, a.label()))
+            .unwrap_or_default();
+        let (Some(helper), Some(profile)) =
+            (signin::find_helper(), accounts::prepared_profile(owner))
+        else {
+            self.desks
+                .set_conn(key, Connection::Failed(fl!("error-helper-missing")));
+            return None;
+        };
+        let target = launcher::Target::Azure {
+            helper,
+            profile,
+            gateway_token: (!signed_in.tokens.needs_refresh(Instant::now()))
+                .then(|| signed_in.tokens.access_token.clone()),
+            login_hint: signed_in.identity.username.clone(),
+        };
+        // Always the account's name. For a password logon the AVD service's
+        // `redirectedUsername` replaces it anyway (FreeRDP 3.32.2
+        // `gateway/arm.c`, `arm_fill_rdstls`); only the domain is the
+        // user's choice (logon setting, ADR 0005).
+        Some((target, signed_in.identity.username.clone(), window_title))
     }
 
     /// "Open on a new workspace": waits for the session's window and moves
@@ -239,7 +264,7 @@ impl AppModel {
     /// (disconnected, signed out or quitting meanwhile) is stopped at once.
     pub(super) fn launched(
         &mut self,
-        account: &str,
+        owner: &str,
         epoch: u64,
         key: String,
         attempt: u64,
@@ -261,19 +286,21 @@ impl AppModel {
             deadline,
             stop,
         } = self.desks.at(&key).launching.take().expect("checked above");
-        let owner = start.account.clone();
-        let current = self.account(account).is_some_and(|a| a.epoch == epoch);
+        let started_by = start.owner.clone();
+        let current = self.owner_epoch(owner) == Some(epoch);
         match result {
-            Ok(session) if self.quit != Quit::Stopping && self.signing_out.contains(&owner) => {
+            Ok(session)
+                if self.quit != Quit::Stopping && self.signing_out.contains(&started_by) =>
+            {
                 // Its account is being signed out: stop it, then delete the
                 // files once more in case its sign-in helper wrote any.
                 let sign_ins = self.sign_ins.clone();
                 return cosmic::task::future(async move {
-                    let id = owner.clone();
+                    let id = started_by.clone();
                     let result = off_ui(
                         move || {
                             launcher::stop_all(&[session], launcher::STOP_GRACE);
-                            sign_ins.remove_files(&owner)
+                            sign_ins.remove_files(&started_by)
                         },
                         Err(()),
                     )
@@ -283,6 +310,20 @@ impl AppModel {
                         result,
                     })
                 });
+            }
+            // Its saved connection was removed meanwhile (ADR 0029): no row
+            // shows it and its events would be ignored, so it isn't kept.
+            Ok(session)
+                if self.quit != Quit::Stopping && self.owner_epoch(&started_by).is_none() =>
+            {
+                return Task::future(async move {
+                    off_ui(
+                        move || launcher::stop_all(&[session], launcher::STOP_GRACE),
+                        (),
+                    )
+                    .await;
+                })
+                .discard();
             }
             Ok(session) => {
                 let wanted = self.quit == Quit::No && !stop && current;

@@ -223,11 +223,11 @@ impl Desks {
     /// The account's sessions running or starting.
     pub(super) fn open_count_for(&self, account: &str) -> usize {
         self.all_running()
-            .filter(|(_, r)| r.start.account == account)
+            .filter(|(_, r)| r.start.owner == account)
             .count()
             + self
                 .all_launching()
-                .filter(|(_, l)| l.start.account == account)
+                .filter(|(_, l)| l.start.owner == account)
                 .count()
     }
 
@@ -291,7 +291,7 @@ mod tests {
         Launching {
             start: Start {
                 attempt: 1,
-                account: account.into(),
+                owner: account.into(),
                 title: "Desk".into(),
                 grabs_shortcuts: false,
                 keep_awake: false,

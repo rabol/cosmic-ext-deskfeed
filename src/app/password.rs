@@ -5,26 +5,23 @@
 
 #[allow(clippy::wildcard_imports)] // see app/mod.rs
 use super::*;
+use crate::connections::SavedConnection;
 
 impl AppModel {
     /// The password dialog, preset to `remembered`.
     pub(super) fn open_password_dialog(
         &mut self,
-        account: &str,
+        owner: &str,
         key: String,
         connection: Arc<ConnectionFile>,
         remembered: &LogonSetting,
     ) {
-        let title = self
-            .account(account)
-            .and_then(|a| a.resource(&key))
-            .map(|r| r.title.clone())
-            .unwrap_or_default();
+        let title = self.title_of(&key);
         let (logon, custom_domain) = logon_index(remembered);
         let error = self.desks.get_mut(&key).and_then(|d| d.last_failure.take());
         self.desks.set_conn(&key, Connection::AwaitingUser);
         let dialog = PasswordDialog {
-            account: account.to_owned(),
+            owner: owner.to_owned(),
             key,
             title,
             connection,
@@ -47,25 +44,33 @@ impl AppModel {
     /// Reads a desktop's remembered password in the background.
     pub(super) fn load_saved_password(
         &mut self,
-        account: &str,
+        owner: &str,
         key: String,
         connection: Arc<ConnectionFile>,
         logon: LogonSetting,
     ) -> Task<cosmic::Action<Message>> {
-        let Some((identity, epoch)) = self.account(account).map(|a| (a.identity.clone(), a.epoch))
-        else {
+        let Some(epoch) = self.owner_epoch(owner) else {
             return Task::none();
         };
-        let account = account.to_owned();
+        // A saved connection's password is its own kind of keyring item
+        // (ADR 0029); a desktop's belongs to its account.
+        let identity = self.account(owner).map(|a| a.identity.clone());
+        let owner = owner.to_owned();
         cosmic::task::future(async move {
-            let owner = key.clone();
+            let desktop = key.clone();
             let result = off_ui(
-                move || crate::secrets::load_password(&identity, &owner).map_err(|e| e.to_string()),
+                move || {
+                    match &identity {
+                        Some(identity) => crate::secrets::load_password(identity, &desktop),
+                        None => crate::secrets::load_connection_password(&desktop),
+                    }
+                    .map_err(|e| e.to_string())
+                },
                 Err("task".into()),
             )
             .await;
             Message::Connection(ConnectionMessage::SavedPasswordLoaded {
-                account,
+                owner,
                 epoch,
                 key,
                 logon,
@@ -78,14 +83,14 @@ impl AppModel {
     /// A remembered password arrived: connect with it, or ask.
     pub(super) fn saved_password_loaded(
         &mut self,
-        account: &str,
+        owner: &str,
         epoch: u64,
         key: String,
         logon: LogonSetting,
         connection: Arc<ConnectionFile>,
         result: Result<Option<Secret>, String>,
     ) -> Task<cosmic::Action<Message>> {
-        if self.account(account).is_none_or(|a| a.epoch != epoch)
+        if self.owner_epoch(owner) != Some(epoch)
             || !matches!(self.desks.conn(&key), Some(Connection::Preparing))
         {
             return Task::none();
@@ -93,7 +98,7 @@ impl AppModel {
         match result {
             Ok(Some(password)) => {
                 self.desks.at(&key).used_saved_password = true;
-                return self.launch(account, &key, &connection, logon, Some(password));
+                return self.launch(owner, &key, &connection, logon, Some(password));
             }
             Ok(None) => {
                 crate::app_log!("remembered password not in the keyring any more");
@@ -106,7 +111,7 @@ impl AppModel {
                 .set_conn(&key, Connection::Failed(fl!("error-connection-lost")));
             return Task::none();
         }
-        self.open_password_dialog(account, key, connection, &logon);
+        self.open_password_dialog(owner, key, connection, &logon);
         Task::none()
     }
 
@@ -128,6 +133,9 @@ impl AppModel {
     /// background.
     pub(super) fn forget_password(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
         self.set_saved_password(key, false);
+        if self.config.connections.contains_key(key) {
+            return self.forget_connection_password(key);
+        }
         let Some((identity, id)) = self
             .account_of_resource(key)
             .map(|a| (a.identity.clone(), a.id.clone()))
@@ -145,6 +153,25 @@ impl AppModel {
             )
             .await;
             crate::app_log!("remembered password deleted: {deleted}");
+        })
+        .discard()
+    }
+
+    /// Deletes a saved connection's remembered password in the background;
+    /// also when removing the connection, so after it is gone from the
+    /// settings.
+    pub(super) fn forget_connection_password(&self, id: &str) -> Task<cosmic::Action<Message>> {
+        // At once: a save already on its way writes nothing.
+        let forget = self.sign_ins.note_forget(id, id);
+        let id = id.to_owned();
+        let sign_ins = self.sign_ins.clone();
+        Task::future(async move {
+            let deleted = off_ui(
+                move || sign_ins.forget_connection_password(&id, forget).is_ok(),
+                false,
+            )
+            .await;
+            crate::app_log!("remembered connection password deleted: {deleted}");
         })
         .discard()
     }
@@ -185,11 +212,19 @@ impl AppModel {
             (Some(p), true) => Some(p.clone()),
             _ => None,
         };
-        self.launch(&d.account, &d.key, &d.connection, logon, password)
+        self.launch(&d.owner, &d.key, &d.connection, logon, password)
     }
 
     pub(super) fn remember_logon(&mut self, key: &str, logon: LogonSetting) {
-        if self.config.logon_settings.get(key) == Some(&logon) {
+        if self.logon_of(key) == Some(&logon) {
+            return;
+        }
+        // A saved connection keeps it with its other fields, where its form
+        // shows it (the domain).
+        if let Some(c) = self.config.connections.get(key) {
+            let mut all = self.config.connections.clone();
+            all.insert(key.to_owned(), SavedConnection { logon, ..c.clone() });
+            save_config!(self, connections, set_connections, all);
             return;
         }
         let mut map = self.config.logon_settings.clone();

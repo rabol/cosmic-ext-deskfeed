@@ -119,7 +119,7 @@ impl AppModel {
             .tray_keys()
             .any(|k| matches!(self.desks.conn(k), Some(Connection::Failed(_))));
         let needs_sign_in = self.desks.tray_keys().any(|k| {
-            self.account_of_resource(k).is_none()
+            self.owner_of(k).is_none()
                 && self
                     .accounts
                     .iter()

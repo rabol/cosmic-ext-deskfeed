@@ -40,37 +40,8 @@ impl AppModel {
                     .desks
                     .get_mut(key)
                     .and_then(|d| d.pending_password.take())
-                    && let Some(account) = self.account_of_resource(key)
                 {
-                    let identity = account.identity.clone();
-                    let id = account.id.clone();
-                    let title = account
-                        .resource(key)
-                        .map(|r| r.title.clone())
-                        .unwrap_or_default();
-                    let key = key.to_owned();
-                    // Read now: a sign-out or Forget before the save runs
-                    // stops it.
-                    let ticket = self.sign_ins.password_ticket(&id, &key);
-                    let sign_ins = self.sign_ins.clone();
-                    save_task = cosmic::task::future(async move {
-                        let owner = key.clone();
-                        let result = off_ui(
-                            move || {
-                                sign_ins
-                                    .save_password(&identity, &owner, &title, &password, ticket)
-                                    .map_err(|e| keyring_detail(&e))
-                            },
-                            Err("task".into()),
-                        )
-                        .await;
-                        Message::Connection(ConnectionMessage::PasswordSaved {
-                            key,
-                            account: id,
-                            ticket,
-                            result,
-                        })
-                    });
+                    save_task = self.save_password(key, password);
                 }
                 let desk = self.desks.at(key);
                 desk.connection = Some(Connection::Connected);
@@ -84,6 +55,45 @@ impl AppModel {
             SessionEvent::Ended { end, log } => return self.session_ended(key, &end, &log),
         }
         save_task
+    }
+
+    /// Remembers the password a connection just worked with ("Remember
+    /// this password"), in the background: a desktop's under its account,
+    /// a saved connection's as its own item (ADR 0029).
+    fn save_password(&self, key: &str, password: Secret) -> Task<cosmic::Action<Message>> {
+        let Some(owner) = self.owner_of(key) else {
+            return Task::none();
+        };
+        let identity = self.account(&owner).map(|a| a.identity.clone());
+        let title = self.title_of(key);
+        let key = key.to_owned();
+        // Read now: a sign-out, Forget or removal before the save runs
+        // stops it.
+        let ticket = self.sign_ins.password_ticket(&owner, &key);
+        let sign_ins = self.sign_ins.clone();
+        cosmic::task::future(async move {
+            let desktop = key.clone();
+            let result =
+                off_ui(
+                    move || {
+                        match &identity {
+                            Some(identity) => sign_ins
+                                .save_password(identity, &desktop, &title, &password, ticket),
+                            None => sign_ins
+                                .save_connection_password(&desktop, &title, &password, ticket),
+                        }
+                        .map_err(|e| keyring_detail(&e))
+                    },
+                    Err("task".into()),
+                )
+                .await;
+            Message::Connection(ConnectionMessage::PasswordSaved {
+                key,
+                owner,
+                ticket,
+                result,
+            })
+        })
     }
 
     /// A session's FreeRDP ended: clear its state, then reconnect, explain,
@@ -101,7 +111,7 @@ impl AppModel {
         let ended = self
             .desks
             .running(key)
-            .map(|r| (r.start.attempt, r.start.remote_app, r.start.account.clone()));
+            .map(|r| (r.start.attempt, r.start.remote_app, r.start.owner.clone()));
         // What belonged to this attempt goes (`Desk::end_attempt`).
         let crate::app::desk::EndedAttempt {
             used_saved_password: used_saved,
@@ -141,8 +151,8 @@ impl AppModel {
         let tried = pending.as_ref().map(|(logon, _)| logon);
         let reconnecting = self.desks.reconnect(key).is_some();
         let wanted = self
-            .account_of_resource(key)
-            .is_some_and(|a| self.effective_settings(&a.id, key).reconnect);
+            .owner_of(key)
+            .is_some_and(|owner| self.effective_settings(&owner, key).reconnect);
         let timed_out = self.desks.get(key).is_some_and(|d| d.timed_out);
         if wanted
             && self.quit == Quit::No
@@ -169,7 +179,7 @@ impl AppModel {
         let outcome = decide::end_outcome(
             end,
             was_connected,
-            self.config.logon_settings.get(key),
+            self.logon_of(key),
             tried,
             self.desks.get(key).map_or(0, |d| d.entra_failures),
         );
@@ -185,11 +195,7 @@ impl AppModel {
             let pinned = self.config.certificate_pins.get(key).cloned();
             let step = decide::certificate_step(pinned.as_deref(), &certificate.fingerprint);
             crate::app_log!("session host certificate not trusted: {step:?}");
-            let title = self
-                .account_of_resource(key)
-                .and_then(|a| a.resource(key))
-                .map(|r| r.title.clone())
-                .unwrap_or_default();
+            let title = self.title_of(key);
             self.desks.set_conn(
                 key,
                 Connection::Failed(match step {
@@ -200,6 +206,7 @@ impl AppModel {
             self.certificate_dialog = Some(CertificateDialog {
                 key: key.to_owned(),
                 title,
+                direct: self.config.connections.contains_key(key),
                 certificate: certificate.clone(),
                 changed_from: (step == decide::CertificateStep::Changed)
                     .then_some(pinned)
@@ -268,14 +275,14 @@ impl AppModel {
             .desks
             .all_running()
             .filter(|(k, r)| {
-                r.start.remote_app && r.start.account == account && *k != key && !leaving(k)
+                r.start.remote_app && r.start.owner == account && *k != key && !leaving(k)
             })
             .map(|(k, r)| (k.as_str(), r.start.attempt));
         let launching = self
             .desks
             .all_launching()
             .filter(|(k, l)| {
-                l.start.remote_app && l.start.account == account && *k != key && !leaving(k)
+                l.start.remote_app && l.start.owner == account && *k != key && !leaving(k)
             })
             .map(|(k, l)| (k.as_str(), l.start.attempt));
         decide::moved_to(end, was_connected, attempt, running.chain(launching)).map(str::to_owned)
@@ -285,8 +292,8 @@ impl AppModel {
     /// desktop's "Reconnect attempts".
     pub(super) fn schedule_reconnect(&mut self, key: &str) -> Task<cosmic::Action<Message>> {
         let Some(of) = self
-            .account_of_resource(key)
-            .map(|a| self.effective_settings(&a.id, key).reconnect_attempts)
+            .owner_of(key)
+            .map(|owner| self.effective_settings(&owner, key).reconnect_attempts)
         else {
             self.desks.take_reconnect(key);
             return Task::none();
