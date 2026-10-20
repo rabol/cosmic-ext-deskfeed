@@ -967,6 +967,7 @@ dependencies = [
  "libcosmic",
  "open",
  "ring",
+ "ron",
  "roxmltree",
  "rust-embed",
  "rustls",

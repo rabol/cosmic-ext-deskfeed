@@ -285,7 +285,6 @@ mod tests {
     fn resource(key: &str, title: &str, kind: ResourceKind) -> ResourceView {
         ResourceView {
             key: key.into(),
-            legacy_key: String::new(),
             title: title.into(),
             kind,
             connection_file: None,

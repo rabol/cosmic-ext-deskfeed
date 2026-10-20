@@ -548,7 +548,6 @@ mod tests {
     fn desktop(title: &str) -> ResourceView {
         ResourceView {
             key: title.into(),
-            legacy_key: String::new(),
             title: title.into(),
             kind: ResourceKind::Desktop,
             connection_file: None,

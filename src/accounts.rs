@@ -25,8 +25,6 @@ use crate::service::http::Http;
 /// Folder of the RAM cookie folders; shared with the helper
 /// (`signin/src/session_jar.rs`).
 const JAR_DIR: &str = "cosmic-ext-deskfeed-web";
-/// The profile name used before multiple accounts existed.
-const LEGACY_PROFILE: &str = "default";
 
 /// Opaque, stable ID for an account: a hash of tenant and object ID, in
 /// hex (so never `new-…` or `default`). Used for folder names and config
@@ -124,18 +122,6 @@ pub fn adopt_profile(used: &Path, id: &str) {
             let _ = fs::remove_dir_all(&to);
             let _ = fs::rename(from, to);
         }
-    }
-}
-
-/// Before multiple accounts, the one profile was called `default`. The
-/// first account restored takes it over.
-pub fn adopt_legacy_profile(id: &str) {
-    let (Some(root), Some(target)) = (profiles_root(), profile_dir(id)) else {
-        return;
-    };
-    let legacy = root.join(LEGACY_PROFILE);
-    if legacy.exists() && !target.exists() {
-        adopt_profile(&legacy, id);
     }
 }
 

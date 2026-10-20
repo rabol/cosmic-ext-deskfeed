@@ -157,7 +157,6 @@ impl AppModel {
             if self.account(&id).is_some() {
                 continue;
             }
-            accounts::adopt_legacy_profile(&id);
             let epoch = self.next();
             let mut account = Account::new(
                 id.clone(),
@@ -608,17 +607,11 @@ impl AppModel {
             *loading = false;
             match result {
                 Ok(list) => {
-                    let pairs: Vec<(String, String)> = list
-                        .iter()
-                        .flat_map(|w| &w.resources)
-                        .map(|r| (r.legacy_key.clone(), r.key.clone()))
-                        .collect();
                     let save = list.clone();
                     *workspaces = list;
                     *error = None;
                     account.last_refreshed = Some(SystemTime::now());
                     account.cached = None;
-                    self.migrate_resource_keys(&pairs);
                     return Task::batch([self.fetch_icons(id), self.save_cached(id, &save)]);
                 }
                 Err(e) => *error = Some(e),
@@ -699,20 +692,6 @@ impl AppModel {
         for (url, bytes) in icons {
             self.icons
                 .insert((id.to_owned(), url), widget::icon::from_raster_bytes(bytes));
-        }
-    }
-
-    /// Saved per-desktop settings under keys from before workspaces were
-    /// part of them move to the new keys.
-    fn migrate_resource_keys(&mut self, pairs: &[(String, String)]) {
-        let Some(handler) = &self.config_handler else {
-            return;
-        };
-        if let Some(map) = migrate_keys(&self.config.logon_settings, pairs) {
-            let _ = self.config.set_logon_settings(handler, map);
-        }
-        if let Some(map) = migrate_keys(&self.config.desktop_settings, pairs) {
-            let _ = self.config.set_desktop_settings(handler, map);
         }
     }
 

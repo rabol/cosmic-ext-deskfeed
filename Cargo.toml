@@ -48,6 +48,9 @@ x11rb = { version = "0.13", default-features = false }
 [dev-dependencies]
 # Random-input testing (ADR 0023); tests only.
 testkit = { package = "cosmic-ext-deskfeed-testkit", path = "testkit" }
+# Reading settings files the way cosmic-config does (`ron::from_str`), in
+# tests only; the same version libcosmic already uses.
+ron = "0.12"
 
 [build-dependencies]
 xdgen = "0.1"

@@ -35,3 +35,12 @@ The ADR for each new dependency records the comparison briefly:
 - whether it ships or is test-only.
 
 Test-only (dev) dependencies don't ship, so they weigh less. The security point above stands: no hand-written cryptography, TLS or JWT validation.
+
+## Dependencies chosen under the addendum
+
+- **`ron` 0.12, test-only (2026-10-20):** to check that settings files written by earlier versions still load, the way cosmic-config reads them.
+  - Options compared:
+    - `ron` as a dev-dependency: the version libcosmic already uses, so nothing new enters `Cargo.lock`;
+    - loading through cosmic-config with a temporary settings folder: needs process-wide environment changes that race between parallel tests;
+    - no test.
+  - Chosen: `ron`.

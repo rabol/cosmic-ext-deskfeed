@@ -30,10 +30,6 @@ pub struct ConnectionSettings {
     pub microphone: Option<bool>,
     #[serde(default)]
     pub camera: Option<bool>,
-    /// Before clipboard directions: on means both directions. Read only
-    /// (`Effective::with`); new values go to `clipboard_mode`.
-    #[serde(default)]
-    pub clipboard: Option<bool>,
     /// One of the `clipboard::*` values (`Choice::Clipboard`).
     #[serde(default)]
     pub clipboard_mode: Option<u32>,
@@ -250,10 +246,7 @@ impl ConnectionSettings {
     pub fn choice(&self, c: Choice) -> Option<u32> {
         match c {
             Choice::Scale => self.scale,
-            // An older on/off value counts until a direction is chosen.
-            Choice::Clipboard => self.clipboard_mode.or(self
-                .clipboard
-                .map(|on| if on { clipboard::BOTH } else { clipboard::OFF })),
+            Choice::Clipboard => self.clipboard_mode,
         }
     }
 
@@ -261,11 +254,7 @@ impl ConnectionSettings {
     pub fn set_choice(&mut self, c: Choice, value: Option<u32>) {
         let slot = match c {
             Choice::Scale => &mut self.scale,
-            Choice::Clipboard => {
-                // The older value is replaced, not left to come back.
-                self.clipboard = None;
-                &mut self.clipboard_mode
-            }
+            Choice::Clipboard => &mut self.clipboard_mode,
         };
         *slot = value.and_then(|v| c.valid(v));
     }
@@ -540,6 +529,36 @@ pub fn effective(
 mod tests {
     use super::*;
 
+    /// A desktop's settings as an earlier version saved them (with the
+    /// old on/off `clipboard`), read the way cosmic-config reads them:
+    /// they still load, with every other value kept.
+    #[test]
+    fn settings_saved_by_earlier_versions_still_load() {
+        let saved = r#"{
+    "z06as8n1B0WLUh_L01y7Ix3x": (
+        timeout_secs: None,
+        fullscreen: Some(true),
+        new_workspace: Some(true),
+        sound: Some(true),
+        clipboard: None,
+        clipboard_mode: Some(1),
+        clipboard_files: Some(true),
+    ),
+    "older": (
+        clipboard: Some(true),
+        fullscreen: Some(false),
+    ),
+}"#;
+        let map: std::collections::BTreeMap<String, ConnectionSettings> =
+            ron::from_str(saved).unwrap();
+        let first = &map["z06as8n1B0WLUh_L01y7Ix3x"];
+        assert_eq!(first.fullscreen, Some(true));
+        assert_eq!(first.new_workspace, Some(true));
+        assert_eq!(first.clipboard_mode, Some(1));
+        assert_eq!(first.clipboard_files, Some(true));
+        assert_eq!(map["older"].fullscreen, Some(false));
+    }
+
     #[test]
     fn levels_override_in_order() {
         let account = ConnectionSettings {
@@ -779,20 +798,13 @@ mod tests {
             arg(clipboard::TO_COMPUTER, true),
             "/clipboard:direction-to:local,files-to:local"
         );
-        // An older on/off value still counts, until a direction is chosen.
-        let old = ConnectionSettings {
-            clipboard: Some(true),
-            ..Default::default()
-        };
-        assert_eq!(effective(Some(&old), None, None).clipboard, clipboard::BOTH);
-        let mut s = old.clone();
+        let mut s = ConnectionSettings::default();
         s.set_choice(Choice::Clipboard, Some(clipboard::TO_DESKTOP));
-        assert_eq!(s.clipboard, None);
         assert_eq!(
             effective(Some(&s), None, None).clipboard,
             clipboard::TO_DESKTOP
         );
-        // Following the level above clears both.
+        // Following the level above clears it.
         s.set_choice(Choice::Clipboard, None);
         assert!(s.is_empty());
     }
