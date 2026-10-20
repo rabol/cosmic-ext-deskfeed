@@ -35,7 +35,7 @@ Install the current build first (`just install`, or the package).
 
 ### Administrator policy (ADR 0021)
 
-15. **Clipboard** (fix 2026-10-20: it never switched on before). Install the new build. On a desktop, set Clipboard to "Both ways" (any level), connect, and copy text both ways. *Expected:* it works. Then set it to "Only to the desktop", reconnect: copying into the desktop works, copying out doesn't. If the clipboard is off although you set it on, the desktop's row says "Clipboard off: your organization doesn't allow it" when that's the reason.
+15. **Clipboard directions** (the both-ways part passed 2026-10-20). Set Clipboard to "Only to the desktop", reconnect: copying into the desktop works, copying out doesn't. Optionally turn on "Copy files" and copy a file in.
 
 ### Settings
 
@@ -53,6 +53,7 @@ Install the current build first (`just install`, or the package).
 
 ## Done
 
+- 2026-10-20: clipboard works after the fix (`9cd5e5c`): text copied both ways.
 - 2026-10-20: sign in again after reinstalling: one Microsoft sign-in page, then the desktop list.
 - 2026-10-20: every desktop still connects after the stricter connection-file checks (ADR 0024).
 - 2026-10-19: tray menu lists the open desktop and switches to it.
