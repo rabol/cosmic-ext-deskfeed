@@ -279,15 +279,26 @@ pub fn launch(
 ) -> Result<Session, LaunchError> {
     let freerdp = find_freerdp().ok_or(LaunchError::FreeRdpMissing)?;
     let proxy = freerdp_proxy(|name| std::env::var(name).ok())?;
-    launch_with(&freerdp, &runtime_base()?, spec, &proxy, events)
+    launch_with(
+        &freerdp,
+        &runtime_base()?,
+        spec,
+        &proxy,
+        events,
+        std::convert::identity,
+    )
 }
 
+/// `edit_args` changes FreeRDP's arguments last: the app leaves them as
+/// they are; tests against a host without the Azure gateway take out
+/// `/gateway:`.
 fn launch_with(
     freerdp: &Path,
     runtime: &Path,
     spec: &LaunchSpec,
     proxy: &FreeRdpProxy,
     events: impl Fn(SessionEvent) + Send + Sync + 'static,
+    edit_args: impl FnOnce(Vec<String>) -> Vec<String>,
 ) -> Result<Session, LaunchError> {
     let dir = RuntimeDir::create(runtime)?;
     // The clipboard is switched on in the file (`to_freerdp_text_with`).
@@ -295,6 +306,7 @@ fn launch_with(
     let rdp_path = write_connection_file(&dir, &spec.connection, clipboard)?;
     let mut args = build_args(spec, &rdp_path)?;
     args.extend(proxy.arg());
+    let args = edit_args(args);
     let proxy_file = proxy.write_file(&dir.0)?;
     let (read_end, write_end) = pipe()?;
     let (terminal, output) = output_terminal().map_err(|e| io_err(&e))?;

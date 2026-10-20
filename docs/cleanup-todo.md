@@ -168,7 +168,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 ## 6. Tests, tooling and docs
 
 - [x] **Remove `fuzz/`** (Kept: owner's decision; it compiles again, see §1.) (broken, see §1; nightly-only; ADR 0023 is titled "random-input tests *instead of* cargo-fuzz"). Also drop `just fuzz`, its CONTRIBUTING and .gitignore lines, and the ADR addendum. For a deep run, raise `DESKFEED_RANDOM_ROUNDS`. Effort S, risk low.
-- [ ] **Launcher test boilerplate** (`src/sessions/launcher/tests.rs:523-830`).
+- [x] **Launcher test boilerplate** (Done 2026-10-20: `Fake` (a fake FreeRDP in its own temporary folder, and `launch`), `ended`, `gone_within`; `start_without_gateway` now goes through `launch_with` with an `edit_args` hook instead of copying its steps.) (`src/sessions/launcher/tests.rs:523-830`).
   - Six tests repeat the same setup: temp dir, `#!/bin/sh` fake, chmod, channel, launch, wait, clean up. Temp dirs leak when a test fails.
   - The `/proc` zombie check is written twice.
   - `start_without_gateway` re-implements `launch_with` step by step and can drift.

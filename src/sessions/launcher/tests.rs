@@ -256,23 +256,10 @@ fn children_end_when_the_app_crashes() {
         .unwrap_or_default()
         .parse()
         .unwrap();
-    // Gone, or a zombie waiting for its new parent to reap it.
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    loop {
-        let state = fs::read_to_string(format!("/proc/{pid}/stat")).ok();
-        let alive = state
-            .as_deref()
-            .and_then(|s| s.rsplit(')').next())
-            .is_some_and(|rest| !rest.trim_start().starts_with('Z'));
-        if !alive {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "sleep {pid} outlived the app"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    assert!(
+        gone_within(pid, Duration::from_secs(5)),
+        "sleep {pid} outlived the app"
+    );
 }
 
 #[test]
@@ -512,20 +499,93 @@ fn log_keeps_errors_and_detects_connection() {
     assert_eq!(log.lines.len(), MAX_LOG_LINES);
 }
 
-/// Runs a fake FreeRDP that records what it received, to check the
-/// pipe hand-off, the private connection file and cleanup.
+/// A fake FreeRDP in a folder of its own: the shell script `script`
+/// makes (given the folder, for files it writes), with FreeRDP's argument
+/// pipe on fd 3. The folder goes when this does, also if a test fails.
+struct Fake {
+    tmp: tempfile::TempDir,
+    path: PathBuf,
+}
+
+impl Fake {
+    fn new(script: impl FnOnce(&Path) -> String) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("xfreerdp3");
+        fs::write(&path, format!("#!/bin/sh\n{}\n", script(tmp.path()))).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        Self { tmp, path }
+    }
+
+    fn dir(&self) -> &Path {
+        self.tmp.path()
+    }
+
+    /// Where the launcher makes its runtime folder.
+    fn runtime(&self) -> PathBuf {
+        self.dir().join("run")
+    }
+
+    /// Starts it for `spec`, as the app would.
+    fn launch(
+        &self,
+        spec: &LaunchSpec,
+        proxy: &FreeRdpProxy,
+    ) -> (Session, std::sync::mpsc::Receiver<SessionEvent>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let events = move |e| {
+            let _ = tx.send(e);
+        };
+        let session = launch_with(
+            &self.path,
+            &self.runtime(),
+            spec,
+            proxy,
+            events,
+            std::convert::identity,
+        )
+        .unwrap();
+        (session, rx)
+    }
+}
+
+/// The session's end and log, past any other events, within 10 s.
+fn ended(rx: &std::sync::mpsc::Receiver<SessionEvent>) -> (SessionEnd, Vec<String>) {
+    loop {
+        if let SessionEvent::Ended { end, log } = rx.recv_timeout(Duration::from_secs(10)).unwrap()
+        {
+            return (end, log);
+        }
+    }
+}
+
+/// Whether process `pid` ends within `within`: gone, or a zombie waiting
+/// for its new parent to reap it.
+fn gone_within(pid: u32, within: Duration) -> bool {
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        let state = fs::read_to_string(format!("/proc/{pid}/stat")).ok();
+        let alive = state
+            .as_deref()
+            .and_then(|s| s.rsplit(')').next())
+            .is_some_and(|rest| !rest.trim_start().starts_with('Z'));
+        if !alive {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// A fake FreeRDP that records what it received, to check the pipe
+/// hand-off, the private connection file and cleanup.
 #[test]
 fn launch_hands_arguments_over_privately() {
-    use std::os::unix::fs::PermissionsExt;
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path();
-    let out = dir.join("out.txt");
-    let fake = dir.join("xfreerdp3");
-    fs::write(
-        &fake,
+    let fake = Fake::new(|dir| {
         format!(
-            "#!/bin/sh\n\
-             out='{out}'\n\
+            "out='{out}'\n\
              echo \"ARGV:$*\" > \"$out\"\n\
              first=''\n\
              while IFS= read -r line <&3; do [ -z \"$line\" ] && break; [ -z \"$first\" ] && first=\"$line\"; echo \"ARG:$line\" >> \"$out\"; done\n\
@@ -541,18 +601,13 @@ fn launch_hands_arguments_over_privately() {
              env | grep -q '^WLOG_FILTER=com.freerdp.core.rdp:DEBUG$' && echo FILTER_OK >> \"$out\"\n\
              env | grep -q '^COSMIC_EXT_DESKFEED_SIGNIN_LOGIN_HINT=anna@example.com$' && echo HINT_OK >> \"$out\"\n\
              echo '[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_FINALIZATION_CLIENT_FONT_MAP --> CONNECTION_STATE_ACTIVE'\n\
-             exit 0\n",
-            out = out.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
-    let runtime = dir.join("run");
-    fs::create_dir_all(&runtime).unwrap();
+             exit 0",
+            out = dir.join("out.txt").display()
+        )
+    });
     // SAFETY: no other test reads this variable.
     unsafe { std::env::set_var("AVD_TEST_SECRET", "x") };
 
-    let (tx, rx) = std::sync::mpsc::channel();
     let s = spec(LogonSetting::Automatic, Some("hunter2"), false);
     // A proxy with a (synthetic) password: only through the pipe and
     // the private file, never the environment.
@@ -560,20 +615,14 @@ fn launch_hands_arguments_over_privately() {
         https_proxy: Some("http://anna:pr0xy-pw@proxy.example:3128".into()),
         no_proxy: Some(".corp.example".into()),
     };
-    let _session = launch_with(&fake, &runtime, &s, &proxy, move |e| {
-        tx.send(e).unwrap();
-    })
-    .unwrap();
+    let (_session, rx) = fake.launch(&s, &proxy);
     assert_eq!(
         rx.recv_timeout(Duration::from_secs(10)).unwrap(),
         SessionEvent::Connected
     );
-    let SessionEvent::Ended { end, .. } = rx.recv_timeout(Duration::from_secs(10)).unwrap() else {
-        panic!("expected end")
-    };
-    assert_eq!(end, SessionEnd::Closed);
+    assert_eq!(ended(&rx).0, SessionEnd::Closed);
 
-    let got = fs::read_to_string(&out).unwrap();
+    let got = fs::read_to_string(fake.dir().join("out.txt")).unwrap();
     assert!(got.contains("ARGV:/args-from:fd:3\n"), "{got}");
     assert!(
         !got.lines().next().unwrap().contains("hunter2"),
@@ -602,7 +651,7 @@ fn launch_hands_arguments_over_privately() {
     );
     // The connection file and its folder are gone.
     assert_eq!(
-        fs::read_dir(runtime.join("cosmic-ext-deskfeed"))
+        fs::read_dir(fake.runtime().join("cosmic-ext-deskfeed"))
             .unwrap()
             .count(),
         0
@@ -614,28 +663,13 @@ fn launch_hands_arguments_over_privately() {
 /// buffer until `sleep` ends.
 #[test]
 fn log_lines_arrive_while_freerdp_runs() {
-    use std::os::unix::fs::PermissionsExt;
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path();
-    fs::create_dir_all(dir.join("run")).unwrap();
-    let fake = dir.join("fake");
-    fs::write(
-        &fake,
-        "#!/bin/sh\ncat <&3 >/dev/null\n\
-         { echo '[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_FINALIZATION_CLIENT_FONT_MAP --> CONNECTION_STATE_ACTIVE'; sleep 5; } | sed -n p\n",
-    )
-    .unwrap();
-    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
-    let (tx, rx) = std::sync::mpsc::channel();
+    let fake = Fake::new(|_| {
+        "cat <&3 >/dev/null\n\
+         { echo '[DEBUG][com.freerdp.core.rdp] - [rdp_client_transition_to_state][0x1]: CONNECTION_STATE_FINALIZATION_CLIENT_FONT_MAP --> CONNECTION_STATE_ACTIVE'; sleep 5; } | sed -n p"
+            .into()
+    });
     let s = spec(LogonSetting::Automatic, Some("pw"), false);
-    let session = launch_with(
-        &fake,
-        &dir.join("run"),
-        &s,
-        &FreeRdpProxy::default(),
-        move |e| tx.send(e).unwrap(),
-    )
-    .unwrap();
+    let (session, rx) = fake.launch(&s, &FreeRdpProxy::default());
     assert_eq!(
         rx.recv_timeout(Duration::from_secs(3)).unwrap(),
         SessionEvent::Connected
@@ -648,10 +682,6 @@ fn log_lines_arrive_while_freerdp_runs() {
 /// leaves it off.
 #[test]
 fn the_clipboard_setting_reaches_the_connection_file() {
-    use std::os::unix::fs::PermissionsExt;
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path();
-    fs::create_dir_all(dir.join("run")).unwrap();
     for (mode, want) in [
         (crate::settings::clipboard::BOTH, "redirectclipboard:i:1"),
         (
@@ -660,37 +690,19 @@ fn the_clipboard_setting_reaches_the_connection_file() {
         ),
         (crate::settings::clipboard::OFF, "redirectclipboard:i:0"),
     ] {
-        let out = dir.join("out.txt");
-        let _ = fs::remove_file(&out);
-        let fake = dir.join("fake");
-        fs::write(
-            &fake,
+        let fake = Fake::new(|dir| {
             format!(
-                "#!/bin/sh\nfirst=''\n\
+                "first=''\n\
                  while IFS= read -r line <&3; do [ -z \"$line\" ] && break; [ -z \"$first\" ] && first=\"$line\"; echo \"ARG:$line\" >> '{out}'; done\n\
-                 grep redirectclipboard \"$first\" >> '{out}'\nexit 0\n",
-                out = out.display()
-            ),
-        )
-        .unwrap();
-        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
+                 grep redirectclipboard \"$first\" >> '{out}'\nexit 0",
+                out = dir.join("out.txt").display()
+            )
+        });
         let mut s = spec(LogonSetting::EntraSignIn, None, true);
         s.settings.clipboard = mode;
-        let (tx, rx) = std::sync::mpsc::channel();
-        let _session = launch_with(
-            &fake,
-            &dir.join("run"),
-            &s,
-            &FreeRdpProxy::default(),
-            move |e| tx.send(e).unwrap(),
-        )
-        .unwrap();
-        loop {
-            if let SessionEvent::Ended { .. } = rx.recv_timeout(Duration::from_secs(10)).unwrap() {
-                break;
-            }
-        }
-        let got = fs::read_to_string(&out).unwrap();
+        let (_session, rx) = fake.launch(&s, &FreeRdpProxy::default());
+        ended(&rx);
+        let got = fs::read_to_string(fake.dir().join("out.txt")).unwrap();
         assert!(got.lines().any(|l| l.trim_end() == want), "{mode}: {got}");
         assert_eq!(got.matches("redirectclipboard:").count(), 1, "{got}");
         // The direction still comes from the argument.
@@ -702,10 +714,6 @@ fn the_clipboard_setting_reaches_the_connection_file() {
 
 #[test]
 fn reports_crash_and_failure_codes() {
-    use std::os::unix::fs::PermissionsExt;
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path();
-    fs::create_dir_all(dir.join("run")).unwrap();
     for (script, want) in [
         (
             "echo '[ERROR][x] - ERRCONNECT_LOGON_FAILURE [0x00020014]'; exit 131",
@@ -719,19 +727,9 @@ fn reports_crash_and_failure_codes() {
         ),
         ("exit 140", SessionEnd::DnsFailed),
     ] {
-        let fake = dir.join("fake");
-        fs::write(&fake, format!("#!/bin/sh\ncat <&3 >/dev/null\n{script}\n")).unwrap();
-        fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
-        let (tx, rx) = std::sync::mpsc::channel();
+        let fake = Fake::new(|_| format!("cat <&3 >/dev/null\n{script}"));
         let s = spec(LogonSetting::Automatic, Some("pw"), false);
-        let _session = launch_with(
-            &fake,
-            &dir.join("run"),
-            &s,
-            &FreeRdpProxy::default(),
-            move |e| tx.send(e).unwrap(),
-        )
-        .unwrap();
+        let (_session, rx) = fake.launch(&s, &FreeRdpProxy::default());
         match rx.recv_timeout(Duration::from_secs(10)).unwrap() {
             SessionEvent::Ended { end, log } => {
                 assert_eq!(end, want, "{script}");
@@ -748,41 +746,22 @@ fn reports_crash_and_failure_codes() {
 /// sign-in helper) is still ended completely, child included.
 #[test]
 fn stopping_ends_the_whole_process_group() {
-    use std::os::unix::fs::PermissionsExt;
-    let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path();
-    fs::create_dir_all(dir.join("run")).unwrap();
-    let out = dir.join("child.txt");
-    let fake = dir.join("fake");
-    fs::write(
-        &fake,
+    let fake = Fake::new(|dir| {
         format!(
-            "#!/bin/sh
-cat <&3 >/dev/null
-trap '' TERM
-sleep 300 &
-echo $! > '{}'
-sleep 300
-",
-            out.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&fake, fs::Permissions::from_mode(0o700)).unwrap();
-    let (tx, rx) = std::sync::mpsc::channel();
+            "cat <&3 >/dev/null\ntrap '' TERM\nsleep 300 &\necho $! > '{}'\nsleep 300",
+            dir.join("child.txt").display()
+        )
+    });
     let s = spec(LogonSetting::Automatic, Some("pw"), false);
-    let session = launch_with(
-        &fake,
-        &dir.join("run"),
-        &s,
-        &FreeRdpProxy::default(),
-        move |e| tx.send(e).unwrap(),
-    )
-    .unwrap();
-    let child: i32 = (0..100)
+    let (session, rx) = fake.launch(&s, &FreeRdpProxy::default());
+    let child: u32 = (0..100)
         .find_map(|_| {
             std::thread::sleep(Duration::from_millis(50));
-            fs::read_to_string(&out).ok()?.trim().parse().ok()
+            fs::read_to_string(fake.dir().join("child.txt"))
+                .ok()?
+                .trim()
+                .parse()
+                .ok()
         })
         .expect("fake started its child");
 
@@ -792,20 +771,14 @@ sleep 300
         rx.recv_timeout(Duration::from_secs(10)).unwrap(),
         SessionEvent::Ended { .. }
     ));
-    // The child is gone (or a zombie waiting for init to reap it).
-    let gone = (0..40).any(|_| {
-        let state = fs::read_to_string(format!("/proc/{child}/stat")).ok();
-        if state.is_none_or(|s| s.rsplit(") ").next().is_some_and(|r| r.starts_with('Z'))) {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-        false
-    });
-    assert!(gone, "child {child} still running");
+    assert!(
+        gone_within(child, Duration::from_secs(5)),
+        "child {child} still running"
+    );
 }
 
-/// `launch_with`'s steps for a test host without the Azure gateway:
-/// Deskfeed's own arguments minus `/gateway:`, changed by `adjust`.
+/// The app's own launch against a test host without the Azure gateway:
+/// with the real FreeRDP, `/gateway:` taken out, and `adjust` applied.
 fn start_without_gateway(
     s: &LaunchSpec,
     dir: &Path,
@@ -813,35 +786,21 @@ fn start_without_gateway(
 ) -> (Session, std::sync::mpsc::Receiver<SessionEvent>) {
     let (tx, rx) = std::sync::mpsc::channel();
     let freerdp = find_freerdp().expect("xfreerdp3 installed");
-    let rundir = RuntimeDir::create(&dir.join("run")).unwrap();
-    let rdp_path = write_connection_file(&rundir, &s.connection, false).unwrap();
-    let args = build_args(s, &rdp_path)
-        .unwrap()
-        .into_iter()
-        .filter(|a| !a.starts_with("/gateway:"))
-        .collect();
-    let args = adjust(args);
-    let (read_end, write_end) = pipe().unwrap();
-    let (terminal, output) = output_terminal().unwrap();
-    let child = spawn_freerdp(
+    let session = launch_with(
         &freerdp,
-        &s.profile,
-        &read_end,
-        output,
+        &dir.join("run"),
+        s,
         &FreeRdpProxy::default(),
-        None,
-        None,
-    )
-    .unwrap();
-    drop(read_end);
-    send_args(write_end, &args).unwrap();
-    let session = supervise(
-        child,
-        terminal,
-        rundir,
-        Arc::new(move |e| {
+        move |e| {
             let _ = tx.send(e);
-        }),
+        },
+        |args| {
+            adjust(
+                args.into_iter()
+                    .filter(|a| !a.starts_with("/gateway:"))
+                    .collect(),
+            )
+        },
     )
     .unwrap();
     (session, rx)
@@ -1122,6 +1081,7 @@ fn real_freerdp_accepts_all_kept_properties() {
         &s,
         &FreeRdpProxy::default(),
         move |e| tx.send(e).unwrap(),
+        std::convert::identity,
     )
     .unwrap();
     let SessionEvent::Ended { log, .. } = rx.recv_timeout(Duration::from_secs(30)).unwrap() else {
