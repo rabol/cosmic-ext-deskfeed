@@ -4,7 +4,9 @@
 
 #[allow(clippy::wildcard_imports)] // see app/mod.rs
 use super::*;
+use crate::accounts::{NotSaved, RenewError};
 use crate::auth::signin::HelperProblem;
+use crate::secrets::SecretsError;
 use crate::sessions::launcher::AppRefusal;
 
 pub(super) fn describe_sign_in_error(e: SignInError) -> SignInFailure {
@@ -209,6 +211,52 @@ pub(super) fn refused_or_shown_http(e: HttpError) -> StepError {
     refused_or_shown(FetchError::Http(e))
 }
 
+/// A keyring problem, as the detail of a message.
+pub(super) fn keyring_detail(e: &SecretsError) -> String {
+    match e {
+        SecretsError::Dismissed => fl!("keyring-dismissed"),
+        SecretsError::NoAnswer => fl!("keyring-no-answer"),
+        SecretsError::Malformed => fl!("keyring-malformed"),
+        SecretsError::Unavailable(_) => fl!("keyring-unavailable"),
+    }
+}
+
+/// The notice when a sign-in couldn't be saved.
+pub(super) fn describe_not_saved(e: &NotSaved) -> String {
+    let detail = match e {
+        NotSaved::NoRefreshToken => "no refresh token".to_owned(),
+        NotSaved::Keyring(e) => keyring_detail(e),
+    };
+    fl!("notice-not-saved", detail = detail)
+}
+
+/// Restoring a saved sign-in at start failed. `Show` keeps the saved
+/// sign-in for another try.
+pub(super) fn describe_restore_error(e: RenewError) -> StepError {
+    match e {
+        RenewError::Network => StepError::Show(fl!("error-restore-network")),
+        RenewError::SignInFrequency => StepError::SignInAgain(fl!("error-sign-in-frequency")),
+        RenewError::SignedOut => StepError::SignInAgain(fl!("error-session-expired")),
+        RenewError::Revoked | RenewError::Refused => {
+            StepError::SignInAgain(fl!("error-saved-sign-in-expired"))
+        }
+    }
+}
+
+/// Renewing a signed-in account's tokens failed (loading desktops,
+/// connecting).
+impl From<RenewError> for StepError {
+    fn from(e: RenewError) -> Self {
+        match e {
+            RenewError::Network => Self::Show(fl!("error-generic")),
+            RenewError::SignInFrequency => Self::SignInAgain(fl!("error-sign-in-frequency")),
+            RenewError::SignedOut | RenewError::Revoked | RenewError::Refused => {
+                Self::SignInAgain(fl!("error-session-expired"))
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +377,64 @@ mod tests {
                 &log(&["ERRCONNECT_LOGON_FAILURE"])
             ),
             describe_session_end(&SessionEnd::LogonFailed)
+        );
+    }
+
+    /// The texts restore and renew errors showed before the wording moved
+    /// here from `accounts`.
+    #[test]
+    fn renewal_errors_are_worded_for_where_they_happen() {
+        let shown = |e: StepError| match e {
+            StepError::Show(t) => ("retry", t),
+            StepError::SignInAgain(t) => ("sign in", t),
+        };
+        // Restoring a saved sign-in at start.
+        let restore = |e| shown(describe_restore_error(e));
+        assert_eq!(
+            restore(RenewError::Network),
+            ("retry", fl!("error-restore-network"))
+        );
+        assert_eq!(
+            restore(RenewError::Revoked),
+            ("sign in", fl!("error-saved-sign-in-expired"))
+        );
+        assert_eq!(
+            restore(RenewError::Refused),
+            ("sign in", fl!("error-saved-sign-in-expired"))
+        );
+        assert_eq!(
+            restore(RenewError::SignInFrequency),
+            ("sign in", fl!("error-sign-in-frequency"))
+        );
+        assert_eq!(
+            restore(RenewError::SignedOut),
+            ("sign in", fl!("error-session-expired"))
+        );
+        // Renewing while signed in.
+        let renew = |e: RenewError| shown(e.into());
+        assert_eq!(renew(RenewError::Network), ("retry", fl!("error-generic")));
+        assert_eq!(
+            renew(RenewError::SignInFrequency),
+            ("sign in", fl!("error-sign-in-frequency"))
+        );
+        for e in [
+            RenewError::Revoked,
+            RenewError::Refused,
+            RenewError::SignedOut,
+        ] {
+            assert_eq!(renew(e), ("sign in", fl!("error-session-expired")));
+        }
+    }
+
+    #[test]
+    fn unsaved_sign_ins_are_explained() {
+        assert_eq!(
+            describe_not_saved(&NotSaved::Keyring(SecretsError::Unavailable("x".into()))),
+            fl!("notice-not-saved", detail = fl!("keyring-unavailable"))
+        );
+        assert_eq!(
+            describe_not_saved(&NotSaved::NoRefreshToken),
+            fl!("notice-not-saved", detail = "no refresh token")
         );
     }
 }

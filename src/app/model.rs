@@ -300,7 +300,7 @@ pub enum Message {
     Restored(
         String,
         u64,
-        Result<(Arc<SignedIn>, Option<String>), crate::accounts::RenewError>,
+        Result<(Arc<SignedIn>, Option<String>), StepError>,
     ),
     RetryRestore(String),
     AddAccount,
@@ -482,15 +482,6 @@ pub enum StepError {
     /// The sign-in can't be renewed any more: the account needs an
     /// interactive sign-in.
     SignInAgain(String),
-}
-
-impl From<accounts::RenewError> for StepError {
-    fn from(e: accounts::RenewError) -> Self {
-        match e {
-            accounts::RenewError::Retry(t) => Self::Show(t),
-            accounts::RenewError::SignInAgain(t) => Self::SignInAgain(t),
-        }
-    }
 }
 
 /// Sign-in failures, cheap to clone for messages.

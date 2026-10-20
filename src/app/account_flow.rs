@@ -56,7 +56,11 @@ impl AppModel {
                 let started = accounts::shared().sign_out_count(&id);
                 return cosmic::task::future(async move {
                     let result = off_ui(
-                        move || accounts::shared().save(&signed_in, started),
+                        move || {
+                            accounts::shared()
+                                .save(&signed_in, started)
+                                .map_err(|e| describe_not_saved(&e))
+                        },
                         Err(fl!("error-generic")),
                     )
                     .await;
@@ -251,8 +255,15 @@ impl AppModel {
         let started = accounts::shared().sign_out_count(&id);
         cosmic::task::future(async move {
             let outcome = off_ui(
-                move || accounts::shared().restore(&http, &stored, started),
-                Err(accounts::RenewError::Retry(fl!("error-generic"))),
+                move || {
+                    accounts::shared()
+                        .restore(&http, &stored, started)
+                        .map(|(account, unsaved)| {
+                            (account, unsaved.as_ref().map(describe_not_saved))
+                        })
+                        .map_err(describe_restore_error)
+                },
+                Err(StepError::Show(fl!("error-generic"))),
             )
             .await;
             Message::Restored(id, generation, outcome)
@@ -263,7 +274,7 @@ impl AppModel {
         &mut self,
         id: &str,
         generation: u64,
-        outcome: Result<(Arc<SignedIn>, Option<String>), accounts::RenewError>,
+        outcome: Result<(Arc<SignedIn>, Option<String>), StepError>,
     ) -> Task<cosmic::Action<Message>> {
         let Some(account) = self.account_mut(id).filter(|a| a.generation == generation) else {
             return Task::none();
@@ -280,12 +291,12 @@ impl AppModel {
                 };
                 self.load_resources(id)
             }
-            Err(accounts::RenewError::SignInAgain(error)) => {
+            Err(StepError::SignInAgain(error)) => {
                 account.stored = None;
                 account.state = AccountState::NeedsSignIn { error: Some(error) };
                 Task::none()
             }
-            Err(accounts::RenewError::Retry(error)) => {
+            Err(StepError::Show(error)) => {
                 account.can_retry = true;
                 account.state = AccountState::NeedsSignIn { error: Some(error) };
                 Task::none()
@@ -468,7 +479,11 @@ impl AppModel {
         let save_id = id.clone();
         let save = cosmic::task::future(async move {
             let result = off_ui(
-                move || accounts::shared().save(&signed_in, started),
+                move || {
+                    accounts::shared()
+                        .save(&signed_in, started)
+                        .map_err(|e| describe_not_saved(&e))
+                },
                 Err(fl!("error-generic")),
             )
             .await;
@@ -872,7 +887,11 @@ fn keyring_cleanup(
         // The saved sign-in and the remembered passwords, under the
         // account's lock like their saves.
         let result = off_ui(
-            move || accounts::shared().delete(&identity),
+            move || {
+                accounts::shared()
+                    .delete(&identity)
+                    .map_err(|_| fl!("error-sign-out-incomplete"))
+            },
             Err(fl!("error-sign-out-incomplete")),
         )
         .await;

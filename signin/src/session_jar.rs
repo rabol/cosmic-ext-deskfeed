@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use webkit6::soup;
 
-/// Shared with the app (`src/accounts.rs`), which removes it on sign-out.
+/// Shared with the app (`src/accounts/profiles.rs`), which removes it on sign-out.
 const JAR_DIR: &str = "cosmic-ext-deskfeed-web";
 const FILE: &str = "cookies.json";
 const MAX_FILE: u64 = 512 * 1024;

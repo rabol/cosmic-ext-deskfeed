@@ -249,7 +249,11 @@ impl cosmic::Application for AppModel {
         let title = app.update_title();
         let load = cosmic::task::future(async {
             let result = off_ui(
-                || accounts::shared().load_saved(),
+                || {
+                    accounts::shared()
+                        .load_saved()
+                        .map_err(|e| fl!("error-keyring-load", detail = keyring_detail(&e)))
+                },
                 Err(fl!("error-generic")),
             )
             .await;

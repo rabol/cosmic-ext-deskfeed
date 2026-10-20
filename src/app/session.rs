@@ -58,6 +58,7 @@ impl AppModel {
                             move || {
                                 crate::accounts::shared()
                                     .save_password(&identity, &owner, &title, &password, ticket)
+                                    .map_err(|e| keyring_detail(&e))
                             },
                             Err("task".into()),
                         )

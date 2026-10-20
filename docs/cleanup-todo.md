@@ -54,7 +54,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - `Restore` and `RenewError` have the same shape.
   - *Simpler:* one `renew_tokens(…)`, with restore adding "delete on invalid_grant".
   - Effort M, risk med.
-- [ ] **`src/accounts.rs` (1,409 lines) mixes concerns.**
+- [x] **`src/accounts.rs` (1,409 lines) mixes concerns.** (Done 2026-10-20: `accounts/{profiles,state,renew}.rs` plus `tests.rs`; typed errors (`RenewError`, `NotSaved`, `SecretsError`), worded in `app/errors.rs`.)
   - It holds profile folders, concurrency bookkeeping, keyring orchestration, token renewal, and user-facing text (`fl!` returned as `Err(String)`).
   - *Simpler:* split into `accounts/{profiles,state,renew}.rs`, return typed errors and let `app/errors.rs` word them.
   - Effort M, risk low.

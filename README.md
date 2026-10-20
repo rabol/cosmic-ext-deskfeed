@@ -95,7 +95,7 @@ just run              # run a release build
 | `src/auth/` | Sign-in attempts, tokens, ID token checks |
 | `src/service/` | HTTP client, allowed endpoints, feed discovery and parsing |
 | `src/sessions/` | Connection-file filtering, starting and supervising FreeRDP |
-| `src/accounts.rs`, `src/secrets.rs` | Per-account storage; the Secret Service (keyring) |
+| `src/accounts/`, `src/secrets/` | Per-account profiles, state, saved sign-ins and token renewal; the Secret Service (keyring) |
 | `src/settings.rs`, `src/workspace.rs` | Connection settings; "open on a new workspace" |
 | `src/deps.rs`, `src/log.rs` | Dependency check; the log file |
 | `signin/` | `cosmic-ext-deskfeed-signin`, the sign-in window ([why a separate program](./docs/adr/0007-sign-in-web-view.md)) |
