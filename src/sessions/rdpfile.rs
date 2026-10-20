@@ -55,8 +55,10 @@ enum Rule {
 /// "windowed".
 ///
 /// Not kept although AVD sends them: `armpath`, `geo`,
-/// `hubdiscoverygeourl`, `wvd endpoint pool` and `resourceprovider`, which
-/// FreeRDP 3.32.2 reads but never uses, and `workspace id` and
+/// `hubdiscoverygeourl` and `wvd endpoint pool`, which FreeRDP 3.32.2
+/// reads but never uses; `resourceprovider`, whose only effect
+/// (`resourceprovider:s:arm` → `GatewayArmTransport`, `file.c`) the
+/// launcher's `/gateway:type:arm` already has; and `workspace id` and
 /// `remotedesktopname`, which it doesn't read. With the AVD gateway the
 /// session host comes from the broker's answer (`gateway/arm.c`), so
 /// `full address` is only checked for its form.

@@ -289,9 +289,16 @@ pub fn check() -> Result<(), SecretsError> {
 /// contents); the user signs in to that account again.
 pub fn load_all(config: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
     let keyring = Keyring::open()?;
+    let items = keyring.search(&app_attributes(config))?;
+    Ok(one_per_account(items.iter().map(|item| keyring.read(item))))
+}
+
+/// The readable items, the first one per account (tenant and object ID);
+/// unreadable ones are skipped and logged without contents.
+fn one_per_account(items: impl Iterator<Item = Result<Stored, SecretsError>>) -> Vec<Stored> {
     let mut accounts: Vec<Stored> = Vec::new();
-    for item in keyring.search(&app_attributes(config))? {
-        match keyring.read(&item) {
+    for item in items {
+        match item {
             Ok(stored) => {
                 let same = |s: &Stored| {
                     s.identity.tenant_id == stored.identity.tenant_id
@@ -304,7 +311,7 @@ pub fn load_all(config: &ClientConfig) -> Result<Vec<Stored>, SecretsError> {
             Err(e) => crate::app_log!("saved sign-in: skipped an item ({e})"),
         }
     }
-    Ok(accounts)
+    accounts
 }
 
 /// Saves (or replaces) one account's refresh token. Other accounts' items
@@ -473,6 +480,37 @@ mod tests {
             .into_iter()
             .map(|(k, v)| (k.to_owned(), v.to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn loading_skips_unreadable_items_and_keeps_one_per_account() {
+        // Was untested (test audit, 2026-10-20): the keyring test that
+        // covers loading is ignored without a keyring.
+        let stored = |object: &str, token: &str| Stored {
+            identity: Identity {
+                object_id: object.into(),
+                ..identity()
+            },
+            refresh_token: Secret::new(token.into()),
+        };
+        let got = one_per_account(
+            [
+                Err(SecretsError::Malformed),
+                Ok(stored("a", "first")),
+                Ok(stored("b", "other account")),
+                Ok(stored("a", "duplicate")),
+                Err(SecretsError::Malformed),
+            ]
+            .into_iter(),
+        );
+        let seen: Vec<(&str, &str)> = got
+            .iter()
+            .map(|s| (s.identity.object_id.as_str(), s.refresh_token.expose()))
+            .collect();
+        // The first item of an account wins; an unreadable one is skipped,
+        // not an error for the others.
+        assert_eq!(seen, [("a", "first"), ("b", "other account")]);
+        assert!(one_per_account(std::iter::empty()).is_empty());
     }
 
     #[test]

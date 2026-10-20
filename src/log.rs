@@ -70,7 +70,9 @@ pub fn write(message: &str) {
         .is_ok_and(|m| m.len() > MAX_SIZE.load(Ordering::Relaxed))
     {
         *out = None;
-        rotate();
+        if let Some(d) = dir() {
+            rotate_in(&d);
+        }
         *out = dir().and_then(|d| open_in(&d));
     }
 }
@@ -92,10 +94,10 @@ fn open_in(dir: &Path) -> Option<File> {
         .ok()
 }
 
-fn rotate() {
-    if let Some(dir) = dir() {
-        let _ = fs::rename(dir.join(FILE), dir.join(OLD));
-    }
+/// The current file becomes the older one (replacing it); the next
+/// write starts a new file.
+fn rotate_in(dir: &Path) {
+    let _ = fs::rename(dir.join(FILE), dir.join(OLD));
 }
 
 /// Bounded, one line, with secrets and tenant data replaced: JWTs and
@@ -342,6 +344,22 @@ mod tests {
         assert_eq!(
             fs::read_to_string(dir.join(FILE)).unwrap(),
             "hello from the test\nsecond\n"
+        );
+        // Rotation (was untested, test audit 2026-10-20): one older file
+        // is kept, a new one starts private.
+        rotate_in(&dir);
+        writeln!(open_in(&dir).unwrap(), "after").unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join(OLD)).unwrap(),
+            "hello from the test\nsecond\n"
+        );
+        assert_eq!(fs::read_to_string(dir.join(FILE)).unwrap(), "after\n");
+        assert_eq!(mode(dir.join(FILE)), 0o600);
+        rotate_in(&dir);
+        assert_eq!(
+            fs::read_to_string(dir.join(OLD)).unwrap(),
+            "after\n",
+            "replaced"
         );
         fs::remove_dir_all(base).unwrap();
     }

@@ -10,7 +10,7 @@
 FreeRDP 3.32.2, checked in its source:
 - `kdcproxyname` becomes the Kerberos KDC address as given (`client/common/file.c`, `FreeRDP_KerberosKdcUrl`).
 - With the AVD gateway (`/gateway:type:arm`, always set), the session host FreeRDP connects to comes from the broker's answer (`libfreerdp/core/gateway/arm.c`, `FreeRDP_ServerHostname`), not from `full address`.
-- `armpath`, `geo`, `hubdiscoverygeourl`, `wvd endpoint pool` and `resourceprovider` are read from the file but used nowhere. `workspace id` and `remotedesktopname` aren't read at all.
+- `armpath`, `geo`, `hubdiscoverygeourl` and `wvd endpoint pool` are read from the file but used nowhere. `resourceprovider:s:arm` does have an effect: it sets `GatewayArmTransport` (`file.c`, used by `wst.c`). The launcher's `/gateway:type:arm` sets the same thing (`cmdline.c`), so dropping it changes nothing. *(Corrected 2026-10-20: this line first said `resourceprovider` was unused.)* `workspace id` and `remotedesktopname` aren't read at all.
 
 ## Decision
 
