@@ -153,3 +153,34 @@ fn every_message_reaches_a_handler_that_handles_it() {
         );
     }
 }
+
+/// Ctrl+Q is bound to Quit, and Quit sends the message the quit handler
+/// takes (the menu entry once did nothing: `QuitChosen` wasn't routed).
+#[test]
+fn ctrl_q_quits() {
+    use cosmic::iced::keyboard::{Key, Modifiers};
+    use cosmic::widget::menu::action::MenuAction as _;
+    let binds = super::key_binds();
+    let q = Key::Character("q".into());
+    let quit: Vec<_> = binds
+        .iter()
+        .filter(|(bind, _)| bind.matches(Modifiers::CTRL, &q, None))
+        .map(|(_, action)| *action)
+        .collect();
+    assert_eq!(quit, [super::MenuAction::Quit]);
+    assert!(matches!(
+        super::MenuAction::Quit.message(),
+        super::Message::QuitChosen
+    ));
+    // Plain Q, or Ctrl+Shift+Q, is not Quit.
+    assert!(
+        !binds
+            .keys()
+            .any(|b| b.matches(Modifiers::empty(), &q, None))
+    );
+    assert!(
+        !binds
+            .keys()
+            .any(|b| b.matches(Modifiers::CTRL | Modifiers::SHIFT, &q, None))
+    );
+}

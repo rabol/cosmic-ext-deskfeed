@@ -36,6 +36,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - The gap caused the Quit bug, and a 155-line source-parsing test was added to cover it. That test depends on exact formatting.
   - *Simpler:* nested message enums (`Message::Account(…)`, `Connection(…)`, `Settings(…)`, `Quit(…)`), so the compiler enforces the routing. `route`, `misrouted` and `routing_check.rs` then go.
   - Effort M–L (about 280 `Message::` sites), risk med.
+- [ ] **The app's state can't be built in a test** (`AppModel` holds libcosmic's `Core`). So flows such as cancelling a desktop before it starts and the sign-out question stay manual tests (3a, 3d), although only the app's own logic decides them. *Simpler:* keep the state (desks, accounts, dialogs, config) in a struct without COSMIC types that `AppModel` owns, with the update logic as methods on it; tests then drive messages through it. Goes well with the routing item above. Effort L, risk med.
 - [ ] **Account state in six global maps** ✓ checked (`src/accounts.rs:184-438`: `ACCOUNT_LOCKS`, `KEYRING`, `SIGN_OUTS`, `LATEST`, `FORGETS`, `SAVED_AFTER`).
   - Each has its own lock, plus a `PasswordTicket` generation scheme.
   - Because the state is global, tests need unique account IDs so they don't interfere.
