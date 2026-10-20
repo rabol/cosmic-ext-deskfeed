@@ -230,7 +230,7 @@ pub(super) fn slept(monotonic: std::time::Duration, wall: std::time::Duration) -
     wall > monotonic + std::time::Duration::from_secs(60)
 }
 
-/// Password dialogs, one per resource (review F06): `open` is shown, the
+/// Password dialogs, one per resource: `open` is shown, the
 /// rest wait in order. A newer dialog for the same resource replaces its
 /// older one; another resource's waits its turn.
 pub(super) fn offer_dialog<T>(
@@ -592,8 +592,7 @@ mod tests {
         // Closing the window with background operation: hides, never asks
         // while idle (ADR 0017).
         assert_eq!(quit_step(true, true, false), Hide);
-        // Choosing Quit really quits, even with background operation (the
-        // owner couldn't quit from the window, 2026-10-20).
+        // Choosing Quit really quits, even with background operation.
         assert_eq!(quit_step(true, true, true), Now);
         // Without background operation, closing quits.
         assert_eq!(quit_step(true, false, false), Now);
@@ -608,9 +607,9 @@ mod tests {
 
     #[test]
     fn every_credential_refusal_counts_as_refusing_the_password() {
-        // Found by the test audit (2026-10-20): a remembered password was
-        // kept after "locked out" or "expired" and sent again on the next
-        // Connect. Each of these must remove it.
+        // A remembered password must go after any refusal, not only "wrong
+        // password": kept after "locked out", the next Connect would send
+        // it again and keep the account locked.
         for end in [
             SessionEnd::LogonFailed,
             SessionEnd::AccountLockedOut,
@@ -638,8 +637,8 @@ mod tests {
 
     #[test]
     fn a_slow_host_is_not_a_failed_sign_in() {
-        // Seen 2026-10-20: the host didn't finish the logon within the
-        // time allowed. An error on the row, never "Entra sign-in failed"
+        // The host didn't finish the logon within the time allowed. An
+        // error on the row, never "Entra sign-in failed"
         // (that would offer a password logon), however often it happens.
         let entra = Some(&LogonSetting::EntraSignIn);
         for earlier in [0, 1, 5] {

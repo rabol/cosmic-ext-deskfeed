@@ -134,7 +134,7 @@ impl AppModel {
         else {
             return Task::none();
         };
-        // At once: a save already on its way writes nothing (review F01).
+        // At once: a save already on its way writes nothing.
         let forget = crate::accounts::note_forget(&id, key);
         let key = key.to_owned();
         Task::future(async move {

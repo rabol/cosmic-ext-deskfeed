@@ -484,8 +484,8 @@ mod tests {
 
     #[test]
     fn loading_skips_unreadable_items_and_keeps_one_per_account() {
-        // Was untested (test audit, 2026-10-20): the keyring test that
-        // covers loading is ignored without a keyring.
+        // The keyring test that covers loading is ignored without a
+        // keyring; this covers the rule itself.
         let stored = |object: &str, token: &str| Stored {
             identity: Identity {
                 object_id: object.into(),

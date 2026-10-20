@@ -171,7 +171,7 @@ pub(super) type SpawnRequest = (Command, std::sync::mpsc::Sender<std::io::Result
 /// a kill (spec §6, §8: no orphaned sessions). The kernel sends it SIGKILL
 /// when its parent goes (`PR_SET_PDEATHSIG`): uncatchable, because after a
 /// crash nothing is left to escalate a SIGTERM that FreeRDP ignored
-/// (review F12; ADR 0022 addendum). Normal quitting stays graceful
+/// (ADR 0022 addendum). Normal quitting stays graceful
 /// (`stop_all`). "Parent" is the *thread* that
 /// started it, and the async runtime's worker threads come and go, so every
 /// start happens on one thread that lasts as long as the app. A child in
@@ -236,7 +236,7 @@ pub(super) fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
 }
 
 /// Writes the argument lines and closes the pipe (an empty line ends them).
-/// Hands the arguments over. Never blocks (review F07): the whole payload
+/// Hands the arguments over. Never blocks: the whole payload
 /// must fit in the pipe's buffer, and the write end is non-blocking, so a
 /// FreeRDP that never reads them can't hold up launching or quitting. On
 /// an error the caller stops FreeRDP.

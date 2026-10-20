@@ -132,8 +132,8 @@ pub struct AppModel {
     icons: HashMap<(String, Url), widget::icon::Handle>,
     quit: Quit,
     dialog: Option<PasswordDialog>,
-    /// Password dialogs waiting their turn behind `dialog` (review F06:
-    /// each resource keeps its own, none replaces another).
+    /// Password dialogs waiting their turn behind `dialog`: each resource
+    /// keeps its own, none replaces another.
     waiting_dialogs: std::collections::VecDeque<PasswordDialog>,
     certificate_dialog: Option<CertificateDialog>,
     logon_labels: Vec<String>,
@@ -667,7 +667,7 @@ impl AppModel {
             | Message::DesktopToggle(..)
             | Message::DesktopNumber(..) => self.settings_message(message),
             // Listed, not a catch-all: a new message that isn't routed is a
-            // compile error, not a silent no-op (QuitChosen, 2026-10-20).
+            // compile error, not a silent no-op.
             Message::Awake(..)
             | Message::CheckDependencies
             | Message::DependenciesChecked(..)

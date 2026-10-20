@@ -2,11 +2,11 @@
 
 //! Everything Deskfeed tracks about one desktop or app, in one place.
 //!
-//! Before, each fact had its own map keyed by resource (connection state,
-//! the starting and running FreeRDP, reconnect, notes, pending password, …)
-//! and every handler had to remember to update all of them. A forgotten one
-//! was a bug. Now a resource has one [`Desk`], and the moments that touch
-//! many facts at once (an attempt ending, sign-out) are methods here.
+//! A resource has one [`Desk`] holding all of its facts (connection
+//! state, the starting and running FreeRDP, reconnect, notes, pending
+//! password, …), so no handler can update one and forget another. The
+//! moments that touch many facts at once (an attempt ending, sign-out) are
+//! methods here.
 
 use std::collections::HashMap;
 use std::sync::Arc;

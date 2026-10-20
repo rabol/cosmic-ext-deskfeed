@@ -50,7 +50,7 @@ impl AppModel {
                         .unwrap_or_default();
                     let key = key.to_owned();
                     // Read now: a sign-out or Forget before the save runs
-                    // stops it (review F01).
+                    // stops it.
                     let ticket = crate::accounts::password_ticket(&id, &key);
                     save_task = cosmic::task::future(async move {
                         let owner = key.clone();

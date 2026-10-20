@@ -377,7 +377,7 @@ mod tests {
         let base = "https://login.microsoftonline.com/common/oauth2/nativeclient";
         let ok = Url::parse(&format!("{base}?code=abc&state=s")).unwrap();
         assert!(matches!(reply_from_redirect(&ok), Reply::Ok { .. }));
-        // As in the review's harness: a 1 MiB code.
+        // A 1 MiB code.
         let huge = Url::parse(&format!("{base}?code={}&state=s", "a".repeat(1024 * 1024))).unwrap();
         assert!(matches!(
             reply_from_redirect(&huge),
@@ -642,8 +642,7 @@ mod tests {
     }
 
     /// The app's request line, every URL the web view navigates to, and
-    /// FreeRDP's redirect target, with random and mangled input (ADR 0023,
-    /// review U2).
+    /// FreeRDP's redirect target, with random and mangled input (ADR 0023).
     #[test]
     fn random_requests_and_navigations_never_break_the_rules() {
         let request = req(AUTH);

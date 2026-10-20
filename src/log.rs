@@ -112,7 +112,7 @@ pub fn redact(message: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .take(MAX_LINE)
         .collect();
-    // IPv6 addresses first: `:` separates words below (review U4).
+    // IPv6 addresses first: `:` separates words below.
     let one_line = redact_ipv6(&one_line);
     let mut out = String::with_capacity(one_line.len());
     let mut word = String::new();
@@ -145,7 +145,7 @@ fn replace_word(word: &str) -> Option<&'static str> {
     if is_guid(word) {
         return Some("<id>");
     }
-    // `DOMAIN\\user`, `user@domain.example`, and `user@DOMAIN` (review U4).
+    // `DOMAIN\\user`, `user@domain.example`, and `user@DOMAIN`.
     if word.contains('\\')
         || word
             .split_once('@')
@@ -345,8 +345,7 @@ mod tests {
             fs::read_to_string(dir.join(FILE)).unwrap(),
             "hello from the test\nsecond\n"
         );
-        // Rotation (was untested, test audit 2026-10-20): one older file
-        // is kept, a new one starts private.
+        // Rotation: one older file is kept, a new one starts private.
         rotate_in(&dir);
         writeln!(open_in(&dir).unwrap(), "after").unwrap();
         assert_eq!(
@@ -424,7 +423,7 @@ mod tests {
     }
 
     /// Lines shaped like real FreeRDP and app log lines, with synthetic
-    /// sensitive data (review U4): what must go, and what must stay
+    /// sensitive data: what must go, and what must stay
     /// readable.
     #[test]
     fn redacts_realistic_lines() {

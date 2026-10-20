@@ -32,8 +32,8 @@ const MAX_VALUE_LEN: usize = 4_096;
 /// Most refused property names kept for the log.
 const MAX_REFUSED: usize = 16;
 
-/// How a kept property's value is checked (review F04: typed, with
-/// destinations checked separately).
+/// How a kept property's value is checked: by type, with destinations
+/// checked separately.
 #[derive(Clone, Copy)]
 enum Rule {
     /// `i`, within this range (Microsoft's RDP properties reference).
@@ -366,8 +366,8 @@ impl ConnectionFile {
     /// directions: it doesn't turn redirection back on after
     /// `redirectclipboard:i:0` (`client/common/cmdline.c`,
     /// `parse_clipboard_options`; only the plain `+clipboard` and
-    /// `use-selection:` do). Found 2026-10-20: the clipboard stayed off
-    /// whatever the setting said.
+    /// `use-selection:` do). Without this, the clipboard stays off whatever
+    /// the setting says.
     pub fn to_freerdp_text_with(&self, clipboard: bool) -> String {
         let mut out = String::new();
         for (key, value) in &self.props {

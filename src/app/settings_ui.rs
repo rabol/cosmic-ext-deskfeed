@@ -387,8 +387,8 @@ impl AppModel {
 
 /// A page's hint, plus a note while desktops it applies to are open:
 /// settings reach FreeRDP only when a connection starts (its arguments
-/// and connection file), so an open session keeps the old ones (owner,
-/// 2026-10-20: the clipboard setting seemed not to work).
+/// and connection file), so an open session keeps the old ones; without
+/// the note a changed setting looks as if it doesn't work.
 fn open_note(hint: String, open: bool, this_desktop: bool) -> String {
     if !open {
         return hint;

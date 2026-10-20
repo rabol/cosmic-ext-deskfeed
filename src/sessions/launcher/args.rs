@@ -51,7 +51,7 @@ pub(super) fn app_proxy(get: impl Fn(&str) -> Option<String>) -> FreeRdpProxy {
 /// accepts `http://`, `socks5://` or no scheme (`proxy_parse_uri`).
 ///
 /// Its address may hold a user name and password, so it never goes into an
-/// environment (review F03): FreeRDP gets it as `/proxy:` through the
+/// environment: FreeRDP gets it as `/proxy:` through the
 /// private argument pipe, and only `no_proxy` as a variable, which FreeRDP
 /// still reads with `/proxy:` set (`libfreerdp/core/proxy.c`,
 /// `proxy_prepare`). The sign-in helper reads it from a private file.

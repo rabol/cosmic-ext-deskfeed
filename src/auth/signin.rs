@@ -175,8 +175,8 @@ pub fn sign_in(
     time: Duration,
     cancel: &Cancel,
 ) -> Result<SignedIn, SignInError> {
-    // As long as the window may stay open (review F11: a fixed 10 minutes
-    // refused sign-ins finished in minutes 11–15).
+    // As long as the window may stay open: a fixed 10 minutes refused
+    // sign-ins that finished in minutes 11–15.
     let mut attempt = Attempt::for_window(config.clone(), time)
         .map_err(|_| SignInError::HelperFailed("random".into()))?;
     let reply = run_helper(
@@ -226,7 +226,7 @@ fn run_helper(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     crate::sessions::launcher::pass_environment(&mut cmd, &["GTK_THEME"]);
-    // The app's proxy, from a private file (review F03); removed when this
+    // The app's proxy, from a private file; removed when this
     // sign-in ends.
     let proxy = crate::sessions::launcher::HelperProxy::new()
         .map_err(|_| SignInError::HelperFailed("proxy".into()))?;

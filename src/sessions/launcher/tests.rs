@@ -561,7 +561,7 @@ fn launch_hands_arguments_over_privately() {
     let (tx, rx) = std::sync::mpsc::channel();
     let s = spec(LogonSetting::Automatic, Some("hunter2"), false);
     // A proxy with a (synthetic) password: only through the pipe and
-    // the private file, never the environment (review F03).
+    // the private file, never the environment.
     let proxy = FreeRdpProxy {
         https_proxy: Some("http://anna:pr0xy-pw@proxy.example:3128".into()),
         no_proxy: Some(".corp.example".into()),
@@ -653,7 +653,7 @@ fn log_lines_arrive_while_freerdp_runs() {
 
 /// The clipboard setting reaches FreeRDP through the connection file
 /// (`to_freerdp_text_with`): a `/clipboard:direction-to:` argument alone
-/// leaves it off (found 2026-10-20).
+/// leaves it off.
 #[test]
 fn the_clipboard_setting_reaches_the_connection_file() {
     use std::os::unix::fs::PermissionsExt;
@@ -720,13 +720,13 @@ fn reports_crash_and_failure_codes() {
         ),
         ("kill -9 $$", SessionEnd::Crashed),
         // The sign-in helper refused another account; FreeRDP then fails
-        // its Entra logon. The refusal is the reason shown (review U1).
+        // its Entra logon. The refusal is the reason shown.
         (
             "echo 'cosmic-ext-deskfeed-signin: signed in as a different account; refused' >&2; \
              echo '[ERROR][x] - ERRCONNECT_LOGON_FAILURE [0x00020014]'; exit 131",
             SessionEnd::WrongAccount,
         ),
-        // The host didn't finish the logon in time (as on 2026-10-20).
+        // The host didn't finish the logon in time.
         (
             "echo '[ERROR][com.freerdp.core] - [rdp_client_wait_for_activation]: ERRCONNECT_ACTIVATION_TIMEOUT [0x0002001C]'; exit 131",
             SessionEnd::HostTimedOut,

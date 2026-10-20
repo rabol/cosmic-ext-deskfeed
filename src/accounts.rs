@@ -378,7 +378,7 @@ fn delete_in(env: &Env, identity: &Identity) -> Result<(), String> {
     let _account = lock.lock();
     let deleted = env.store.delete(&env.config, identity);
     crate::app_log!("saved sign-in: deleted (sign-out): {deleted:?}");
-    // Under the same lock as their saves (`save_password`, review F01).
+    // Under the same lock as their saves (`save_password`).
     let passwords = env.store.delete_passwords(identity, None);
     crate::app_log!(
         "remembered passwords deleted (sign-out): {:?}",
@@ -392,7 +392,7 @@ fn delete_in(env: &Env, identity: &Identity) -> Result<(), String> {
 /// Saves the account's offline list, unless it was signed out since
 /// `started` ([`sign_out_count`] when the save was scheduled). Under the
 /// account's lock, like [`remove_files`], so a save queued before a
-/// sign-out can't bring the list back after it (review F05).
+/// sign-out can't bring the list back after it.
 pub fn save_cache(
     store: &crate::cache::Store,
     id: &str,
@@ -414,7 +414,7 @@ static FORGETS: LazyLock<Mutex<HashMap<(String, String), u64>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// What a remembered-password save was scheduled under: the account's
-/// sign-outs and the desktop's forgets at that moment (review F01).
+/// sign-outs and the desktop's forgets at that moment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PasswordTicket {
     sign_outs: u64,
@@ -572,7 +572,7 @@ pub enum Restore {
 
 /// Signs in with a saved refresh token. `started`: [`sign_out_count`] when
 /// this was scheduled, so a restore queued before a sign-out does nothing
-/// after it (review F01).
+/// after it.
 pub fn restore(http: &Http, stored: &Stored, started: u64) -> Restore {
     restore_at(http, &system(), stored, started)
 }
@@ -716,7 +716,7 @@ fn renew_in(
     renew_at(http, env, account, force, started)
 }
 
-/// `started`: [`sign_out_count`] when the work was scheduled (review F01).
+/// `started`: [`sign_out_count`] when the work was scheduled.
 fn renew_at(
     http: &Http,
     env: &Env,

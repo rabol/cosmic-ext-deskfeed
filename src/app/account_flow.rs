@@ -226,7 +226,7 @@ impl AppModel {
             return Task::none();
         };
         let (id, list) = (id.to_owned(), to_cached(list));
-        // Read now: a sign-out before the save runs stops it (review F05).
+        // Read now: a sign-out before the save runs stops it.
         let started = accounts::sign_out_count(&id);
         Task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
@@ -255,7 +255,7 @@ impl AppModel {
         account.can_retry = false;
         let http = self.http.clone();
         let id = id.to_owned();
-        // Read now: a sign-out before the restore runs stops it (review F01).
+        // Read now: a sign-out before the restore runs stops it.
         let started = accounts::sign_out_count(&id);
         cosmic::task::future(async move {
             let outcome =
@@ -547,12 +547,12 @@ impl AppModel {
         let epoch = account.epoch;
         let http = self.http.clone();
         let id = id.to_owned();
-        // Read now: a sign-out before this runs stops it (review F01).
+        // Read now: a sign-out before this runs stops it.
         let started = accounts::sign_out_count(&id);
         let owner = id.clone();
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {
-                // No more requests once the account signed out (review F08).
+                // No more requests once the account signed out.
                 let wanted = || accounts::sign_out_count(&owner) == started;
                 // An expired access token would only get "session expired".
                 let signed_in = accounts::renew_if_needed(&http, signed_in, started)?;
@@ -694,8 +694,7 @@ impl AppModel {
                 let mut icons = Vec::new();
                 let mut refused = 0;
                 for url in missing {
-                    // No more requests once the account signed out
-                    // (review F08).
+                    // No more requests once the account signed out.
                     if accounts::sign_out_count(&owner) != started {
                         break;
                     }
@@ -915,7 +914,7 @@ fn keyring_cleanup(
     cosmic::task::future(async move {
         let kept = identity.clone();
         // The saved sign-in and the remembered passwords, under the
-        // account's lock like their saves (review F01).
+        // account's lock like their saves.
         let result = tokio::task::spawn_blocking(move || accounts::delete(&identity))
             .await
             .unwrap_or_else(|_| Err(fl!("error-sign-out-incomplete")));

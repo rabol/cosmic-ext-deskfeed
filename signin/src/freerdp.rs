@@ -227,7 +227,7 @@ pub fn run(args: &[String]) -> ExitCode {
     let main_loop = glib::MainLoop::new(None, false);
     let view = SignInView::new(&profile, &window_title(), proxy.ok().flatten().as_ref());
     let send = Arc::new(send);
-    // Which account the app expects (review U1, `account.rs`).
+    // Which account the app expects (`account.rs`).
     let expected = Arc::new(crate::account::Expected::from_env());
     {
         let main_loop = main_loop.clone();
@@ -262,7 +262,7 @@ pub const WRONG_ACCOUNT_LINE: &str =
     "cosmic-ext-deskfeed-signin: signed in as a different account; refused";
 
 /// An `Ok` naming a different account than the app's becomes a failure,
-/// so FreeRDP never gets a token for it (review U1). Others pass.
+/// so FreeRDP never gets a token for it. Others pass.
 pub fn vet(reply: Reply, expected: Option<&crate::account::Account>) -> Reply {
     use crate::account::{Check, check};
     let Reply::Ok { account, .. } = &reply else {
@@ -298,7 +298,7 @@ pub enum AfterSilent {
     /// Microsoft needs the user: the normal sign-in.
     Interactive,
     /// The remembered session is another account: the sign-in with the
-    /// account list, so the user can pick the right one (review U1).
+    /// account list, so the user can pick the right one.
     PickAccount,
 }
 

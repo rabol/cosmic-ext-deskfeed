@@ -238,7 +238,7 @@ impl AppModel {
                 }
                 (None, b.into())
             }
-            // Not started yet: Cancel stops it (review F06, F08).
+            // Not started yet: Cancel stops it.
             Some(Connection::Preparing) => (
                 Some(fl!("status-preparing")),
                 widget::button::standard(fl!("cancel"))
@@ -336,9 +336,9 @@ impl AppModel {
             _ => kind,
         };
         let favorite = self.config.favorites.contains(&r.key);
-        // A filled star for a favorite, an outline one otherwise: the
-        // owner found one icon for both states unclear (2026-10-20). Both
-        // come from COSMIC's icon theme through its Pop fallback.
+        // A filled star for a favorite, an outline one otherwise; one icon
+        // for both states was unclear. Both come from COSMIC's icon theme
+        // through its Pop fallback.
         let star = if favorite {
             "starred-symbolic"
         } else {

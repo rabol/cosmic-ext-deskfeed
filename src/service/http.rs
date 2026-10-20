@@ -439,7 +439,7 @@ mod tests {
     }
 
     /// A small compressed answer that expands past the role's limit (a
-    /// "gzip bomb"): the limit counts the expanded bytes (review test gap 5).
+    /// "gzip bomb"): the limit counts the expanded bytes.
     #[test]
     fn compressed_answers_count_expanded() {
         let bomb: &[u8] = include_bytes!("testdata/zeros-1mib.gz");
@@ -469,7 +469,7 @@ mod tests {
     }
 
     /// A server that never answers, and one that trickles: the time limit
-    /// ends both (review test gap 5).
+    /// ends both.
     #[test]
     fn slow_servers_time_out() {
         let limit = Duration::from_secs(1);
@@ -499,7 +499,7 @@ mod tests {
     }
 
     /// An answer cut off before its announced length is an error, never a
-    /// short body taken as complete (review test gap 5).
+    /// short body taken as complete.
     #[test]
     fn a_cut_off_answer_is_an_error() {
         let port = one_connection(|mut s| {
@@ -515,7 +515,7 @@ mod tests {
     }
 
     /// No kind of request follows a redirect, and its target is never
-    /// contacted (review test gap 5; `redirect_is_not_followed…` covers the
+    /// contacted (`redirect_is_not_followed…` covers the
     /// feed with a token).
     #[test]
     fn no_role_follows_redirects() {

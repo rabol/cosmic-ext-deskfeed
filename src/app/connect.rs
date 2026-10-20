@@ -18,7 +18,7 @@ impl AppModel {
                 if self.account(&id).is_none_or(|a| a.epoch != epoch) {
                     return Task::none();
                 }
-                // Cancelled while it was being prepared (review F08).
+                // Cancelled while it was being prepared.
                 if !matches!(self.desks.conn(&key), Some(Connection::Preparing)) {
                     return Task::none();
                 }
@@ -82,7 +82,7 @@ impl AppModel {
             }
             Message::PasswordSaved(key, id, ticket, result) => match result {
                 // Only while nothing changed since: a sign-out or Forget
-                // meanwhile wins (review F01).
+                // meanwhile wins.
                 Ok(true)
                     if self.account(&id).is_some()
                         && crate::accounts::password_ticket(&id, &key) == ticket =>
@@ -146,7 +146,7 @@ impl AppModel {
             }
             Message::Disconnect(key) => {
                 // Not started yet: preparing, or waiting for its password
-                // (review F06, F08). A connection file still on its way is
+                //. A connection file still on its way is
                 // dropped when it arrives.
                 if matches!(
                     self.desks.conn(&key),
@@ -240,7 +240,7 @@ impl AppModel {
         self.desks.set_conn(key, Connection::Preparing);
         let http = self.http.clone();
         let key = key.to_owned();
-        // Read now: a sign-out before this runs stops it (review F01).
+        // Read now: a sign-out before this runs stops it.
         let started = accounts::sign_out_count(&id);
         cosmic::task::future(async move {
             let result = tokio::task::spawn_blocking(move || {

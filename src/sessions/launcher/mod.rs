@@ -91,7 +91,7 @@ pub struct LaunchSpec {
     pub window_title: String,
     pub app_id: String,
     /// The Deskfeed account, so the sign-in helper can steer FreeRDP's own
-    /// sign-in to it and refuse another (review U1, ADR 0026).
+    /// sign-in to it and refuse another (ADR 0026).
     pub account: Option<HelperAccount>,
 }
 

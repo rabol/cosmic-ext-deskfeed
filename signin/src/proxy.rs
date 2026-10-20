@@ -2,7 +2,7 @@
 
 //! The proxy the sign-in window uses: the app's own (spec §7), from a
 //! private file rather than the environment, since its address may carry a
-//! user name and password (review F03). The app writes the file (0600, in a
+//! user name and password. The app writes the file (0600, in a
 //! private folder) and names it in `PROXY_FILE_ENV`; the variable holds only
 //! the path. Without the variable the web view uses the desktop's proxy
 //! settings.

@@ -144,12 +144,12 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
 
 ## 5. Comments
 
-- [ ] **Review IDs and dates in code comments.**
+- [x] **Review IDs and dates in code comments.** (Done 2026-10-20: provenance removed, reasons kept; dates kept only where they date an observation of an external system.)
   - 42 references to CODE_REVIEW.md items in `.rs` files ✓ checked (for example "(review F09)", "(test audit 2026-10-20)").
   - About 30 diary lines ("found 2026-10-20", "was untested", "Before, each fact had its own map… Now…").
   - *Fix:* keep the *why*, drop the provenance, or point to an ADR.
   - Effort S–M, risk none.
-- [ ] **Stale or stacked doc comments.**
+- [x] **Stale or stacked doc comments.** (Done 2026-10-20.)
   - `model.rs:465-470`: three docs on `to_cached`, two of which describe `resource_key` and contradict each other ✓ checked.
   - Message variants with an old doc above the new one: `SignOutFinished`, `PasswordSaved`, `WorkspaceMoved`.
   - `mod.rs:151-152`: leftover from a deleted constant.

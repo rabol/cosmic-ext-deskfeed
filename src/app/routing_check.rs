@@ -6,7 +6,7 @@
 //! refuses a message it doesn't route. It can't check that the handler a
 //! message is sent to has an arm for it: a mismatch only shows at run
 //! time as "bug: message … routed to the wrong handler" and the action
-//! does nothing (Quit in the menu, 2026-10-20). This test reads the
+//! does nothing (as Quit in the menu once did). This test reads the
 //! sources and compares the two, so the mismatch fails CI instead.
 
 use std::collections::{BTreeMap, BTreeSet};

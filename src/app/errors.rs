@@ -64,8 +64,8 @@ pub(super) fn describe_fetch_error(e: &FetchError) -> String {
 
 /// The text for an ended session, with an explanation for failures the
 /// launcher has no category for: FreeRDP's own error name and how far the
-/// connection got, from its log lines (owner, 2026-10-20: "failed error
-/// code 131 is useless"). The code stays in the text, for support.
+/// connection got, from its log lines; a bare "code 131" tells the user
+/// nothing. The code stays in the text, for support.
 pub(super) fn describe_ended(end: &SessionEnd, log: &[String]) -> String {
     match end {
         SessionEnd::Failed { code } => explain_failure(*code, log),
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn a_failure_explains_itself_and_keeps_the_code() {
-        // The owner's case (2026-10-20): code 131 with FreeRDP's error name.
+        // Code 131 with FreeRDP's error name, as seen on the owner's host.
         let text = describe_ended(
             &SessionEnd::Failed { code: 131 },
             &log(&[

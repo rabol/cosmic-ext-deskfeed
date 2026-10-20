@@ -456,7 +456,7 @@ pub fn run(labels: Labels) -> impl cosmic::iced::futures::Stream<Item = TrayEven
 }
 
 /// How long the panel's tray may be gone before the app is told (a panel
-/// restart takes a moment; review U3).
+/// restart takes a moment).
 const HOST_GRACE: Duration = Duration::from_secs(5);
 
 /// Serves the item on `bus` and registers it with the panel's tray.
@@ -535,7 +535,7 @@ async fn serve(
 
 /// Follows the panel's tray (the watcher): when it goes away and stays away
 /// for `grace`, the app hears `Unavailable` and shows its window, so it is
-/// never hidden without a way back (spec §5; review U3). When it comes back,
+/// never hidden without a way back (spec §5). When it comes back,
 /// the item registers again and the app hears `Ready`.
 async fn follow_host(
     conn: zbus::Connection,

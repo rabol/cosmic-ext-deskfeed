@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-//! Which account FreeRDP's sign-in for the desktop uses (review U1).
+//! Which account FreeRDP's sign-in for the desktop uses.
 //!
 //! FreeRDP 3.32.2 asks for the session host's token with no hint about the
 //! account (`client/common/client.c`, the authorize URL has `client_id`,

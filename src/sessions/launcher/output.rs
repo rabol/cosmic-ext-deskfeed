@@ -34,14 +34,14 @@ pub(super) const REPLACED_MARKER: &str = "ERRINFO_DISCONNECTED_BY_OTHER_CONNECTI
 pub(super) const PROXY_ANSWER_MARKER: &str = "[http_proxy_connect]: HTTP Proxy: ";
 
 /// The sign-in helper refused a sign-in as another account than the app's
-/// (signin/src/freerdp.rs, `WRONG_ACCOUNT_LINE`; review U1).
+/// (signin/src/freerdp.rs, `WRONG_ACCOUNT_LINE`).
 pub(super) const WRONG_ACCOUNT_MARKER: &str =
     "cosmic-ext-deskfeed-signin: signed in as a different account";
 
 /// The session host didn't finish the logon within `/timeout`
 /// (`connection.c`, `rdp_client_wait_for_activation`). FreeRDP then exits
-/// with its generic 131 (`XF_EXIT_CONN_FAILED`); seen 2026-10-20 on the
-/// owner's host right after the previous session closed.
+/// with its generic 131 (`XF_EXIT_CONN_FAILED`). Seen on the owner's host
+/// right after the previous session closed (docs/compatibility.md).
 pub(super) const ACTIVATION_TIMEOUT_MARKER: &str = "ERRCONNECT_ACTIVATION_TIMEOUT";
 
 pub(super) const MAX_LOG_LINES: usize = 60;
@@ -87,7 +87,7 @@ pub enum SessionEnd {
     /// (`ACTIVATION_TIMEOUT_MARKER`): the server's side, not the sign-in.
     HostTimedOut,
     /// The user signed in to the desktop as a different account than the
-    /// app's, and the sign-in helper refused it (review U1).
+    /// app's, and the sign-in helper refused it.
     WrongAccount,
     /// FreeRDP couldn't verify the session host's certificate (ADR 0016).
     CertificateNotTrusted(CertificateInfo),
