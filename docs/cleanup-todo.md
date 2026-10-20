@@ -175,6 +175,12 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - *Simpler:* `fake_freerdp(script)`, `launch_fake(spec, script)`, `is_gone(pid)`.
   - Effort M, risk low.
 - [ ] **Four hand-written fake HTTP servers and ~14 temp-dir naming schemes.** *Simpler:* one configurable test server in `test_util`, and `tempfile` (already in Cargo.lock) as a dev-dependency (an ADR line per the minimal-dependencies rule). Effort S, risk low.
+- [ ] **Hand-written code where a mature crate fits** (owner, 2026-10-20: "keep minimal does not mean handcode everything"). Weigh each honestly — crate if it replaces real code or a tricky format and is widely used; record it in an ADR:
+  - test HTTP fakes → `mockito` (decided; one small raw server stays for hostile cases);
+  - test temp folders → `tempfile`;
+  - `testkit::random_inputs` → `proptest` (shrinks failing inputs);
+  - the tray's StatusNotifierItem/dbusmenu code (`tray.rs`, ~470 lines) → `ksni`;
+  - local time via `localtime_r` (`views.rs`) → a time crate, if one is already in the tree.
 - [ ] **Two tiny workspace crates** (`lines/`, `testkit/`): sharing code with the helper is a real need, but one crate is enough. Merge them into the common crate from §2, with the random-input tool behind a feature. Effort S, risk low.
 - [x] **`justfile`.** (Done 2026-10-20: `just ci`; `check` as CI; comments on the right recipes; `check-json` gone; `tag` bumps only the app and the helper, tags `v<version>` as the AUR package expects, no interactive amend.)
   - A doc comment sits on the wrong recipe.
