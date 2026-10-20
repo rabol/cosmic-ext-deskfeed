@@ -55,6 +55,25 @@ pub(super) enum AccountState {
 }
 
 impl Account {
+    /// A new account entry: nothing loaded, refreshed or noted yet.
+    pub(super) fn new(id: String, identity: Identity, state: AccountState, epoch: u64) -> Self {
+        Self {
+            id,
+            identity,
+            state,
+            stored: None,
+            notice: None,
+            can_retry: false,
+            generation: 0,
+            sign_in: 0,
+            last_load: None,
+            jitter: 0,
+            last_refreshed: None,
+            cached: None,
+            epoch,
+        }
+    }
+
     pub(super) fn label(&self) -> String {
         self.identity
             .username

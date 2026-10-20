@@ -161,21 +161,14 @@ impl AppModel {
             }
             accounts::adopt_legacy_profile(&id);
             let epoch = self.next();
-            self.accounts.push(Account {
-                id: id.clone(),
-                identity: stored.identity.clone(),
-                state: AccountState::Restoring,
-                stored: Some(stored),
-                notice: None,
-                can_retry: false,
-                generation: 0,
-                sign_in: 0,
-                last_load: None,
-                jitter: 0,
-                last_refreshed: None,
-                cached: None,
+            let mut account = Account::new(
+                id.clone(),
+                stored.identity.clone(),
+                AccountState::Restoring,
                 epoch,
-            });
+            );
+            account.stored = Some(stored);
+            self.accounts.push(account);
             tasks.push(self.load_cached(&id, epoch));
             tasks.push(self.start_restore(&id));
         }
@@ -473,30 +466,18 @@ impl AppModel {
             workspaces: Vec::new(),
             error: None,
         };
-        match self.account_mut(&id) {
-            Some(a) => {
-                a.identity = signed_in.identity.clone();
-                a.state = state;
-                a.notice = None;
-                a.can_retry = false;
-                a.generation = generation;
-                a.sign_in = generation;
-            }
-            None => self.accounts.push(Account {
-                id: id.clone(),
-                identity: signed_in.identity.clone(),
-                state,
-                stored: None,
-                notice: None,
-                can_retry: false,
-                generation,
-                sign_in: generation,
-                last_load: None,
-                jitter: 0,
-                last_refreshed: None,
-                cached: None,
-                epoch,
-            }),
+        if let Some(a) = self.account_mut(&id) {
+            a.identity = signed_in.identity.clone();
+            a.state = state;
+            a.notice = None;
+            a.can_retry = false;
+            a.generation = generation;
+            a.sign_in = generation;
+        } else {
+            let mut account = Account::new(id.clone(), signed_in.identity.clone(), state, epoch);
+            account.generation = generation;
+            account.sign_in = generation;
+            self.accounts.push(account);
         }
         self.rebuild_nav(&Page::Account(id.clone()));
         let started = accounts::sign_out_count(&id);
@@ -811,15 +792,10 @@ impl AppModel {
         Task::batch(tasks)
     }
 
-    /// The account's open connections: running or starting.
-    fn open_sessions(&self, id: &str) -> usize {
-        self.desks.open_count_for(id)
-    }
-
     /// Sign-out asks first while the account has desktops or apps open
     /// (spec §6: disconnect and sign out, or cancel).
     fn ask_sign_out(&mut self, id: &str) -> Task<cosmic::Action<Message>> {
-        if self.open_sessions(id) == 0 {
+        if self.desks.open_count_for(id) == 0 {
             return self.sign_out(id);
         }
         self.sign_out_asking = Some(id.to_owned());
@@ -828,7 +804,7 @@ impl AppModel {
 
     pub(super) fn sign_out_dialog(&self, id: &str) -> Element<'_, Message> {
         let label = self.account(id).map(Account::label).unwrap_or_default();
-        let open = u32::try_from(self.open_sessions(id)).unwrap_or(u32::MAX);
+        let open = u32::try_from(self.desks.open_count_for(id)).unwrap_or(u32::MAX);
         widget::dialog()
             .title(fl!("sign-out-title", account = label))
             .body(fl!("sign-out-body", count = open))

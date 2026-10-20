@@ -29,7 +29,10 @@ impl AppModel {
     pub(super) fn diagnostics_inputs(&self) -> Inputs {
         let mut summary = vec![
             format!("Deskfeed {}", env!("CARGO_PKG_VERSION")),
-            format!("Created {}", crate::app::diagnostics::now_label()),
+            format!(
+                "Created {}",
+                super::views::date_time_label(std::time::SystemTime::now())
+            ),
             String::new(),
             "Dependencies:".to_owned(),
         ];
@@ -141,11 +144,6 @@ fn redact_names(text: &str, names: &[(String, String)]) -> String {
         out = out.replace(name.as_str(), placeholder);
     }
     out
-}
-
-/// Local date and time for the report's header.
-pub(super) fn now_label() -> String {
-    super::views::date_time_label(std::time::SystemTime::now())
 }
 
 /// Writes the report to `path`, private to the user.

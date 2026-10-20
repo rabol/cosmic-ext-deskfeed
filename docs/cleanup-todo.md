@@ -117,7 +117,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - *Simpler:* `glib::unix_fd_add_local`.
   - Effort M, risk med (re-run the hostile-input tests).
 - [ ] **Sign-in cancellation via raw PIDs** (`src/auth/signin.rs:65-130, 216-303`): Condvar, PID in a Mutex, `waitid(WNOWAIT)` and unsafe `kill`. Keeping the `Child` in the shared mutex may remove the unsafe code. Uncertain; try it. Effort M, risk med.
-- [ ] **Small wrappers.**
+- [x] **Small wrappers.** (Done 2026-10-20: `open_sessions` and `now_label` inlined, `clock_label` reuses `date_time_label`, `Account::new`. Kept: `retain_from_tray(|_, _| false)` (two uses, clear enough); `with_window` goes with the workspace item.)
   - `open_sessions` and `diagnostics::now_label`;
   - `retain_from_tray(|_,_| false)` used three times (should be `clear_from_tray`);
   - `clock_label` re-implements `date_time_label`;

@@ -535,18 +535,12 @@ pub(super) fn clock_label(t: SystemTime) -> String {
     let Some(tm) = local(t) else {
         return String::new();
     };
-    let time = format!("{:02}:{:02}", tm.tm_hour, tm.tm_min);
     let today = local(SystemTime::now())
         .is_some_and(|n| (n.tm_year, n.tm_yday) == (tm.tm_year, tm.tm_yday));
     if today {
-        time
+        format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
     } else {
-        format!(
-            "{:04}-{:02}-{:02} {time}",
-            tm.tm_year + 1900,
-            tm.tm_mon + 1,
-            tm.tm_mday
-        )
+        date_time_label(t)
     }
 }
 
