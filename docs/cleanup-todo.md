@@ -74,7 +74,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - The wrong-account marker is kept equal only by a test.
   - *Simpler:* one shared crate (turn `lines/` into a common crate holding bounded lines, the protocol types and the constants).
   - Effort M, risk low.
-- [ ] **Password dialogs as parallel state with generics for one type.**
+- [x] **Password dialogs as parallel state with generics for one type.** (Done 2026-10-20: `DialogQueue` with `offer`, `withdraw`, `close`; still generic, so its test can use stand-ins.)
   - Where: `dialog` + `waiting_dialogs` (`src/app/mod.rs`), and `offer_dialog<T>`/`withdraw_dialogs<T>` (`src/app/decide.rs:236-262`).
   - `withdraw_dialogs(|_| false)` really means "show the next one".
   - *Simpler:* a small `DialogQueue` with `offer`, `withdraw` and `advance`.

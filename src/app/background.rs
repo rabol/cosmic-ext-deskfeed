@@ -127,7 +127,7 @@ impl AppModel {
         self.desks
             .retain_from_tray(|_, d| d.connection.as_ref().is_some_and(Connection::is_starting));
         if self.quit == Quit::Asking
-            || self.dialog.is_some()
+            || self.dialogs.shown().is_some()
             || self.certificate_dialog.is_some()
             || failed
             || needs_sign_in

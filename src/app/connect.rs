@@ -38,32 +38,31 @@ impl AppModel {
                 return self.connection_file_ready(&id, key, result);
             }
             Message::PasswordInput(PasswordText(s)) => {
-                if let Some(d) = &mut self.dialog {
+                if let Some(d) = self.dialogs.shown_mut() {
                     d.password = s;
                 }
             }
             Message::TogglePasswordVisible => {
-                if let Some(d) = &mut self.dialog {
+                if let Some(d) = self.dialogs.shown_mut() {
                     d.password_hidden = !d.password_hidden;
                 }
             }
             Message::LogonSelected(i) => {
-                if let Some(d) = &mut self.dialog {
+                if let Some(d) = self.dialogs.shown_mut() {
                     d.logon = i;
                     d.error = None;
                 }
             }
             Message::CustomDomainInput(s) => {
-                if let Some(d) = &mut self.dialog {
+                if let Some(d) = self.dialogs.shown_mut() {
                     d.custom_domain = s;
                 }
             }
             // Cancelled: back to Connect.
             Message::DialogCancel => {
-                if let Some(d) = self.dialog.take() {
+                if let Some(d) = self.dialogs.close() {
                     self.desks.clear_conn(&d.key);
                 }
-                self.withdraw_dialogs(|_| false);
             }
             Message::DialogConnect => return self.dialog_connect(),
             Message::Launched(id, epoch, key, attempt, result) => {
@@ -73,7 +72,7 @@ impl AppModel {
             Message::ReconnectDue(key, timer) => return self.reconnect_due(&key, timer),
             Message::ShowSession(key) => return self.show_session(&key),
             Message::ToggleRememberPassword(on) => {
-                if let Some(d) = &mut self.dialog {
+                if let Some(d) = self.dialogs.shown_mut() {
                     d.remember = on;
                 }
             }

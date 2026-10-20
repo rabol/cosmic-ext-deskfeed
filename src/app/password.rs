@@ -36,14 +36,12 @@ impl AppModel {
             remember: false,
         };
         // Another resource's dialog is open: this one waits its turn.
-        decide::offer_dialog(&mut self.dialog, &mut self.waiting_dialogs, dialog, |d| {
-            &d.key
-        });
+        self.dialogs.offer(dialog, |d| &d.key);
     }
 
     /// Drops the password dialogs `gone` matches and shows the next one.
     pub(super) fn withdraw_dialogs(&mut self, gone: impl Fn(&PasswordDialog) -> bool) {
-        decide::withdraw_dialogs(&mut self.dialog, &mut self.waiting_dialogs, gone);
+        self.dialogs.withdraw(gone);
     }
 
     /// Reads a desktop's remembered password in the background.
@@ -151,7 +149,7 @@ impl AppModel {
     }
 
     pub(super) fn dialog_connect(&mut self) -> Task<cosmic::Action<Message>> {
-        let Some(d) = &mut self.dialog else {
+        let Some(d) = self.dialogs.shown_mut() else {
             return Task::none();
         };
         let logon = match d.logon {
@@ -180,8 +178,7 @@ impl AppModel {
         } else {
             None
         };
-        let d = self.dialog.take().expect("checked above");
-        self.withdraw_dialogs(|_| false);
+        let d = self.dialogs.close().expect("checked above");
         // Kept only until the connection works (`session_event`).
         self.desks.at(&d.key).pending_password = match (&password, d.remember) {
             (Some(p), true) => Some(p.clone()),

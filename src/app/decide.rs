@@ -230,35 +230,60 @@ pub(super) fn slept(monotonic: std::time::Duration, wall: std::time::Duration) -
     wall > monotonic + std::time::Duration::from_secs(60)
 }
 
-/// Password dialogs, one per resource: `open` is shown, the
-/// rest wait in order. A newer dialog for the same resource replaces its
-/// older one; another resource's waits its turn.
-pub(super) fn offer_dialog<T>(
-    open: &mut Option<T>,
-    waiting: &mut std::collections::VecDeque<T>,
-    dialog: T,
-    key: impl Fn(&T) -> &str,
-) {
-    waiting.retain(|d| key(d) != key(&dialog));
-    match open {
-        Some(shown) if key(shown) != key(&dialog) => waiting.push_back(dialog),
-        _ => *open = Some(dialog),
+/// Password dialogs, one per resource: one is shown, the rest wait in
+/// order. A newer dialog for the same resource replaces its older one;
+/// another resource's waits its turn. Generic so the tests can use simple
+/// stand-ins.
+pub(super) struct DialogQueue<T> {
+    shown: Option<T>,
+    waiting: std::collections::VecDeque<T>,
+}
+
+impl<T> Default for DialogQueue<T> {
+    fn default() -> Self {
+        Self {
+            shown: None,
+            waiting: std::collections::VecDeque::new(),
+        }
     }
 }
 
-/// Drops the dialogs `gone` matches (cancelled, signed out), shown or
-/// waiting, then shows the next one if none is open.
-pub(super) fn withdraw_dialogs<T>(
-    open: &mut Option<T>,
-    waiting: &mut std::collections::VecDeque<T>,
-    gone: impl Fn(&T) -> bool,
-) {
-    waiting.retain(|d| !gone(d));
-    if open.as_ref().is_some_and(&gone) {
-        *open = None;
+impl<T> DialogQueue<T> {
+    pub(super) fn shown(&self) -> Option<&T> {
+        self.shown.as_ref()
     }
-    if open.is_none() {
-        *open = waiting.pop_front();
+
+    pub(super) fn shown_mut(&mut self) -> Option<&mut T> {
+        self.shown.as_mut()
+    }
+
+    /// Shows `dialog`, or queues it behind another resource's.
+    pub(super) fn offer(&mut self, dialog: T, key: impl Fn(&T) -> &str) {
+        self.waiting.retain(|d| key(d) != key(&dialog));
+        match &self.shown {
+            Some(shown) if key(shown) != key(&dialog) => self.waiting.push_back(dialog),
+            _ => self.shown = Some(dialog),
+        }
+    }
+
+    /// Drops the dialogs `gone` matches (cancelled, signed out), shown or
+    /// waiting, then shows the next one if none is shown.
+    pub(super) fn withdraw(&mut self, gone: impl Fn(&T) -> bool) {
+        self.waiting.retain(|d| !gone(d));
+        if self.shown.as_ref().is_some_and(&gone) {
+            self.shown = None;
+        }
+        if self.shown.is_none() {
+            self.shown = self.waiting.pop_front();
+        }
+    }
+
+    /// The shown dialog is answered or cancelled: returns it and shows the
+    /// next one.
+    pub(super) fn close(&mut self) -> Option<T> {
+        let closed = self.shown.take();
+        self.shown = self.waiting.pop_front();
+        closed
     }
 }
 
@@ -512,33 +537,44 @@ mod tests {
 
     #[test]
     fn password_dialogs_take_turns() {
-        use std::collections::VecDeque;
         fn key<'a>(d: &'a (&'static str, u32)) -> &'a str {
             d.0
         }
-        let (mut open, mut waiting) = (None, VecDeque::new());
+        let mut q = DialogQueue::default();
         // Two resources finish in either order: both get their dialog.
-        offer_dialog(&mut open, &mut waiting, ("a", 1), key);
-        offer_dialog(&mut open, &mut waiting, ("b", 1), key);
-        assert_eq!(open, Some(("a", 1)));
-        assert_eq!(waiting, [("b", 1)]);
+        q.offer(("a", 1), key);
+        q.offer(("b", 1), key);
+        assert_eq!(q.shown, Some(("a", 1)));
+        assert_eq!(q.waiting, [("b", 1)]);
         // A newer dialog for a waiting resource replaces its older one.
-        offer_dialog(&mut open, &mut waiting, ("b", 2), key);
-        assert_eq!(waiting, [("b", 2)]);
+        q.offer(("b", 2), key);
+        assert_eq!(q.waiting, [("b", 2)]);
         // And for the shown one, replaces it in place.
-        offer_dialog(&mut open, &mut waiting, ("a", 2), key);
-        assert_eq!(open, Some(("a", 2)));
+        q.offer(("a", 2), key);
+        assert_eq!(q.shown, Some(("a", 2)));
         // Answering or cancelling "a" shows "b".
-        withdraw_dialogs(&mut open, &mut waiting, |d| d.0 == "a");
-        assert_eq!(open, Some(("b", 2)));
-        assert!(waiting.is_empty());
+        q.withdraw(|d| d.0 == "a");
+        assert_eq!(q.shown, Some(("b", 2)));
+        assert!(q.waiting.is_empty());
         // Cancelling a waiting one leaves the shown one alone.
-        offer_dialog(&mut open, &mut waiting, ("c", 1), key);
-        withdraw_dialogs(&mut open, &mut waiting, |d| d.0 == "c");
-        assert_eq!(open, Some(("b", 2)));
-        assert!(waiting.is_empty());
-        withdraw_dialogs(&mut open, &mut waiting, |d| d.0 == "b");
-        assert_eq!(open, None);
+        q.offer(("c", 1), key);
+        q.withdraw(|d| d.0 == "c");
+        assert_eq!(q.shown, Some(("b", 2)));
+        assert!(q.waiting.is_empty());
+        q.withdraw(|d| d.0 == "b");
+        assert_eq!(q.shown, None);
+    }
+
+    #[test]
+    fn closing_the_shown_dialog_shows_the_next() {
+        let mut q = DialogQueue::default();
+        q.offer(("a", 1), |d: &(&'static str, u32)| d.0);
+        q.offer(("b", 1), |d: &(&'static str, u32)| d.0);
+        assert_eq!(q.close(), Some(("a", 1)));
+        assert_eq!(q.shown(), Some(&("b", 1)));
+        assert_eq!(q.close(), Some(("b", 1)));
+        assert_eq!(q.close(), None);
+        assert!(q.shown().is_none());
     }
 
     #[test]

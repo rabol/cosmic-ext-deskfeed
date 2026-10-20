@@ -128,10 +128,9 @@ pub struct AppModel {
     /// URLs (`?v=`), so a fetched one stays valid.
     icons: HashMap<(String, Url), widget::icon::Handle>,
     quit: Quit,
-    dialog: Option<PasswordDialog>,
-    /// Password dialogs waiting their turn behind `dialog`: each resource
-    /// keeps its own, none replaces another.
-    waiting_dialogs: std::collections::VecDeque<PasswordDialog>,
+    /// The password dialog shown, and the ones waiting their turn: each
+    /// resource keeps its own, none replaces another.
+    dialogs: decide::DialogQueue<PasswordDialog>,
     certificate_dialog: Option<CertificateDialog>,
     logon_labels: Vec<String>,
     /// Last dependency check; `None` while it runs.
@@ -231,8 +230,7 @@ impl cosmic::Application for AppModel {
             cache: crate::cache::Store::user(),
             icons: HashMap::new(),
             quit: Quit::No,
-            dialog: None,
-            waiting_dialogs: std::collections::VecDeque::new(),
+            dialogs: decide::DialogQueue::default(),
             certificate_dialog: None,
             logon_labels: vec![
                 fl!("logon-automatic"),
@@ -427,7 +425,7 @@ impl cosmic::Application for AppModel {
         if let Some(d) = &self.certificate_dialog {
             return Some(certificate::certificate_dialog(d));
         }
-        let d = self.dialog.as_ref()?;
+        let d = self.dialogs.shown()?;
         let account = self
             .account(&d.account)
             .and_then(|a| a.identity.username.clone())
