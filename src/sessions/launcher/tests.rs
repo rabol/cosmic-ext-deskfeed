@@ -1189,3 +1189,67 @@ fn random_freerdp_output_never_breaks_the_reader() {
         }
     });
 }
+
+/// How a session ended: what FreeRDP's output names exactly wins over its
+/// generic exit code, in this order.
+#[test]
+fn the_end_follows_the_output_before_the_exit_code() {
+    let fp = format!("{}aa", "aa:".repeat(31));
+    let log = |f: &dyn Fn(&mut Log)| {
+        let mut l = Log::default();
+        f(&mut l);
+        l
+    };
+    // A refused certificate first, even with an app refusal and a code.
+    let both = log(&|l| {
+        l.refused = true;
+        l.presented = Some(fp.clone());
+        l.app_refused = Some(AppRefusal::NotFound);
+    });
+    assert!(matches!(
+        both.end(Some(131)),
+        SessionEnd::CertificateNotTrusted(c) if c.fingerprint == fp
+    ));
+    // An app refusal before the proxy's 407.
+    let app = log(&|l| {
+        l.app_refused = Some(AppRefusal::SessionLocked);
+        l.proxy_auth = true;
+    });
+    assert_eq!(
+        app.end(Some(131)),
+        SessionEnd::AppRefused(AppRefusal::SessionLocked)
+    );
+    // Another account: only before connecting.
+    let wrong = log(&|l| l.wrong_account = true);
+    assert_eq!(wrong.end(Some(131)), SessionEnd::WrongAccount);
+    let later = log(&|l| {
+        l.wrong_account = true;
+        l.connected = true;
+    });
+    assert_eq!(later.end(Some(0)), SessionEnd::Closed);
+    // The proxy's 407 before "replaced" and the code.
+    let proxy = log(&|l| {
+        l.proxy_auth = true;
+        l.replaced = true;
+    });
+    assert_eq!(proxy.end(Some(5)), SessionEnd::ProxyAuthRefused);
+    // Replaced needs FreeRDP to have exited; killed by a signal it crashed.
+    let replaced = log(&|l| l.replaced = true);
+    assert_eq!(replaced.end(Some(0)), SessionEnd::Replaced);
+    assert_eq!(replaced.end(None), SessionEnd::Crashed);
+    // A slow host: only before connecting, and not over a logon failure.
+    let slow = log(&|l| l.activation_timeout = true);
+    assert_eq!(slow.end(Some(131)), SessionEnd::HostTimedOut);
+    let slow_and_refused = log(&|l| {
+        l.activation_timeout = true;
+        l.logon_failure = true;
+    });
+    assert_eq!(slow_and_refused.end(Some(131)), SessionEnd::LogonFailed);
+    // Otherwise the exit code decides (`classify_exit`).
+    assert_eq!(Log::default().end(Some(140)), SessionEnd::DnsFailed);
+    let lost = log(&|l| {
+        l.connected = true;
+        l.lost = true;
+    });
+    assert_eq!(lost.end(Some(147)), SessionEnd::ConnectionLost);
+}

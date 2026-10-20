@@ -289,6 +289,24 @@ impl Log {
         }
     }
 
+    /// How the session ended, from FreeRDP's exit code (`None`: killed by
+    /// a signal) and what its output said. The order is the precedence:
+    /// what the output names exactly wins over the generic exit code.
+    pub(super) fn end(&self, code: Option<i32>) -> SessionEnd {
+        match (self.refused_certificate(), self.app_refused) {
+            (Some(cert), _) => SessionEnd::CertificateNotTrusted(cert),
+            (None, Some(why)) => SessionEnd::AppRefused(why),
+            // Only before connecting: a later end is about that session.
+            _ if self.wrong_account && !self.connected => SessionEnd::WrongAccount,
+            _ if self.proxy_auth => SessionEnd::ProxyAuthRefused,
+            _ if self.replaced && code.is_some() => SessionEnd::Replaced,
+            _ if self.activation_timeout && !self.connected && !self.logon_failure => {
+                SessionEnd::HostTimedOut
+            }
+            _ => classify_exit(code, self.logon_failure, self.connected && self.lost),
+        }
+    }
+
     /// The refused certificate, from whatever arrived: stdout (the
     /// description) and stderr (the log lines) are read separately, so
     /// their order isn't known. FreeRDP's own fingerprint line wins; a

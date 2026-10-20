@@ -79,7 +79,7 @@ The AI fingerprint is **accretion**. Each fix added a flag, wrapper, global map,
   - `withdraw_dialogs(|_| false)` really means "show the next one".
   - *Simpler:* a small `DialogQueue` with `offer`, `withdraw` and `advance`.
   - Effort S–M, risk low.
-- [ ] **How a session ended is decided in two places.** `supervise`'s guard chain (`src/sessions/launcher/process.rs:325-337`) and `classify_exit` (`output.rs`); "Replaced" is derived in both. *Simpler:* one `Log::end(status)` holding the whole order, testable without threads. Effort S, risk low–med (order matters).
+- [x] **How a session ended is decided in two places.** (Done 2026-10-20: `Log::end`, tested without threads; `classify_exit` and its tests unchanged.) `supervise`'s guard chain (`src/sessions/launcher/process.rs:325-337`) and `classify_exit` (`output.rs`); "Replaced" is derived in both. *Simpler:* one `Log::end(status)` holding the whole order, testable without threads. Effort S, risk low–med (order matters).
 
 ## 3. Duplication and needless pieces (cheap)
 
