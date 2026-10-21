@@ -1,6 +1,6 @@
 # 3. Connect from the tray with the window closed
 
-- **Status:** To do
+- **Status:** Passed (2026-10-21)
 - **Area:** Background and tray
 - **Why it's manual:** Needs COSMIC's real panel tray and Microsoft's sign-in page.
 - **Needs:** Your AVD account (as a normal user) and a desktop to connect to.

@@ -18,12 +18,11 @@ Install the current build first (`just install`, or the package).
 
 When a test passes, set its status to "Passed (date)" in its file and here. When one fails, note what happened in its file: it's a bug. Expectations must match the owner's setup: an unknown administrator policy is a step ("if the row says …, stop"), not an expected result.
 
-## To do (29)
+## To do (28)
 
 | # | Test | Area | Status |
 |---|---|---|---|
 | 2 | [Sleep for over an hour](02-sleep-over-an-hour.md) | Sign-in and accounts | To do |
-| 3 | [Connect from the tray with the window closed](03-connect-from-tray.md) | Background and tray | To do |
 | 3b | [Sign-out when the keyring refuses](03b-sign-out-keyring-refuses.md) | Sign-in and accounts | To do |
 | 3c | [Sign in while the keyring is locked](03c-sign-in-keyring-locked.md) | Sign-in and accounts | To do |
 | 3e | [Your account is filled in on Microsoft's page](03e-account-filled-in.md) | Sign-in and accounts | To do |
@@ -65,6 +64,7 @@ Test 24 (shared folder) is To do on win-100; its AVD half is completed but not t
 
 | # | Test | Area | Status |
 |---|---|---|---|
+| 3 | [Connect from the tray with the window closed](03-connect-from-tray.md) | Background and tray | Passed (2026-10-21) |
 | 4b | [The tray on ksni](04b-tray-on-ksni.md) | Background and tray | Passed (2026-10-20) |
 | 17 | [Plain RDP connection](17-plain-rdp-connection.md) | Plain RDP connections | Passed (2026-10-21) |
 | 26 | [Open on a new workspace follows the window](26-new-workspace-follows.md) | Desktop sessions | Passed (2026-10-21) |
