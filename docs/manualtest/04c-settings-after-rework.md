@@ -2,7 +2,7 @@
 
 - **Status:** To do
 - **Area:** Settings
-- **Why it's manual:** Needs the real settings store across an install (cleanup-todo §2–3).
+- **Why it's manual:** Needs the real settings store across an install (changed in the 2026-10-20 code cleanup).
 - **Needs:** A few settings you changed with an earlier build.
 
 ## Steps

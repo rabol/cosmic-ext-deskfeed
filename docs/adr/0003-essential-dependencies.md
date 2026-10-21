@@ -95,7 +95,7 @@ Test-only (dev) dependencies don't ship, so they weigh less. The security point 
   - Chosen: the `futures` crates.
 - **`rustix` with `process` (2026-10-20):** ending a hung sign-in helper through a Linux pidfd, replacing our `unsafe` `kill` by process ID and the `waitid(WNOWAIT)` that kept that ID from being reused.
   - Options compared:
-    - keep the `Child` in the shared lock (cleanup-todo's idea): the thread that waits for the helper would hold the lock while blocked, or poll with `try_wait`;
+    - keep the `Child` in the shared lock (an idea from the 2026-10-20 code cleanup): the thread that waits for the helper would hold the lock while blocked, or poll with `try_wait`;
     - std's own pidfd (`CommandExt::create_pidfd`): still unstable (`linux_pidfd`, checked on rustc 1.99);
     - `rustix`: safe `pidfd_open` and `pidfd_send_signal`; already shipped (through `tempfile`) with `process` on, so nothing new.
   - Chosen: `rustix`. A pidfd always refers to the helper, so a kill can't reach a reused process ID, and the helper is reaped with plain `Child::wait`. Needs Linux 5.3; without a pidfd the helper is still ended by closing its stdin, by its own timer, and with the app.
@@ -107,4 +107,4 @@ An outside review proposed more crates. Taken: `ksni` (above), and `tempfile` fo
 - **`subtle` for comparing the sign-in `state`**: not needed at all. Each attempt is used up by its first callback, so timing can't help an attacker; a plain `==` is used.
 - **`jsonwebtoken` for ID tokens**: it has no `ring` backend, so it would bring the RustCrypto `rsa` stack and `sha2` 0.10 beside ours. Its defaults differ (60 s leeway, `nbf` not checked). The tenant, issuer, nonce and account checks stay ours either way. Our code is about 80 lines on top of `ring`'s signature check.
 - **`oauth2` for the token requests**: its ureq support is for ureq 2 (we use 3), and it always brings chrono, `rand` 0.8, `getrandom` 0.2 and `sha2` 0.10. Most of our code there is Microsoft-specific policy, which stays.
-- **`syn` for `routing_check.rs`**: that test went with the nested message enums (cleanup-todo §2), where the compiler checks the routing.
+- **`syn` for `routing_check.rs`**: that test went with the nested message enums (2026-10-20 code cleanup), where the compiler checks the routing.

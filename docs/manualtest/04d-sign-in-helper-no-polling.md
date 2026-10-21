@@ -2,7 +2,7 @@
 
 - **Status:** To do
 - **Area:** Sign-in and accounts
-- **Why it's manual:** Needs the real web view and FreeRDP (cleanup-todo §3).
+- **Why it's manual:** Needs the real web view and FreeRDP (changed in the 2026-10-20 code cleanup).
 - **Needs:** Your AVD account (as a normal user) and a desktop to connect to.
 
 ## Steps

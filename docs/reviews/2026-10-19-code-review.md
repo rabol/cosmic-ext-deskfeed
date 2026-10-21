@@ -1,6 +1,6 @@
 # Independent repository code review
 
-*Historical: a one-time review of commit `35b6557`. Its findings were fixed or decided since; what is still open is in [docs/roadmap.md](../roadmap.md) and [docs/cleanup-todo.md](../cleanup-todo.md).*
+*Historical: a one-time review of commit `35b6557`. Its findings were fixed or decided since. Its finding IDs (F02, U6, …) are cited in ADRs and the changelog; what is still open is in [docs/roadmap.md](../roadmap.md).*
 
 Date: 2026-10-19. Reviewed commit: `35b6557327e17d54b6f4889b3e0567c0ca9d1f37` (initial working tree clean).
 
