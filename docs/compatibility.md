@@ -14,7 +14,7 @@ What has been tested, on what, and what isn't supported (spec §4, item 8). Evid
 | Window size, color depth, network type (local test server, `xfreerdp3` 3.32.2, 2026-10-20) | — | — | works | The client asks for the chosen size (80 % → 3072×1728 on a 3840×2160 monitor), 16 bpp and WAN (type 5); the defaults stay 1024×768, 32 bpp, autodetect. With tiling on, COSMIC resizes the window at once and the desktop follows |
 | Shared folder (`/drive:`) | — | — | not tested | FreeRDP 3.32.2 takes the argument and loads its device channel; the local test server has no drive channel. Needs a Windows machine (manual test 24) |
 | Restricted admin mode (`+restricted-admin`) | — | — | not tested | The local test server accepts it (FreeRDP's server default). What Windows answers when it doesn't allow the mode, or for a user who isn't an administrator, is unknown (manual test 25) |
-| Span as one screen (`+span`) | — | — | not tested | Needs two monitors. FreeRDP accepts it and connects (local test server, one monitor) |
+| Span as one screen (`+span`) | — | — | not tested | Needs two monitors. FreeRDP accepts it and connects (local test server, one monitor). Manual test 33 |
 | HTTP proxy that needs a user name and password | works | **doesn't work** | — | FreeRDP 3.32.2 bug ([ADR 0008](adr/0008-http-and-crypto-crates.md) addendum) |
 | Administrator-provided registration | — | — | — | Not in v1 (owner's decision) |
 

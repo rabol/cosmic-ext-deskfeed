@@ -1,12 +1,12 @@
 # Roadmap: what's still open
 
-Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md), why it was done that way is in the [ADRs](adr/README.md), and the checks only the owner can do are in [manual-tests.md](manual-tests.md). Code cleanup is tracked in [cleanup-todo.md](cleanup-todo.md).
+Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md), why it was done that way is in the [ADRs](adr/README.md), and the checks only the owner can do are in [manual tests](manualtest/README.md). Code cleanup is tracked in [cleanup-todo.md](cleanup-todo.md).
 
 ## Before the first release
 
 - Tag `v0.1.0`, then fill in the AUR package checksum (review F14, F20).
 - AppStream screenshots.
-- The real-tenant checks in [manual-tests.md](manual-tests.md), including the stability run (spec §8, §13): several hours of use with idle time, audio device changes, a monitor plugged in, network changes, and suspend and resume.
+- The real-tenant checks in [manual tests](manualtest/README.md), including the stability run (spec §8, §13): several hours of use with idle time, audio device changes, a monitor plugged in, network changes, and suspend and resume.
 
 ## Next
 

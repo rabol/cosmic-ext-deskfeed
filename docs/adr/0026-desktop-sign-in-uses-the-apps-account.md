@@ -43,7 +43,7 @@ Decoding `client_info` needs base64. The helper now depends on `base64` 0.22, wh
   - the launcher mapping the helper's line to the new end, ahead of FreeRDP's own logon failure;
   - the environment reaching FreeRDP's children.
 - **Not verified yet: that FreeRDP passes the helper's error output on to Deskfeed.** FreeRDP starts the helper (ADR 0004), and the launcher reads FreeRDP's error output. If it isn't passed on, the refusal still happens, but the row shows the general "sign-in rejected" message instead of the new one. Manual test 3e shows which.
-- **Not verified yet: the real tenant.** That Entra returns `client_info` on FreeRDP's request, and that its `uid`/`utid` equal the ID token's `oid`/`tid`. Both are MSAL's documented behaviour, and the app signs in through `/organizations`, which is the home tenant. A guest account is the case to watch. If the IDs don't match there, every Entra connection is refused with the new message. That is manual test 3e (docs/manual-tests.md), and the log line "signed in as a different account" would show it.
+- **Not verified yet: the real tenant.** That Entra returns `client_info` on FreeRDP's request, and that its `uid`/`utid` equal the ID token's `oid`/`tid`. Both are MSAL's documented behaviour, and the app signs in through `/organizations`, which is the home tenant. A guest account is the case to watch. If the IDs don't match there, every Entra connection is refused with the new message. That is [manual test 3e](../manualtest/03e-account-filled-in.md), and the log line "signed in as a different account" would show it.
 
 ## Addendum (2026-10-20): the check never runs on the real tenant
 
