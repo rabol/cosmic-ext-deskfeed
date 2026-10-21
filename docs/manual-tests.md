@@ -90,11 +90,6 @@ Install the current build first (`just install`, or the package).
 
 These need a real Windows machine and its certificate. Before them, in Windows (a PC or a VM you set up): Settings → System → Remote Desktop → On; a local user with a password; note the machine's name or IP address (`ipconfig` in a terminal).
 
-17. **Add and connect**. In the sidebar select **Add connection**. Enter the server, a name, and the Windows user name; leave the password and domain empty. Save.
-   - *Expected:* **Connections** appears in the sidebar and lists the connection. Connect asks for the password, with logon choices but no Entra sign-in.
-   - The first time, a dialog says the certificate couldn't be verified, worded for a machine of your own (no "Azure"). Compare the fingerprint if you like, then trust it: it connects.
-   - Disconnect and connect again: no certificate question.
-
 18. **Remembered password**. Connect with "Remember this password" ticked. Disconnect and connect again. *Expected:* no password question. In a keyring manager (Seahorse), the item is "Deskfeed RDP password (<name>)".
    - Edit the connection and give a password in the form instead (a new connection, or after removing the remembered one in its settings): the same, without the dialog.
 
@@ -146,6 +141,7 @@ These need a real Windows machine and its certificate. Before them, in Windows (
 
 ## Done
 
+- 2026-10-21: plain RDP connection (17): added through the form and connected to the owner's Windows machine (win-100).
 - 2026-10-20: the tray on ksni (4b): a click on the icon and "Show Deskfeed" give the window the keyboard; a connected desktop has a check mark and comes to the front; after `killall cosmic-panel` the icon returns and the window stays closed.
 - 2026-10-20: clipboard works after the fix (`9cd5e5c`): text copied both ways.
 - 2026-10-20: sign in again after reinstalling: one Microsoft sign-in page, then the desktop list.
