@@ -119,6 +119,12 @@ These need a real Windows machine and its certificate. Before them, in Windows (
    - On an AVD desktop whose administrator doesn't allow drives, the row says "Folder not shared: your organization doesn't allow drives on this desktop".
    - Rename the folder here and connect again: it connects, and the row says the folder isn't there. **Stop sharing** removes it from the settings.
 
+25. **Restricted admin mode** (the Windows machine; needs an administrator account there). Edit the saved connection, turn on **Restricted admin mode**, save and connect.
+   - First without changing anything in Windows. If it connects, the mode is already allowed there: go on to the non-administrator step. If it doesn't, the row should say so or say restricted admin mode is on. **Tell me the exact text on the row, and copy the last lines from View → Open log folder**: that shows what Windows answers, so the message can be made specific.
+   - Then allow it in Windows, as administrator in a terminal: `reg add HKLM\System\CurrentControlSet\Control\Lsa /v DisableRestrictedAdmin /t REG_DWORD /d 0 /f`. Connect again. *Expected:* it connects as your administrator account.
+   - Optionally with a user who isn't an administrator there: note the row's text the same way.
+   - Afterwards, set it back if you like: the same command with `/d 1`.
+
 ### How things look
 
 16. **"Changes apply the next time you connect"**. Connect a desktop and open its settings.

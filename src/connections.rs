@@ -35,6 +35,10 @@ pub struct SavedConnection {
     pub username: String,
     #[serde(default)]
     pub logon: LogonSetting,
+    /// Restricted admin mode: the password isn't handed to the machine.
+    /// Only for administrators, on machines that allow it (ADR 0029).
+    #[serde(default)]
+    pub restricted_admin: bool,
 }
 
 /// What's wrong with a connection's fields.
@@ -91,6 +95,7 @@ impl SavedConnection {
             port,
             username: username.trim().to_owned(),
             logon,
+            restricted_admin: false,
         };
         connection.check()?;
         Ok(connection)

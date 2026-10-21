@@ -172,7 +172,28 @@
  	context->activated = TRUE;
  	// PACKET_COMPR_TYPE_8K;
  	// PACKET_COMPR_TYPE_64K;
-@@ -1263,7 +1357,9 @@
+@@ -1180,6 +1274,20 @@
+ 		goto fail;
+ 	if (!freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, FALSE))
+ 		goto fail;
++	/* Deskfeed test addition: DESKFEED_TEST_NO_RESTRICTED_ADMIN=1 stops
++	 * offering restricted admin mode (FreeRDP's server offers it by
++	 * default, libfreerdp/core/settings.c). FreeRDP's server then drops a
++	 * request for it (nego.c, "REQUIRED but disabled"); how a Windows
++	 * machine that doesn't allow it answers isn't known (ADR 0029). */
++	{
++		const char* off = getenv("DESKFEED_TEST_NO_RESTRICTED_ADMIN");
++		if (off && strcmp(off, "1") == 0)
++		{
++			if (!freerdp_settings_set_bool(settings, FreeRDP_RestrictedAdminModeSupported, FALSE))
++				goto fail;
++			WLog_INFO(TAG, "DESKFEED-TEST restricted admin mode not offered");
++		}
++	}
+ 	if (!freerdp_settings_set_uint32(settings, FreeRDP_EncryptionLevel,
+ 	                                 ENCRYPTION_LEVEL_CLIENT_COMPATIBLE))
+ 		goto fail;
+@@ -1263,7 +1371,9 @@
  
  		HANDLE channelHandle = WTSVirtualChannelManagerGetEventHandle(context->vcm);
  		handles[count++] = channelHandle;
@@ -183,7 +204,7 @@
  
  		if (status == WAIT_FAILED)
  		{
-@@ -1275,9 +1371,20 @@
+@@ -1275,9 +1385,20 @@
  		if (client->CheckFileDescriptor(client) != TRUE)
  			break;
  
@@ -205,7 +226,7 @@
  		/* Handle dynamic virtual channel initializations */
  		if (WTSVirtualChannelManagerIsChannelJoined(context->vcm, DRDYNVC_SVC_CHANNEL_NAME))
  		{
-@@ -1291,6 +1398,37 @@
+@@ -1291,6 +1412,37 @@
  
  				case DRDYNVC_STATE_READY:
  

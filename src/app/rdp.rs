@@ -21,6 +21,7 @@ impl AppModel {
                     server: c.server(),
                     username: c.username.clone(),
                     domain: c.domain().to_owned(),
+                    restricted_admin: c.restricted_admin,
                     ..ConnectionForm::default()
                 };
                 self.rebuild_nav(&Page::AddConnection);
@@ -35,6 +36,7 @@ impl AppModel {
                 }
             }
             RdpMessage::PasswordInput(PasswordText(text)) => self.connection_form.password = text,
+            RdpMessage::RestrictedAdmin(on) => self.connection_form.restricted_admin = on,
             RdpMessage::TogglePasswordVisible => {
                 self.connection_form.password_shown = !self.connection_form.password_shown;
             }
@@ -92,7 +94,10 @@ impl AppModel {
                     Ok(c)
                 }
             }) {
-            Ok(c) => c,
+            Ok(c) => SavedConnection {
+                restricted_admin: f.restricted_admin,
+                ..c
+            },
             Err(e) => {
                 self.connection_form.error = Some(describe_connection_error(e));
                 return Task::none();
@@ -300,6 +305,13 @@ impl AppModel {
                     widget::text_input(fl!("connection-domain-placeholder"), f.domain.as_str())
                         .on_input(input(FormField::Domain)),
                 ),
+            )
+            .add(
+                widget::settings::item::builder(fl!("connection-restricted-admin"))
+                    .description(fl!("connection-restricted-admin-desc"))
+                    .toggler(f.restricted_admin, |on| {
+                        Message::Rdp(RdpMessage::RestrictedAdmin(on))
+                    }),
             );
         let space = cosmic::theme::spacing();
         let mut buttons = widget::row::with_capacity(4)

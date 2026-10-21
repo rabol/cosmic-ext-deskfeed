@@ -313,6 +313,7 @@ pub enum RdpMessage {
     Input(FormField, String),
     PasswordInput(PasswordText),
     TogglePasswordVisible,
+    RestrictedAdmin(bool),
     Save,
     /// Back to the list without saving.
     Cancel,
@@ -351,6 +352,7 @@ pub(super) struct ConnectionForm {
     /// Only kept until saved, then in the keyring.
     pub(super) password: String,
     pub(super) password_shown: bool,
+    pub(super) restricted_admin: bool,
     pub(super) error: Option<String>,
 }
 

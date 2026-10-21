@@ -10,7 +10,7 @@ Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md)
 
 ## Next
 
-- **Plain RDP connections, after the first version** ([ADR 0029](adr/0029-plain-rdp-connections.md#compared-with-remmina-follow-up-steps)): waiting on the owner for smartcard logon and restricted admin mode. Later decisions: RD Gateway, importing `.rdp` files.
+- **Plain RDP connections, after the first version** ([ADR 0029](adr/0029-plain-rdp-connections.md#compared-with-remmina-follow-up-steps)): waiting on the owner for smartcard logon. Restricted admin mode: a specific message once manual test 25 shows what Windows answers when it doesn't allow it. Later decisions: RD Gateway, importing `.rdp` files.
 
 ## Open questions
 

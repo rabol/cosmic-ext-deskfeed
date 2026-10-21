@@ -39,6 +39,12 @@ pub(super) const PROXY_ANSWER_MARKER: &str = "[http_proxy_connect]: HTTP Proxy: 
 /// right after the previous session closed (docs/compatibility.md).
 pub(super) const ACTIVATION_TIMEOUT_MARKER: &str = "ERRCONNECT_ACTIVATION_TIMEOUT";
 
+/// The machine's first answer didn't offer restricted admin mode, which
+/// was required (`libfreerdp/core/nego.c`, `nego_process_negotiation_response`:
+/// "restricted-admin mode requested but not supported, terminating").
+pub(super) const RESTRICTED_ADMIN_MARKER: &str =
+    "restricted-admin mode requested but not supported";
+
 pub(super) const MAX_LOG_LINES: usize = 60;
 
 pub(super) const STATE_LOGGER: &str = "com.freerdp.core.rdp";
@@ -83,6 +89,10 @@ pub enum SessionEnd {
     HostTimedOut,
     /// FreeRDP couldn't verify the session host's certificate (ADR 0016).
     CertificateNotTrusted(CertificateInfo),
+    /// Restricted admin mode was asked for and the machine doesn't offer
+    /// it (`RESTRICTED_ADMIN_MARKER`; ADR 0029). Nothing about the
+    /// password: it was never tried.
+    RestrictedAdminRefused,
     Failed {
         code: i32,
     },
@@ -207,6 +217,9 @@ pub(super) struct Log {
     pub(super) proxy_auth: bool,
     /// The host didn't finish the logon in time (`ACTIVATION_TIMEOUT_MARKER`).
     pub(super) activation_timeout: bool,
+    /// The machine doesn't offer restricted admin mode
+    /// (`RESTRICTED_ADMIN_MARKER`).
+    pub(super) restricted_admin_refused: bool,
     /// The certificate FreeRDP is describing (`Certificate details for`).
     pub(super) certificate: Option<CertificateInfo>,
     /// A complete description (it has a well-formed thumbprint).
@@ -287,6 +300,7 @@ impl Log {
             (Some(cert), _) => SessionEnd::CertificateNotTrusted(cert),
             (None, Some(why)) => SessionEnd::AppRefused(why),
             _ if self.proxy_auth => SessionEnd::ProxyAuthRefused,
+            _ if self.restricted_admin_refused => SessionEnd::RestrictedAdminRefused,
             _ if self.replaced && code.is_some() => SessionEnd::Replaced,
             _ if self.activation_timeout && !self.connected && !self.logon_failure => {
                 SessionEnd::HostTimedOut
@@ -343,6 +357,9 @@ impl Log {
         }
         if line.contains(ACTIVATION_TIMEOUT_MARKER) {
             self.activation_timeout = true;
+        }
+        if line.contains(RESTRICTED_ADMIN_MARKER) {
+            self.restricted_admin_refused = true;
         }
         self.read_certificate(line);
         // `ERRINFO_…` is the server's reason for ending, logged at INFO

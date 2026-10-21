@@ -1241,3 +1241,87 @@ mod shared_folders {
         assert_eq!(notes, Vec::<String>::new());
     }
 }
+
+/// Restricted admin mode on a saved connection (ADR 0029, compared with
+/// Remmina).
+mod restricted_admin {
+    use super::*;
+
+    fn saved(app: &mut AppModel, on: bool) -> String {
+        for (field, text) in [(FormField::Server, "pc1"), (FormField::Username, "anna")] {
+            let _ = app.update(Message::Rdp(RdpMessage::Input(field, text.into())));
+        }
+        let _ = app.update(Message::Rdp(RdpMessage::RestrictedAdmin(on)));
+        let _ = app.update(Message::Rdp(RdpMessage::Save));
+        app.config.connections.keys().next().unwrap().clone()
+    }
+
+    #[test]
+    fn the_choice_is_saved_and_shown_again() {
+        let mut app = app();
+        let id = saved(&mut app, true);
+        assert!(app.config.connections[&id].restricted_admin);
+        let _ = app.update(Message::Rdp(RdpMessage::Edit(id.clone())));
+        assert!(app.connection_form.restricted_admin);
+        // The logon that worked is remembered without losing it.
+        app.remember_logon(&id, LogonSetting::CustomDomain("CORP".into()));
+        assert!(app.config.connections[&id].restricted_admin);
+        let _ = app.update(Message::Rdp(RdpMessage::RestrictedAdmin(false)));
+        let _ = app.update(Message::Rdp(RdpMessage::Save));
+        assert!(!app.config.connections[&id].restricted_admin);
+    }
+
+    #[test]
+    fn the_launch_asks_for_it() {
+        for on in [true, false] {
+            let mut app = app();
+            let id = saved(&mut app, on);
+            let (target, ..) = app.launch_target(&id, &id).unwrap();
+            assert!(
+                matches!(target, launcher::Target::Direct { restricted_admin } if restricted_admin == on)
+            );
+        }
+    }
+
+    /// A connection saved before this setting existed loads with it off.
+    #[test]
+    fn older_saved_connections_load_with_it_off() {
+        let c: crate::connections::SavedConnection =
+            ron::from_str(r#"(name: "", host: "pc1", port: 3389, username: "anna")"#).unwrap();
+        assert!(!c.restricted_admin);
+    }
+
+    fn failed_text(app: &AppModel, key: &str) -> String {
+        match app.desks.conn(key) {
+            Some(Connection::Failed(t)) => t.clone(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_failure_before_connecting_says_the_mode_is_on() {
+        let hint = fl!("restricted-admin-hint");
+        for (on, end, hinted) in [
+            // Windows' answer isn't known: the mode is mentioned.
+            (true, SessionEnd::Failed { code: 156 }, true),
+            (true, SessionEnd::LogonFailed, true),
+            // Off: nothing about it.
+            (false, SessionEnd::Failed { code: 156 }, false),
+            // FreeRDP's own refusal already says it.
+            (true, SessionEnd::RestrictedAdminRefused, false),
+        ] {
+            let mut app = app();
+            let id = saved(&mut app, on);
+            let file = Arc::new(ConnectionFile::direct("pc1:3389").unwrap());
+            let desk = app.desks.at(&id);
+            desk.connection = Some(Connection::Connecting);
+            desk.pending_logon = Some((LogonSetting::Automatic, file));
+            let _ = app.session_ended(&id, &end, &[]);
+            let text = failed_text(&app, &id);
+            assert_eq!(text.contains(&hint), hinted, "{end:?}: {text}");
+            if end == SessionEnd::RestrictedAdminRefused {
+                assert_eq!(text, fl!("error-restricted-admin"));
+            }
+        }
+    }
+}

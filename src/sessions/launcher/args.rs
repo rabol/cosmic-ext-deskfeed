@@ -171,8 +171,12 @@ pub(super) fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<Strin
             });
             args.push(format!("/azure:auth-helper:{}", helper.display()));
         }
-        Target::Direct if entra => return Err(LaunchError::EntraNeedsAzure),
-        Target::Direct => {}
+        Target::Direct { .. } if entra => return Err(LaunchError::EntraNeedsAzure),
+        Target::Direct { restricted_admin } => {
+            if *restricted_admin {
+                args.push("+restricted-admin".to_owned());
+            }
+        }
     }
     // FreeRDP runs `~/.config/freerdp/action.sh` for key combinations it
     // lists, and that can take keys from the session. The app sets the

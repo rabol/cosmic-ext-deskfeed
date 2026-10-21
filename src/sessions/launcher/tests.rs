@@ -33,7 +33,9 @@ fn spec(logon: LogonSetting, password: Option<&str>, entra_file: bool) -> Launch
 fn direct_spec(address: &str) -> LaunchSpec {
     LaunchSpec {
         connection: ConnectionFile::direct(address).unwrap(),
-        target: Target::Direct,
+        target: Target::Direct {
+            restricted_admin: false,
+        },
         username: Some(r"CORP\anna".into()),
         password: Some(Secret::new("hunter2".into())),
         logon: LogonSetting::Automatic,
@@ -240,6 +242,22 @@ fn only_the_chosen_folder_is_shared() {
             ["/drive:Projects,/home/anna/My Projects"]
         );
     }
+}
+
+/// Restricted admin mode only for a saved connection that asks for it.
+#[test]
+fn restricted_admin_only_when_chosen() {
+    let ra = |a: &[String]| a.iter().any(|x| x.contains("restricted-admin"));
+    let mut s = direct_spec("pc01");
+    assert!(!ra(&args(&s)));
+    s.target = Target::Direct {
+        restricted_admin: true,
+    };
+    let a = args(&s);
+    assert!(a.contains(&"+restricted-admin".to_owned()), "{a:?}");
+    // The password still goes for NLA (it isn't handed to the machine).
+    assert!(a.contains(&"/p:hunter2".to_owned()));
+    assert!(!ra(&args(&spec(LogonSetting::Automatic, Some("p"), false))));
 }
 
 #[test]
@@ -951,7 +969,9 @@ fn windows_host_remote_app() {
             var("PASSWORD").expect("DESKFEED_TEST_RAIL_PASSWORD"),
         )),
         logon: LogonSetting::Automatic,
-        target: Target::Direct,
+        target: Target::Direct {
+            restricted_admin: false,
+        },
         pinned_certificate: None,
         settings: crate::settings::Effective {
             // Set for a desktop; an app must not get them.
@@ -1030,6 +1050,20 @@ fn windows_host_remote_app() {
 /// end as a lost connection within that time (stop the server);
 /// the window's tiling and the server's resize log
 /// are checked from outside.
+/// Waits for a session that should end before connecting, prints how and
+/// its log, and stops it.
+fn expect_end(rx: &std::sync::mpsc::Receiver<SessionEvent>, session: Session) -> SessionEnd {
+    let SessionEvent::Ended { end, log } = rx.recv_timeout(Duration::from_secs(15)).unwrap() else {
+        panic!("expected an end");
+    };
+    println!("ended: {end:?}");
+    for line in &log {
+        println!("  {line}");
+    }
+    stop_all(&[session], STOP_GRACE);
+    end
+}
+
 /// A number from the environment, or `default`.
 fn env_u32(name: &str, default: u32) -> u32 {
     std::env::var(name)
@@ -1054,7 +1088,13 @@ fn local_test_server_session() {
         username: Some("test".into()),
         password: Some(Secret::new("test".into())),
         logon: LogonSetting::EmptyDomain,
-        target: Target::Direct,
+        // `DESKFEED_TEST_RESTRICTED_ADMIN=1`: restricted admin mode; with
+        // `DESKFEED_TEST_NO_RESTRICTED_ADMIN=1` (here and for the test
+        // server) expected to be refused.
+        target: Target::Direct {
+            restricted_admin: std::env::var("DESKFEED_TEST_RESTRICTED_ADMIN")
+                .is_ok_and(|v| v == "1"),
+        },
         // `DESKFEED_TEST_PIN=<sha256>`: connect with that approved
         // certificate instead of `/cert:ignore`.
         pinned_certificate: std::env::var("DESKFEED_TEST_PIN").ok(),
@@ -1104,16 +1144,28 @@ fn local_test_server_session() {
     });
     if std::env::var("DESKFEED_TEST_CHECK_CERT").is_ok() {
         // Expect the refusal, ended by the launcher at once.
-        let SessionEvent::Ended { end, log } = rx.recv_timeout(Duration::from_secs(15)).unwrap()
-        else {
-            panic!("expected an end");
-        };
-        println!("ended: {end:?}");
-        for line in &log {
-            println!("  {line}");
-        }
+        let end = expect_end(&rx, session);
         assert!(matches!(end, SessionEnd::CertificateNotTrusted(_)));
-        stop_all(&[session], STOP_GRACE);
+        return;
+    }
+    if matches!(
+        s.target,
+        Target::Direct {
+            restricted_admin: true
+        }
+    ) && std::env::var("DESKFEED_TEST_NO_RESTRICTED_ADMIN").is_ok_and(|v| v == "1")
+    {
+        // The test server, started with the same variable, doesn't offer
+        // restricted admin mode. FreeRDP's server code then drops the
+        // request itself (`nego.c`, "…REQUIRED but disabled"), so the
+        // client's own refusal line (`RESTRICTED_ADMIN_MARKER`) can't be
+        // seen here: only that it ends without connecting. (FreeRDP's
+        // server offers the mode by default: then it connects as usual.)
+        let end = expect_end(&rx, session);
+        assert!(
+            !matches!(end, SessionEnd::Closed | SessionEnd::ConnectionLost),
+            "{end:?}"
+        );
         return;
     }
     assert_eq!(
@@ -1318,6 +1370,15 @@ fn the_end_follows_the_output_before_the_exit_code() {
         l.logon_failure = true;
     });
     assert_eq!(slow_and_refused.end(Some(131)), SessionEnd::LogonFailed);
+    // FreeRDP's own restricted-admin refusal (`nego.c`), whatever the
+    // exit code; read from the real log line.
+    let mut refused = Log::default();
+    refused.push(
+        "[ERROR][com.freerdp.core.nego] - [nego_process_negotiation_response]: \
+         restricted-admin mode requested but not supported, terminating",
+    );
+    assert_eq!(refused.end(Some(131)), SessionEnd::RestrictedAdminRefused);
+    assert_eq!(refused.end(Some(147)), SessionEnd::RestrictedAdminRefused);
     // Otherwise the exit code decides (`classify_exit`).
     assert_eq!(Log::default().end(Some(140)), SessionEnd::DnsFailed);
     let lost = log(&|l| {

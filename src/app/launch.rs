@@ -179,7 +179,7 @@ impl AppModel {
     /// plain RDP connection directly (ADR 0029), a desktop through Azure.
     /// `None` when it can't start (the row says why, if there is a reason
     /// to give).
-    fn launch_target(
+    pub(super) fn launch_target(
         &mut self,
         owner: &str,
         key: &str,
@@ -187,7 +187,9 @@ impl AppModel {
         if let Some(c) = self.config.connections.get(key) {
             // Its own user name; no gateway, no Azure sign-in.
             return Some((
-                launcher::Target::Direct,
+                launcher::Target::Direct {
+                    restricted_admin: c.restricted_admin,
+                },
                 Some(c.username.clone()),
                 c.title().to_owned(),
             ));

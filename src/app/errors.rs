@@ -184,6 +184,7 @@ pub(super) fn describe_session_end(end: &SessionEnd) -> String {
         SessionEnd::Replaced => fl!("error-session-replaced"),
         SessionEnd::ProxyAuthRefused => fl!("error-proxy-password"),
         SessionEnd::HostTimedOut => fl!("error-host-timed-out"),
+        SessionEnd::RestrictedAdminRefused => fl!("error-restricted-admin"),
         SessionEnd::AppRefused(why) => match why {
             AppRefusal::NotAllowed => fl!("error-app-not-allowed"),
             AppRefusal::NotFound => fl!("error-app-not-found"),

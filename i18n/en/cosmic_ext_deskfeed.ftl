@@ -401,3 +401,9 @@ shared-folder-chooser-failed = The folder chooser didn't open: { $detail }
 folder-not-allowed = Folder not shared: your organization doesn't allow drives on this desktop
 folder-unusable = Folder not shared: its path contains a comma or is too long
 folder-missing = Folder not shared: it isn't there (deleted, or on a disk that isn't plugged in)
+
+## Restricted admin mode (ADR 0029, compared with Remmina)
+connection-restricted-admin = Restricted admin mode
+connection-restricted-admin-desc = Your password logs you on but isn't handed to the machine, so a compromised machine can't reuse it. Only for administrators of that machine, and only where Windows allows it; you then have no access to network shares from the session. Connects to the console session.
+error-restricted-admin = This machine doesn't allow restricted admin mode. Turn it off in the connection, or ask its administrator to allow it.
+restricted-admin-hint = Restricted admin mode is on for this connection: if the machine doesn't allow it, or you aren't an administrator there, turn it off.

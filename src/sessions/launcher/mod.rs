@@ -122,7 +122,14 @@ pub enum Target {
     /// A Windows machine by host name (ADR 0029): the connection file
     /// (`ConnectionFile::direct`) names it; no gateway and no Azure
     /// sign-in; the password over NLA only.
-    Direct,
+    Direct {
+        /// Restricted admin mode (`+restricted-admin`): the password logs
+        /// on over NLA but isn't handed to the machine (FreeRDP sends empty
+        /// `TSPasswordCreds`, `libfreerdp/core/nla.c`), and FreeRDP joins
+        /// the console session. Only for administrators, on machines that
+        /// allow it.
+        restricted_admin: bool,
+    },
 }
 
 /// A window title FreeRDP can take as one argument line: no control

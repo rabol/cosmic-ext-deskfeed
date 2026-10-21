@@ -1274,6 +1274,20 @@ static DWORD WINAPI test_peer_mainloop(LPVOID arg)
 		goto fail;
 	if (!freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, FALSE))
 		goto fail;
+	/* Deskfeed test addition: DESKFEED_TEST_NO_RESTRICTED_ADMIN=1 stops
+	 * offering restricted admin mode (FreeRDP's server offers it by
+	 * default, libfreerdp/core/settings.c). FreeRDP's server then drops a
+	 * request for it (nego.c, "REQUIRED but disabled"); how a Windows
+	 * machine that doesn't allow it answers isn't known (ADR 0029). */
+	{
+		const char* off = getenv("DESKFEED_TEST_NO_RESTRICTED_ADMIN");
+		if (off && strcmp(off, "1") == 0)
+		{
+			if (!freerdp_settings_set_bool(settings, FreeRDP_RestrictedAdminModeSupported, FALSE))
+				goto fail;
+			WLog_INFO(TAG, "DESKFEED-TEST restricted admin mode not offered");
+		}
+	}
 	if (!freerdp_settings_set_uint32(settings, FreeRDP_EncryptionLevel,
 	                                 ENCRYPTION_LEVEL_CLIENT_COMPATIBLE))
 		goto fail;

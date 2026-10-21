@@ -103,7 +103,7 @@ The owner compared the form with Remmina's RDP profile (2026-10-20). The first v
 |---|---|---|
 | Share folder | `/drive:name,path` | **Built 2026-10-21** (below). |
 | Smartcard logon (and PIN) | `/smartcard-logon`, `/smartcard` | The spec excludes smartcard redirection (§3); it would need a card and reader to test. |
-| Restricted admin mode | `+restricted-admin` | Logs on without sending the password to the machine, but only for administrators and only where the machine allows it. Safer for admins, confusing for everyone else. |
+| Restricted admin mode | `+restricted-admin` | **Built 2026-10-21** (below). |
 
 **Advised against:**
 
@@ -128,4 +128,13 @@ The owner started it on 2026-10-21, as proposed above.
 - **What FreeRDP can carry** (`client/common/cmdline.c`, `channels/drive/client/drive_main.c`): `/drive:` splits at commas and reads the path up to 260 bytes, so such paths are refused when chosen and again at launch. The share name is the folder's own name in letters, digits, `-` and `_` (FreeRDP would replace `:<>"/\|` and spaces anyway), "Deskfeed" when nothing is left.
 - **A missing folder** (deleted, a disk not plugged in) doesn't stop the connection: it connects without it and the row says so. The check touches the disk, so it runs with the launch, off the UI thread.
 - Checked: the real `xfreerdp3` 3.32.2 takes the argument (a path with a space) and loads its device channel (`rdpdr`). The local test server has no drive channel, so Windows showing the folder is manual test 24.
+
+### Restricted admin mode (built 2026-10-21)
+
+The owner started it on 2026-10-21.
+
+- **What FreeRDP 3.32.2 does** (`client/common/cmdline.c`, `libfreerdp/core/nla.c`, `nego.c`): `+restricted-admin` asks for the mode in the first request; the password still logs on over NLA but isn't handed to the machine (empty `TSPasswordCreds`), so a compromised machine can't reuse it. It also joins the console session (`ConsoleSession`), which on a Windows PC is the only one anyway. A machine that doesn't announce the mode in its first answer is refused by FreeRDP with "restricted-admin mode requested but not supported, terminating".
+- **Where:** a "Restricted admin mode" switch in a saved connection's form, stored with it (`restricted_admin`, off; older saved connections load with it off). It travels in the launch target (`Target::Direct { restricted_admin }`), so an AVD desktop can never get it: AVD doesn't support it.
+- **When it's refused:** FreeRDP's own refusal line has its own ending and text (turn it off, or ask the machine's administrator), is never retried, and isn't taken for a wrong password (it was never tried). What a Windows machine that doesn't allow the mode, or a user who isn't an administrator there, actually answers is **not known yet**: possibly an account restriction (FreeRDP exit 156), possibly a logon failure. So any failure before connecting with the mode on adds a hint that it is on, instead of guessing the cause. Manual test 25 finds out; then the hint can become a specific message.
+- Checked against the local test server: with the mode offered (FreeRDP's server default) the client asks for it (`RDP_NEG_REQ::flags RESTRICTED_ADMIN_MODE_REQUIRED`) and connects. Not offered (`DESKFEED_TEST_NO_RESTRICTED_ADMIN=1`), FreeRDP's server drops the request itself, so the client ended with a generic failure (147), not its refusal line: that line is tested from FreeRDP's source text.
 

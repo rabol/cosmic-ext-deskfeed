@@ -79,6 +79,7 @@ pub(super) fn end_outcome(
                 | SessionEnd::AppRefused(_)
                 | SessionEnd::ProxyAuthRefused
                 | SessionEnd::HostTimedOut
+                | SessionEnd::RestrictedAdminRefused
         )
     {
         return EndOutcome::Failed;
@@ -178,6 +179,7 @@ pub(super) fn reconnects(
         | SessionEnd::DisconnectedByServer
         | SessionEnd::Cancelled
         | SessionEnd::CertificateNotTrusted(_)
+        | SessionEnd::RestrictedAdminRefused
         | SessionEnd::LogonFailed
         | SessionEnd::AccountLockedOut
         | SessionEnd::PasswordExpired
@@ -497,10 +499,12 @@ mod tests {
                 "{end:?}"
             );
         }
-        // ... but never credentials, a normal end or a cancel.
+        // ... but never credentials, a normal end, a cancel, or a machine
+        // that refuses restricted admin mode (it would refuse again).
         for end in [
             SessionEnd::Closed,
             SessionEnd::Cancelled,
+            SessionEnd::RestrictedAdminRefused,
             SessionEnd::LogonFailed,
             SessionEnd::AuthenticationFailed,
             SessionEnd::AccountLockedOut,
@@ -510,6 +514,18 @@ mod tests {
                 "{end:?}"
             );
         }
+    }
+
+    /// Restricted admin refused: shown as it is, never taken for a wrong
+    /// password (the password was never tried).
+    #[test]
+    fn a_refused_restricted_admin_is_not_about_the_password() {
+        let end = SessionEnd::RestrictedAdminRefused;
+        assert_eq!(
+            end_outcome(&end, false, Some(&PASSWORD), Some(&PASSWORD), 0),
+            EndOutcome::Failed
+        );
+        assert!(!refuses_password(&end));
     }
 
     #[test]

@@ -240,13 +240,19 @@ impl AppModel {
                 } else {
                     fl!("error-logon-failed", setting = tried)
                 };
+                let status = self.with_restricted_admin_hint(key, end, fl!("status-logon-failed"));
                 let desk = self.desks.at(key);
-                desk.connection = Some(Connection::Failed(fl!("status-logon-failed")));
+                desk.connection = Some(Connection::Failed(status));
                 desk.last_failure = Some(message);
             }
             decide::EndOutcome::Failed => {
-                self.desks
-                    .set_conn(key, Connection::Failed(describe_ended(end, log)));
+                let text = describe_ended(end, log);
+                let text = if was_connected {
+                    text
+                } else {
+                    self.with_restricted_admin_hint(key, end, text)
+                };
+                self.desks.set_conn(key, Connection::Failed(text));
                 // Windows refused the remembered password for another
                 // reason (locked, expired, …): it goes too, so the next
                 // Connect asks instead of sending it again (ADR 0005,
@@ -257,6 +263,23 @@ impl AppModel {
             }
         }
         save_task
+    }
+
+    /// A failure before connecting, with restricted admin mode on: what
+    /// Windows answers when it doesn't allow the mode, or the user isn't an
+    /// administrator there, can't be told apart from other refusals (only
+    /// FreeRDP's own check has a line of its own, `RestrictedAdminRefused`,
+    /// whose text already says it). So the text says the mode is on.
+    fn with_restricted_admin_hint(&self, key: &str, end: &SessionEnd, text: String) -> String {
+        let on = self
+            .config
+            .connections
+            .get(key)
+            .is_some_and(|c| c.restricted_admin);
+        if !on || *end == SessionEnd::RestrictedAdminRefused {
+            return text;
+        }
+        format!("{text} {}", fl!("restricted-admin-hint"))
     }
 
     /// The RemoteApp connection that took over this one's Windows session,
