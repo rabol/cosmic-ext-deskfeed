@@ -120,8 +120,9 @@ These need a real Windows machine and its certificate. Before them, in Windows (
    - Optionally with a user who isn't an administrator there: note the row's text the same way.
    - Afterwards, set it back if you like: the same command with `/d 1`.
 
-26. **Open on a new workspace follows the window** (ADR 0011 addendum). For an AVD desktop (a saved connection passed 2026-10-21): turn on Full screen and Open on a new workspace, then connect.
-   - *Expected:* COSMIC switches to the new workspace with the desktop on it, and typing goes to the desktop. Before the fix the window moved but the view stayed behind.
+27. **No flash on a new workspace** (ADR 0011, second addendum). For an AVD desktop and a saved connection, with Full screen and Open on a new workspace on, start from a workspace with other windows and connect.
+   - *Expected:* COSMIC switches to an empty workspace right away; Microsoft's sign-in page (AVD) and then the desktop open there. The window doesn't show on the old workspace first. The log (View → Open log folder) says "open on a new workspace: the window opened there".
+   - Connect again, and close Microsoft's sign-in page without signing in (or, for a saved connection, give a wrong password). *Expected:* COSMIC switches back to the workspace you started from.
 
 ### How things look
 
@@ -141,7 +142,7 @@ These need a real Windows machine and its certificate. Before them, in Windows (
 
 ## Done
 
-- 2026-10-21: open on a new workspace now switches to it, with a saved connection (26, fix `dbd5918`).
+- 2026-10-21: open on a new workspace now switches to it, with a saved connection and an AVD desktop (26, fix `dbd5918`). For AVD the window still showed on the old workspace first: see 27.
 - 2026-10-21: plain RDP connection (17): added through the form and connected to the owner's Windows machine (win-100).
 - 2026-10-20: the tray on ksni (4b): a click on the icon and "Show Deskfeed" give the window the keyboard; a connected desktop has a check mark and comes to the front; after `killall cosmic-panel` the icon returns and the window stays closed.
 - 2026-10-20: clipboard works after the fix (`9cd5e5c`): text copied both ways.

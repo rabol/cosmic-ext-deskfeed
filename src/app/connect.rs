@@ -216,8 +216,9 @@ impl AppModel {
                 }
                 // Not worth interrupting the user: the desktop opened, only
                 // not on a new workspace.
-                if let Err(e) = result {
-                    crate::app_log!("open on a new workspace: {e}");
+                match result {
+                    Ok(placed) => crate::app_log!("open on a new workspace: {placed}"),
+                    Err(e) => crate::app_log!("open on a new workspace: {e}"),
                 }
             }
         }

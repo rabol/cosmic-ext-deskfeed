@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 
-//! "Open on a new workspace": moves a FreeRDP window to an empty COSMIC
-//! workspace (ADR 0011). Also brings a session's window to the front
-//! ([`focus`], `activate` in `cosmic-toplevel-management`).
+//! "Open on a new workspace": shows a FreeRDP window on an empty COSMIC
+//! workspace (ADR 0011), by switching there before it opens, or moving it
+//! there when it opened elsewhere. Also brings a session's window to the
+//! front ([`focus`], `activate` in `cosmic-toplevel-management`).
 //!
 //! FreeRDP is started with a known app ID (`/wm-class:`) and window title
 //! (`/title:`); this module waits for that window with COSMIC's window
 //! information protocols (`ext-foreign-toplevel-list` with
-//! `cosmic-toplevel-info`), picks an empty workspace in the window's
-//! workspace group (or asks COSMIC for a new one), and moves the window
-//! there with `cosmic-toplevel-management` (`move_to_ext_workspace`,
-//! version 4). cosmic-comp offers these protocols only to unsandboxed
+//! `cosmic-toplevel-info`). An empty workspace (or a new one from COSMIC)
+//! is activated with `ext-workspace` first; a window that still opens
+//! elsewhere is moved with `cosmic-toplevel-management`
+//! (`move_to_ext_workspace`, version 4). cosmic-comp offers these protocols only to unsandboxed
 //! clients (`src/state.rs`), which is one reason the app is native only.
 //!
 //! Blocking, with its own short-lived Wayland connection; call it from
@@ -78,6 +79,9 @@ pub enum MoveError {
     NotActivated,
     /// Moved to the new workspace, but COSMIC didn't switch to it.
     MovedNotShown,
+    /// Asked to switch to the empty workspace before the window opened,
+    /// but COSMIC didn't.
+    NotSwitched,
 }
 
 impl std::fmt::Display for MoveError {
@@ -90,6 +94,25 @@ impl std::fmt::Display for MoveError {
             Self::Cancelled => write!(f, "session ended first"),
             Self::NotActivated => write!(f, "compositor didn't activate the window"),
             Self::MovedNotShown => write!(f, "moved, but the compositor didn't switch to it"),
+            Self::NotSwitched => write!(f, "the compositor didn't switch to the empty workspace"),
+        }
+    }
+}
+
+/// How the window got onto its new workspace; for the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placed {
+    /// It opened on the workspace switched to beforehand: no move.
+    OpenedThere,
+    /// It opened elsewhere and was moved.
+    Moved,
+}
+
+impl std::fmt::Display for Placed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OpenedThere => write!(f, "the window opened there"),
+            Self::Moved => write!(f, "the window was moved there"),
         }
     }
 }
@@ -149,14 +172,22 @@ pub fn check() -> Result<(), String> {
     Ok(())
 }
 
-/// Waits up to `wait` for the window with `app_id` and `title`, then moves
-/// it to an empty workspace. `cancel` stops the wait (the session ended).
+/// Waits up to `wait` for the window with `app_id` and `title` and shows it
+/// on an empty workspace. `cancel` stops the wait (the session ended).
+///
+/// Switches to the empty workspace first, so the window opens there:
+/// FreeRDP's X11 client maps its window on the current workspace and only
+/// then makes it full screen (FreeRDP 3.32.2 `client/X11/xf_client.c`,
+/// `xf_create_window`), so moving it afterwards showed it there for a
+/// moment (owner, 2026-10-21, most visible with an Azure desktop). The
+/// sign-in page opens there too. If the window opens elsewhere anyway (the
+/// user switched meanwhile), it is moved as before.
 pub fn move_to_new_workspace(
     app_id: &str,
     title: &str,
     wait: Duration,
     cancel: &Arc<AtomicBool>,
-) -> Result<(), MoveError> {
+) -> Result<Placed, MoveError> {
     let (mut queue, mut state) = connect()?;
     if state.manager.manager.version() < 4 {
         return Err(MoveError::Unsupported("move_to_ext_workspace (v4)"));
@@ -170,11 +201,20 @@ pub fn move_to_new_workspace(
         return Err(MoveError::Unsupported("move capability"));
     }
 
+    // Not fatal: without it the window is moved once it is there.
+    let switched = match switch_first(&mut queue, &mut state) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            crate::app_log!("open on a new workspace: no switch first: {e}");
+            None
+        }
+    };
+
     // Wait for the window, with its workspace known.
     let deadline = Instant::now() + wait;
-    let window = loop {
+    let found = loop {
         if cancel.load(Ordering::SeqCst) {
-            return Err(MoveError::Cancelled);
+            break Err(MoveError::Cancelled);
         }
         if let Some(w) = state.info.toplevels().find(|t| {
             t.app_id == app_id
@@ -182,44 +222,36 @@ pub fn move_to_new_workspace(
                 && t.cosmic_toplevel.is_some()
                 && !t.workspace.is_empty()
         }) {
-            break w.clone();
+            break Ok(w.clone());
         }
         if Instant::now() > deadline {
-            return Err(MoveError::WindowNotFound);
+            break Err(MoveError::WindowNotFound);
         }
         std::thread::sleep(POLL);
         roundtrip(&mut queue, &mut state)?;
     };
-
-    let (group, target) = if let Some(found) = empty_workspace(&state, &window) {
-        found
-    } else {
-        {
-            // None free: ask COSMIC for one, if the group allows it.
-            let group = group_of(&state, &window).ok_or(MoveError::NoWorkspace)?;
-            if !group
-                .capabilities
-                .contains(ext_workspace_group_handle_v1::GroupCapabilities::CreateWorkspace)
-            {
-                return Err(MoveError::NoWorkspace);
+    let window = match found {
+        Ok(w) => w,
+        Err(e) => {
+            if let Some(s) = &switched {
+                switch_back(&mut queue, &mut state, s)?;
             }
-            group.handle.create_workspace(String::new());
-            if let Ok(manager) = state.workspaces.workspace_manager().get() {
-                manager.commit();
-            }
-            let until = Instant::now() + CREATE_WAIT;
-            loop {
-                roundtrip(&mut queue, &mut state)?;
-                if let Some(found) = empty_workspace(&state, &window) {
-                    break found;
-                }
-                if Instant::now() > until {
-                    return Err(MoveError::NoWorkspace);
-                }
-                std::thread::sleep(POLL);
-            }
+            return Err(e);
         }
     };
+    let toplevel = window
+        .cosmic_toplevel
+        .clone()
+        .ok_or(MoveError::WindowNotFound)?;
+    if let Some(s) = switched
+        && window.workspace.contains(&s.target)
+    {
+        return show_moved(&mut queue, &mut state, &toplevel, &s.target, app_id, title)
+            .map(|()| Placed::OpenedThere);
+    }
+
+    let group = group_of(&state, &window).ok_or(MoveError::NoWorkspace)?;
+    let target = empty_or_new(&mut queue, &mut state, &group)?;
     let output = window
         .output
         .iter()
@@ -227,16 +259,116 @@ pub fn move_to_new_workspace(
         .cloned()
         .or(group.outputs.first().cloned())
         .ok_or(MoveError::NoWorkspace)?;
-    let toplevel = window
-        .cosmic_toplevel
-        .as_ref()
-        .ok_or(MoveError::WindowNotFound)?;
     state
         .manager
         .manager
-        .move_to_ext_workspace(toplevel, &target, &output);
-    let toplevel = toplevel.clone();
-    show_moved(&mut queue, &mut state, &toplevel, &target, app_id, title)
+        .move_to_ext_workspace(&toplevel, &target, &output);
+    show_moved(&mut queue, &mut state, &toplevel, &target, app_id, title).map(|()| Placed::Moved)
+}
+
+/// The empty workspace the window should open on, shown before it opens.
+struct Switched {
+    target: ext_workspace_handle_v1::ExtWorkspaceHandleV1,
+    /// The workspace it replaced; `None` when the one in use was empty
+    /// already and is the target itself.
+    previous: Option<ext_workspace_handle_v1::ExtWorkspaceHandleV1>,
+}
+
+/// Switches the screen in use to an empty workspace (none needed when the
+/// one in use is empty).
+fn switch_first(
+    queue: &mut cctk::wayland_client::EventQueue<State>,
+    state: &mut State,
+) -> Result<Switched, MoveError> {
+    let group = current_group(state).ok_or(MoveError::NoWorkspace)?;
+    let previous = active_in(state, &group).ok_or(MoveError::NoWorkspace)?;
+    let target = empty_or_new(queue, state, &group)?;
+    if target == previous {
+        return Ok(Switched {
+            target,
+            previous: None,
+        });
+    }
+    target.activate();
+    if let Ok(manager) = state.workspaces.workspace_manager().get() {
+        manager.commit();
+    }
+    if !wait_active(queue, state, &target)? {
+        return Err(MoveError::NotSwitched);
+    }
+    Ok(Switched {
+        target,
+        previous: Some(previous),
+    })
+}
+
+/// No window came: back to the workspace the user was on, unless they
+/// have moved on or put something on the new one meanwhile.
+fn switch_back(
+    queue: &mut cctk::wayland_client::EventQueue<State>,
+    state: &mut State,
+    switched: &Switched,
+) -> Result<(), MoveError> {
+    let Some(previous) = &switched.previous else {
+        return Ok(());
+    };
+    queue.roundtrip(state).map_err(no_wayland)?;
+    let still_active = state.workspaces.workspaces().any(|w| {
+        w.handle == switched.target && w.state.contains(ext_workspace_handle_v1::State::Active)
+    });
+    let in_use = state
+        .info
+        .toplevels()
+        .any(|t| t.workspace.contains(&switched.target));
+    let previous_there = state.workspaces.workspaces().any(|w| w.handle == *previous);
+    if still_active && !in_use && previous_there {
+        previous.activate();
+        if let Ok(manager) = state.workspaces.workspace_manager().get() {
+            manager.commit();
+        }
+        queue.roundtrip(state).map_err(no_wayland)?;
+    }
+    Ok(())
+}
+
+/// An empty workspace in `group`, or a new one if the group allows it.
+fn empty_or_new(
+    queue: &mut cctk::wayland_client::EventQueue<State>,
+    state: &mut State,
+    group: &cctk::workspace::WorkspaceGroup,
+) -> Result<ext_workspace_handle_v1::ExtWorkspaceHandleV1, MoveError> {
+    if let Some(found) = empty_workspace(state, group) {
+        return Ok(found);
+    }
+    // None free: ask COSMIC for one, if the group allows it.
+    if !group
+        .capabilities
+        .contains(ext_workspace_group_handle_v1::GroupCapabilities::CreateWorkspace)
+    {
+        return Err(MoveError::NoWorkspace);
+    }
+    group.handle.create_workspace(String::new());
+    if let Ok(manager) = state.workspaces.workspace_manager().get() {
+        manager.commit();
+    }
+    let until = Instant::now() + CREATE_WAIT;
+    loop {
+        queue.roundtrip(state).map_err(no_wayland)?;
+        // The group's list now includes the new workspace.
+        let group = state
+            .workspaces
+            .workspace_groups()
+            .find(|g| g.handle == group.handle)
+            .cloned()
+            .ok_or(MoveError::NoWorkspace)?;
+        if let Some(found) = empty_workspace(state, &group) {
+            return Ok(found);
+        }
+        if Instant::now() > until {
+            return Err(MoveError::NoWorkspace);
+        }
+        std::thread::sleep(POLL);
+    }
 }
 
 /// Shows the window just moved to `target`: see the comment inside.
@@ -423,29 +555,82 @@ fn group_of(state: &State, window: &ToplevelInfo) -> Option<cctk::workspace::Wor
         .cloned()
 }
 
-/// An empty workspace in the window's group (the first by position), and
-/// that group.
+/// The group of the screen in use: the focused window's (usually
+/// Deskfeed's, just clicked), else the first with an active workspace.
+fn current_group(state: &State) -> Option<cctk::workspace::WorkspaceGroup> {
+    state
+        .info
+        .toplevels()
+        .find(|t| {
+            t.state
+                .contains(&zcosmic_toplevel_handle_v1::State::Activated)
+        })
+        .and_then(|t| group_of(state, t))
+        .or_else(|| {
+            state
+                .workspaces
+                .workspace_groups()
+                .find(|g| active_in(state, g).is_some())
+                .cloned()
+        })
+}
+
+/// The group's active workspace.
+fn active_in(
+    state: &State,
+    group: &cctk::workspace::WorkspaceGroup,
+) -> Option<ext_workspace_handle_v1::ExtWorkspaceHandleV1> {
+    state
+        .workspaces
+        .workspaces()
+        .find(|w| {
+            group.workspaces.contains(&w.handle)
+                && w.state.contains(ext_workspace_handle_v1::State::Active)
+        })
+        .map(|w| w.handle.clone())
+}
+
+/// An empty workspace in `group`: see [`pick_empty`].
 fn empty_workspace(
     state: &State,
-    window: &ToplevelInfo,
-) -> Option<(
-    cctk::workspace::WorkspaceGroup,
-    ext_workspace_handle_v1::ExtWorkspaceHandleV1,
-)> {
-    let group = group_of(state, window)?;
+    group: &cctk::workspace::WorkspaceGroup,
+) -> Option<ext_workspace_handle_v1::ExtWorkspaceHandleV1> {
     let occupied: Vec<_> = state
         .info
         .toplevels()
         .flat_map(|t| t.workspace.iter().cloned())
         .collect();
-    let target = state
+    let candidates: Vec<_> = state
         .workspaces
         .workspaces()
-        .filter(|w| group.workspaces.contains(&w.handle) && !occupied.contains(&w.handle))
-        .min_by(|a, b| a.coordinates.cmp(&b.coordinates))?
-        .handle
-        .clone();
-    Some((group, target))
+        .filter(|w| group.workspaces.contains(&w.handle))
+        .map(|w| Candidate {
+            handle: w.handle.clone(),
+            active: w.state.contains(ext_workspace_handle_v1::State::Active),
+            empty: !occupied.contains(&w.handle),
+            position: w.coordinates.clone(),
+        })
+        .collect();
+    pick_empty(candidates)
+}
+
+/// A workspace as [`pick_empty`] sees it.
+struct Candidate<H> {
+    handle: H,
+    active: bool,
+    /// No window on it, minimized ones included.
+    empty: bool,
+    position: Vec<u32>,
+}
+
+/// The active workspace if it is empty (no need to switch), otherwise the
+/// first empty one by position.
+fn pick_empty<H>(workspaces: Vec<Candidate<H>>) -> Option<H> {
+    workspaces
+        .into_iter()
+        .filter(|w| w.empty)
+        .min_by(|a, b| b.active.cmp(&a.active).then(a.position.cmp(&b.position)))
+        .map(|w| w.handle)
 }
 
 impl ProvidesRegistryState for State {
@@ -555,6 +740,45 @@ cctk::delegate_workspace!(State);
 
 #[cfg(test)]
 mod tests {
+    use super::{Candidate, pick_empty};
+
+    fn ws(handle: u32, active: bool, empty: bool, position: u32) -> Candidate<u32> {
+        Candidate {
+            handle,
+            active,
+            empty,
+            position: vec![position],
+        }
+    }
+
+    #[test]
+    fn an_empty_active_workspace_needs_no_switch() {
+        let all = vec![
+            ws(1, false, true, 0),
+            ws(2, true, true, 1),
+            ws(3, false, true, 2),
+        ];
+        assert_eq!(pick_empty(all), Some(2));
+    }
+
+    #[test]
+    fn otherwise_the_first_empty_one_by_position() {
+        // Listed out of order: position decides, not the order COSMIC sent.
+        let all = vec![
+            ws(3, false, true, 2),
+            ws(1, true, false, 0),
+            ws(2, false, true, 1),
+        ];
+        assert_eq!(pick_empty(all), Some(2));
+    }
+
+    #[test]
+    fn no_empty_workspace_gives_none() {
+        let all = vec![ws(1, true, false, 0), ws(2, false, false, 1)];
+        assert_eq!(pick_empty(all), None);
+        assert_eq!(pick_empty(Vec::<Candidate<u32>>::new()), None);
+    }
+
     /// Moves a real window: `MOVE_APP_ID=… MOVE_TITLE=… cargo test --release
     /// move_a_real_window -- --ignored` (for example a session from
     /// `local_test_server_session`). Passes only once COSMIC shows the new
@@ -563,13 +787,14 @@ mod tests {
     #[ignore = "moves a real window on the running COSMIC session"]
     fn move_a_real_window() {
         let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        super::move_to_new_workspace(
+        let placed = super::move_to_new_workspace(
             &std::env::var("MOVE_APP_ID").unwrap(),
             &std::env::var("MOVE_TITLE").unwrap(),
             std::time::Duration::from_secs(10),
             &cancel,
-        )
-        .unwrap();
+        );
+        println!("{placed:?}");
+        placed.unwrap();
     }
 
     /// Focuses a real window: `MOVE_APP_ID=… MOVE_TITLE=… cargo test

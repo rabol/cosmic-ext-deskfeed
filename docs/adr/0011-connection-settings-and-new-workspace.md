@@ -1,6 +1,6 @@
 # 0011. Connection settings per account and desktop; open on a new workspace
 
-- Status: Accepted (new workspace: pending the owner's test)
+- Status: Accepted (switching before the window opens: pending the owner's test)
 - Date: 2026-10-17
 
 ## Context
@@ -26,3 +26,14 @@ The owner asked for several accounts, each with its own connection defaults, and
 ## Addendum (2026-10-21): switching to the new workspace
 
 The owner found that a saved connection's window (ADR 0029) was moved to a new workspace, but the view stayed on the old one: COSMIC moves a window without following it. With AVD desktops the view had ended up on the new workspace too, for a reason not established; it can't be relied on. After the move, Deskfeed now activates the window, as Show does (it also gets the keyboard), and if the new workspace isn't active within a second, activates the workspace itself. The move counts as done only once COSMIC reports the new workspace active; otherwise the log says "moved, but the compositor didn't switch to it". Checked on the owner's COSMIC with the local test server's window (`move_a_real_window`, which now passes only when the workspace is shown).
+
+## Addendum (2026-10-21): switching before the window opens
+
+The owner found that with an AVD desktop in full screen the window showed on the current workspace before it jumped to the new one. It happens with every session: FreeRDP's X11 client maps its window on the current workspace and only then makes it full screen (FreeRDP 3.32.2 `client/X11/xf_client.c`, `xf_create_window`), and the move came after that; it was only more visible with AVD. Moving faster would shorten the flash, not remove it. Options put to the owner: switch when connecting starts (chosen), switch once the sign-in is done (its timing is less exact), or only react faster.
+
+- When the session starts, Deskfeed activates an empty workspace in the group of the focused window (usually Deskfeed's own; otherwise the first group with an active workspace). The current workspace counts when it is empty. If none is empty, COSMIC is asked for one, as before.
+- FreeRDP's window, and Microsoft's sign-in page, then open there. Once the window is reported on that workspace it is activated as before, with no move. If it opens elsewhere (the user switched away meanwhile), the earlier move applies.
+- If no window comes (connecting failed, was stopped, or took too long), Deskfeed switches back, but only while the new workspace is still the active one and has no window on it.
+- The log says which happened: "open on a new workspace: the window opened there" or "…was moved there".
+
+Checked on the owner's COSMIC with the local test server in full screen: `move_a_real_window` started first switched to an empty workspace and printed `Ok(OpenedThere)`. A first run found a bug, fixed before the commit: with the current workspace already empty, the window was moved off it to another one. Switching back is not yet checked on a real screen (manual test 27).

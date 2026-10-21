@@ -525,7 +525,7 @@ pub enum ConnectionMessage {
     WorkspaceMoved {
         key: String,
         stop: Arc<std::sync::atomic::AtomicBool>,
-        result: Result<(), String>,
+        result: Result<crate::workspace::Placed, String>,
     },
 }
 

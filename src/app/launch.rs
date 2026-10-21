@@ -243,8 +243,9 @@ impl AppModel {
         Some(path.clone())
     }
 
-    /// "Open on a new workspace": waits for the session's window and moves
-    /// it.
+    /// "Open on a new workspace": switches to an empty workspace now, so
+    /// the session's window opens there (or moves it there if it opens
+    /// elsewhere); switches back if no window comes.
     pub(super) fn mover(
         &mut self,
         key: &str,
