@@ -18,3 +18,7 @@
 - After restarting: still listed, signed out.
 - After signing in: the desktops come back.
 - After Remove account: it leaves the sidebar, which then shows only "Sign in".
+
+## Notes
+
+- 2026-10-21: step 1 confirmed by the owner: after Sign out the account stays in the sidebar. (A sign-out on 2026-10-20 at 17:23 had removed it: that build was from before `7a58951`.) Steps 2–4 still to do.
