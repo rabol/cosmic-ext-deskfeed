@@ -125,6 +125,9 @@ These need a real Windows machine and its certificate. Before them, in Windows (
    - Optionally with a user who isn't an administrator there: note the row's text the same way.
    - Afterwards, set it back if you like: the same command with `/d 1`.
 
+26. **Open on a new workspace follows the window** (ADR 0011 addendum). For a saved connection and for an AVD desktop: turn on Full screen and Open on a new workspace, then connect.
+   - *Expected:* COSMIC switches to the new workspace with the desktop on it, and typing goes to the desktop. Before the fix the window moved but the view stayed behind.
+
 ### How things look
 
 16. **"Changes apply the next time you connect"**. Connect a desktop and open its settings.

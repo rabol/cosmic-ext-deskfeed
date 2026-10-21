@@ -6,6 +6,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Fixed
 
+- "Open on a new workspace" now also switches to that workspace; before, COSMIC could leave you on the old one with the desktop moved away (ADR 0011 addendum).
 - The password dialog no longer has a Windows user name field: Azure Virtual Desktop replaces the name with its own anyway, so a typed name was ignored. The domain can still be chosen in the logon setting (ADR 0005 addendum).
 - A failed connection now explains itself instead of only "ended with an error (code 131)": FreeRDP's reason in plain words when it gives one (for example "the desktop refused the sign-in", "the desktop is starting up"), otherwise how far the connection got. The code and FreeRDP's error name stay in the message for support.
 - A remembered Windows password is now deleted when Windows refuses it for any reason (locked out, expired, disabled), not only for a wrong password, so it isn't sent again.

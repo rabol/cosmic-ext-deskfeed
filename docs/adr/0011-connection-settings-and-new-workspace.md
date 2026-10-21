@@ -22,3 +22,7 @@ The owner asked for several accounts, each with its own connection defaults, and
 
 - cosmic-comp offers window management only to unsandboxed clients; another reason for [ADR 0010](0010-native-only-and-dependency-check.md).
 - If two desktops with the same title and account open at the same moment, either window may be moved first; both end up on new workspaces when both ask for it.
+
+## Addendum (2026-10-21): switching to the new workspace
+
+The owner found that a saved connection's window (ADR 0029) was moved to a new workspace, but the view stayed on the old one: COSMIC moves a window without following it. With AVD desktops the view had ended up on the new workspace too, for a reason not established; it can't be relied on. After the move, Deskfeed now activates the window, as Show does (it also gets the keyboard), and if the new workspace isn't active within a second, activates the workspace itself. The move counts as done only once COSMIC reports the new workspace active; otherwise the log says "moved, but the compositor didn't switch to it". Checked on the owner's COSMIC with the local test server's window (`move_a_real_window`, which now passes only when the workspace is shown).

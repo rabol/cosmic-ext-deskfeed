@@ -76,6 +76,8 @@ pub enum MoveError {
     Cancelled,
     /// COSMIC didn't activate the window.
     NotActivated,
+    /// Moved to the new workspace, but COSMIC didn't switch to it.
+    MovedNotShown,
 }
 
 impl std::fmt::Display for MoveError {
@@ -87,6 +89,7 @@ impl std::fmt::Display for MoveError {
             Self::NoWorkspace => write!(f, "no empty workspace"),
             Self::Cancelled => write!(f, "session ended first"),
             Self::NotActivated => write!(f, "compositor didn't activate the window"),
+            Self::MovedNotShown => write!(f, "moved, but the compositor didn't switch to it"),
         }
     }
 }
@@ -232,8 +235,75 @@ pub fn move_to_new_workspace(
         .manager
         .manager
         .move_to_ext_workspace(toplevel, &target, &output);
-    roundtrip(&mut queue, &mut state)?;
-    Ok(())
+    let toplevel = toplevel.clone();
+    show_moved(&mut queue, &mut state, &toplevel, &target, app_id, title)
+}
+
+/// Shows the window just moved to `target`: see the comment inside.
+fn show_moved(
+    queue: &mut cctk::wayland_client::EventQueue<State>,
+    state: &mut State,
+    toplevel: &zcosmic_toplevel_handle_v1::ZcosmicToplevelHandleV1,
+    target: &ext_workspace_handle_v1::ExtWorkspaceHandleV1,
+    app_id: &str,
+    title: &str,
+) -> Result<(), MoveError> {
+    // COSMIC moves the window but doesn't follow it (owner, 2026-10-21,
+    // with a saved connection's window: it was moved, the view stayed).
+    // So once COSMIC reports it there: activate the window (it also gets
+    // the keyboard, as with Show), and if that doesn't switch, the
+    // workspace itself. Done when the new workspace is the active one.
+    let until = Instant::now() + CREATE_WAIT;
+    loop {
+        queue.roundtrip(state).map_err(no_wayland)?;
+        let there = state
+            .info
+            .toplevels()
+            .any(|t| t.app_id == app_id && t.title == title && t.workspace.contains(target));
+        if there {
+            break;
+        }
+        if Instant::now() > until {
+            return Err(MoveError::MovedNotShown);
+        }
+        std::thread::sleep(POLL);
+    }
+    // Its own confirmation only says the window is focused, which it may
+    // already have been; the workspace's state below is the check.
+    let _ = activate(queue, state, toplevel, app_id, title);
+    if wait_active(queue, state, target)? {
+        return Ok(());
+    }
+    target.activate();
+    if let Ok(manager) = state.workspaces.workspace_manager().get() {
+        manager.commit();
+    }
+    if wait_active(queue, state, target)? {
+        return Ok(());
+    }
+    Err(MoveError::MovedNotShown)
+}
+
+/// Waits up to a second for `workspace` to be the active one.
+fn wait_active(
+    queue: &mut cctk::wayland_client::EventQueue<State>,
+    state: &mut State,
+    workspace: &ext_workspace_handle_v1::ExtWorkspaceHandleV1,
+) -> Result<bool, MoveError> {
+    let until = Instant::now() + Duration::from_secs(1);
+    loop {
+        queue.roundtrip(state).map_err(no_wayland)?;
+        let active = state.workspaces.workspaces().any(|w| {
+            w.handle == *workspace && w.state.contains(ext_workspace_handle_v1::State::Active)
+        });
+        if active {
+            return Ok(true);
+        }
+        if Instant::now() > until {
+            return Ok(false);
+        }
+        std::thread::sleep(POLL);
+    }
 }
 
 /// Brings the window with `app_id` and `title` to the front (COSMIC
@@ -246,14 +316,6 @@ pub fn focus(app_id: &str, title: &str) -> Result<(), MoveError> {
     for _ in 0..2 {
         queue.roundtrip(&mut state).map_err(no_wayland)?;
     }
-    if !state.can_activate {
-        return Err(MoveError::Unsupported("activate capability"));
-    }
-    let seat = state
-        .seats
-        .seats()
-        .next()
-        .ok_or(MoveError::Unsupported("seat"))?;
     // The window list arrives over several round trips.
     let until = Instant::now() + Duration::from_secs(2);
     let toplevel = loop {
@@ -280,11 +342,32 @@ pub fn focus(app_id: &str, title: &str) -> Result<(), MoveError> {
         std::thread::sleep(POLL);
         queue.roundtrip(&mut state).map_err(no_wayland)?;
     };
-    state.manager.manager.activate(&toplevel, &seat);
+    activate(&mut queue, &mut state, &toplevel, app_id, title)
+}
+
+/// Asks COSMIC to activate `toplevel` (it switches to the window's
+/// workspace) and waits up to a second for it to report the window
+/// activated.
+fn activate(
+    queue: &mut cctk::wayland_client::EventQueue<State>,
+    state: &mut State,
+    toplevel: &zcosmic_toplevel_handle_v1::ZcosmicToplevelHandleV1,
+    app_id: &str,
+    title: &str,
+) -> Result<(), MoveError> {
+    if !state.can_activate {
+        return Err(MoveError::Unsupported("activate capability"));
+    }
+    let seat = state
+        .seats
+        .seats()
+        .next()
+        .ok_or(MoveError::Unsupported("seat"))?;
+    state.manager.manager.activate(toplevel, &seat);
     // Confirm it: COSMIC reports the window as activated.
     let until = Instant::now() + Duration::from_secs(1);
     loop {
-        queue.roundtrip(&mut state).map_err(no_wayland)?;
+        queue.roundtrip(state).map_err(no_wayland)?;
         let active = state.info.toplevels().any(|t| {
             t.app_id == app_id
                 && t.title == title
@@ -474,7 +557,8 @@ cctk::delegate_workspace!(State);
 mod tests {
     /// Moves a real window: `MOVE_APP_ID=… MOVE_TITLE=… cargo test --release
     /// move_a_real_window -- --ignored` (for example a session from
-    /// `local_test_server_session`).
+    /// `local_test_server_session`). Passes only once COSMIC shows the new
+    /// workspace, not only when the window has moved.
     #[test]
     #[ignore = "moves a real window on the running COSMIC session"]
     fn move_a_real_window() {
