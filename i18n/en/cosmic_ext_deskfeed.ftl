@@ -387,3 +387,17 @@ network-wan = WAN (10 Mbit/s or more, high latency)
 network-broadband-high = Broadband (2–10 Mbit/s)
 network-broadband-low = Slow broadband (256 kbit/s–2 Mbit/s)
 network-modem = Modem (56 kbit/s)
+
+## Shared folder (ADR 0029, compared with Remmina)
+settings-shared-folder = Shared folder
+setting-shared-folder = Share a folder
+setting-shared-folder-desc = Windows shows it as a drive. Programs there can read, change and delete what's in it: share only a folder meant for that.
+setting-shared-folder-none = Not shared
+shared-folder-choose = Choose…
+shared-folder-choose-title = Folder to share with the desktop
+shared-folder-stop = Stop sharing
+shared-folder-unusable = This folder's path can't be shared: it contains a comma or is too long.
+shared-folder-chooser-failed = The folder chooser didn't open: { $detail }
+folder-not-allowed = Folder not shared: your organization doesn't allow drives on this desktop
+folder-unusable = Folder not shared: its path contains a comma or is too long
+folder-missing = Folder not shared: it isn't there (deleted, or on a disk that isn't plugged in)

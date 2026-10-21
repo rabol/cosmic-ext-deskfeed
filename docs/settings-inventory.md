@@ -23,6 +23,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Color depth | 32-bit | A, Ac, C | `settings.rs` `Choice::ColorDepth` | Done (ADR 0029 follow-up) |
 | Network type | Automatic | A, Ac, C | `settings.rs` `Choice::Network` | Done (ADR 0029 follow-up) |
 | Span as one screen (with all monitors in full screen) | off | A, Ac, C | `settings.rs` `Toggle::SpanMonitors` | Done (ADR 0029 follow-up); not tested with two monitors |
+| Shared folder | none | C | `config.shared_folders`, `shared_folder.rs` | Done (ADR 0029, shared folder); per desktop or connection only, by choice: sharing a folder is a decision for one machine |
 | Keep the screen on in full screen | off | A, Ac, C | `settings.rs` `Toggle::KeepAwake`, `awake.rs` | Done (ADR 0019) |
 | Send shortcuts like Super and Alt+Tab to the desktop | on (`+grab-keyboard`) | A, Ac, C | `settings.rs` `Toggle::SystemShortcuts` | Done (ADR 0018) |
 | Ctrl+Alt+Enter switches full screen | on (`+toggle-fullscreen`) | A, Ac, C | `settings.rs` `Toggle::FullscreenKey` | Done (ADR 0018 addendum) |

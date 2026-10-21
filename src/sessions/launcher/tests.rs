@@ -23,6 +23,7 @@ fn spec(logon: LogonSetting, password: Option<&str>, entra_file: bool) -> Launch
         },
         pinned_certificate: None,
         settings: crate::settings::DEFAULTS,
+        shared_folder: None,
         window_title: String::new(),
         app_id: String::new(),
     }
@@ -38,6 +39,7 @@ fn direct_spec(address: &str) -> LaunchSpec {
         logon: LogonSetting::Automatic,
         pinned_certificate: None,
         settings: crate::settings::DEFAULTS,
+        shared_folder: None,
         window_title: String::new(),
         app_id: String::new(),
     }
@@ -213,6 +215,33 @@ fn freerdp_gets_the_proxy_the_app_uses() {
 
 /// A Windows machine by host name: none of Azure's arguments, NLA, and
 /// the user's own user name, domain and approved certificate.
+/// The chosen folder goes to FreeRDP as one `/drive:` argument; nothing
+/// else shares a drive (the connection file's `drivestoredirect` is
+/// dropped, `rdpfile.rs`).
+#[test]
+fn only_the_chosen_folder_is_shared() {
+    let drives = |a: &[String]| -> Vec<String> {
+        a.iter()
+            .filter(|x| x.starts_with("/drive") || x.contains("drives") || x.contains("home-drive"))
+            .cloned()
+            .collect()
+    };
+    for mut s in [
+        spec(LogonSetting::Automatic, None, false),
+        direct_spec("pc01"),
+    ] {
+        assert_eq!(drives(&args(&s)), Vec::<String>::new());
+        s.shared_folder = Some(crate::shared_folder::Share {
+            name: "Projects".into(),
+            path: "/home/anna/My Projects".into(),
+        });
+        assert_eq!(
+            drives(&args(&s)),
+            ["/drive:Projects,/home/anna/My Projects"]
+        );
+    }
+}
+
 #[test]
 fn direct_arguments_have_nothing_of_azure() {
     let mut s = direct_spec("pc01:3390");
@@ -931,6 +960,7 @@ fn windows_host_remote_app() {
             scale: crate::display::resolve_percent(0),
             ..crate::settings::DEFAULTS
         },
+        shared_folder: None,
         window_title: "Deskfeed RemoteApp test".into(),
         app_id: "io.github.rabol.DeskfeedTest".into(),
     };
@@ -1046,6 +1076,10 @@ fn local_test_server_session() {
             span_monitors: std::env::var("DESKFEED_TEST_SPAN").is_ok_and(|v| v == "1"),
             ..crate::settings::DEFAULTS
         },
+        // `DESKFEED_TEST_FOLDER=<path>`: share that folder (`/drive:`).
+        shared_folder: std::env::var("DESKFEED_TEST_FOLDER")
+            .ok()
+            .map(|p| crate::shared_folder::share(&p).expect("a folder")),
         // `DESKFEED_TEST_TITLE`: another title, for two sessions at once.
         window_title: std::env::var("DESKFEED_TEST_TITLE")
             .unwrap_or_else(|_| "Deskfeed local test \u{2013} t\u{e9}st".into()),
@@ -1172,6 +1206,7 @@ fn real_freerdp_accepts_all_kept_properties() {
         },
         pinned_certificate: None,
         settings: crate::settings::DEFAULTS,
+        shared_folder: None,
         window_title: String::new(),
         app_id: String::new(),
     };

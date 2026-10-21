@@ -234,6 +234,11 @@ pub(super) fn build_args(spec: &LaunchSpec, rdp_path: &Path) -> Result<Vec<Strin
     } else {
         spec.settings.freerdp_args()
     });
+    // The connection file can't add drives (`rdpfile.rs` drops
+    // `drivestoredirect`); only the user's chosen folder goes through.
+    if let Some(share) = &spec.shared_folder {
+        args.push(share.freerdp_arg());
+    }
     let title = safe_title(&spec.window_title);
     if !title.is_empty() {
         args.push(format!("/title:{title}"));

@@ -154,6 +154,10 @@ impl AppModel {
         if logons.remove(id).is_some() {
             save_config!(self, logon_settings, set_logon_settings, logons);
         }
+        let mut folders = self.config.shared_folders.clone();
+        if folders.remove(id).is_some() {
+            save_config!(self, shared_folders, set_shared_folders, folders);
+        }
         let mut favorites = self.config.favorites.clone();
         if favorites.remove(id) {
             save_config!(self, favorites, set_favorites, favorites);

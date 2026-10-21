@@ -677,6 +677,7 @@ mod tests {
             clipboard: true,
             microphone: true,
             sound: true,
+            drives: true,
         };
         let mut allowed = e;
         assert_eq!(allowed.limit_to(all), []);
@@ -685,6 +686,7 @@ mod tests {
             clipboard: false,
             microphone: false,
             sound: false,
+            drives: false,
         };
         let limited = e.limit_to(none);
         assert_eq!(

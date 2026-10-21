@@ -853,6 +853,9 @@ mod saved_connections {
                 .insert(key.clone(), LogonSetting::Automatic);
             app.config.favorites.insert(key.clone());
             app.config.saved_passwords.insert(key.clone());
+            app.config
+                .shared_folders
+                .insert(key.clone(), "/home/anna/Shared".into());
         }
         let _ = app.update(Message::Settings(SettingsMessage::OpenDesktopSettings(
             id.clone(),
@@ -860,6 +863,8 @@ mod saved_connections {
         rdp(&mut app, RdpMessage::Remove);
         let c = &app.config;
         assert!(!c.connections.contains_key(&id));
+        assert!(!c.shared_folders.contains_key(&id));
+        assert!(c.shared_folders.contains_key(&keep));
         assert!(!c.certificate_pins.contains_key(&id));
         assert!(!c.desktop_settings.contains_key(&id));
         assert!(!c.logon_settings.contains_key(&id));
@@ -1149,5 +1154,90 @@ mod saved_connections {
                 (&*fl!("connections"), vec![TrayAction::Connect(id)]),
             ]
         );
+    }
+}
+
+/// A shared folder (ADR 0029, compared with Remmina): chosen per desktop,
+/// taken only when FreeRDP can carry its path, and shared only where the
+/// connection file lets drives through.
+mod shared_folders {
+    use super::*;
+
+    fn chosen(app: &mut AppModel, key: &str, result: Result<String, Option<String>>) {
+        let _ = app.update(Message::Settings(SettingsMessage::FolderChosen {
+            key: key.into(),
+            result,
+        }));
+    }
+
+    #[test]
+    fn the_choice_is_kept_refused_or_ignored() {
+        let mut app = app();
+        chosen(&mut app, "k1", Ok("/home/anna/Shared".into()));
+        assert_eq!(app.config.shared_folders["k1"], "/home/anna/Shared");
+        // A comma would cut FreeRDP's argument: refused, the old one kept.
+        chosen(&mut app, "k1", Ok("/home/anna/a,b".into()));
+        assert_eq!(app.config.shared_folders["k1"], "/home/anna/Shared");
+        assert!(app.folder_error.as_ref().is_some_and(|(k, _)| k == "k1"));
+        // Cancelled: nothing changes, and the old message goes with a
+        // new attempt.
+        let _ = app.update(Message::Settings(SettingsMessage::ChooseFolder(
+            "k1".into(),
+        )));
+        assert!(app.folder_error.is_none());
+        chosen(&mut app, "k1", Err(None));
+        assert_eq!(app.config.shared_folders["k1"], "/home/anna/Shared");
+        assert!(app.folder_error.is_none());
+        // The chooser failed: said where the folder is chosen.
+        chosen(&mut app, "k1", Err(Some("no portal".into())));
+        assert!(
+            app.folder_error
+                .as_ref()
+                .is_some_and(|(_, e)| e == "no portal")
+        );
+        let _ = app.update(Message::Settings(SettingsMessage::StopSharingFolder(
+            "k1".into(),
+        )));
+        assert!(app.config.shared_folders.is_empty());
+    }
+
+    #[test]
+    fn shared_only_where_drives_are_allowed() {
+        let mut app = app();
+        app.config
+            .shared_folders
+            .insert("k1".into(), "/home/anna/Shared".into());
+        let mut notes = Vec::new();
+        // An AVD file without `drivestoredirect`: not shared, and said so.
+        assert_eq!(
+            app.shared_folder_of("k1", &connection_file(), &mut notes),
+            None
+        );
+        assert_eq!(notes, [fl!("folder-not-allowed")]);
+        let allowed = ConnectionFile::parse(
+            b"full address:s:rdgateway.example\r\n\
+              gatewayhostname:s:rdgateway.wvd.microsoft.com:443\r\n\
+              drivestoredirect:s:*\r\n",
+        )
+        .unwrap();
+        let mut notes = Vec::new();
+        assert_eq!(
+            app.shared_folder_of("k1", &allowed, &mut notes).as_deref(),
+            Some("/home/anna/Shared")
+        );
+        assert_eq!(notes, Vec::<String>::new());
+        // A saved connection: a machine of the user's own.
+        let direct = ConnectionFile::direct("pc01:3389").unwrap();
+        assert!(app.shared_folder_of("k1", &direct, &mut notes).is_some());
+        // A hand-edited path FreeRDP can't take: not shared, and said so.
+        app.config
+            .shared_folders
+            .insert("k1".into(), "/home/anna/a,b".into());
+        assert_eq!(app.shared_folder_of("k1", &allowed, &mut notes), None);
+        assert_eq!(notes, [fl!("folder-unusable")]);
+        // Nothing chosen: nothing to say.
+        let mut notes = Vec::new();
+        assert_eq!(app.shared_folder_of("k2", &allowed, &mut notes), None);
+        assert_eq!(notes, Vec::<String>::new());
     }
 }

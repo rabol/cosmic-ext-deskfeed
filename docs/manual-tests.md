@@ -114,6 +114,11 @@ These need a real Windows machine and its certificate. Before them, in Windows (
    - *Expected:* with COSMIC's tiling off (floating window), the window opens at about 70 % of the monitor; with tiling on, COSMIC sizes it. Colors look coarser (gradients show bands). It connects as before.
    - Set them back to their first entries (or "Account setting") and connect: as before these settings existed.
 
+24. **Shared folder** (the Windows machine; an AVD desktop if its administrator allows drives). In its settings, under Shared folder, select **Choose…** and pick a folder with a test file in it. Connect.
+   - *Expected:* COSMIC's folder chooser opens. In Windows, File Explorer → This PC shows "<folder name> on <this computer's name>" with the test file; a file created there appears in the folder here.
+   - On an AVD desktop whose administrator doesn't allow drives, the row says "Folder not shared: your organization doesn't allow drives on this desktop".
+   - Rename the folder here and connect again: it connects, and the row says the folder isn't there. **Stop sharing** removes it from the settings.
+
 ### How things look
 
 16. **"Changes apply the next time you connect"**. Connect a desktop and open its settings.

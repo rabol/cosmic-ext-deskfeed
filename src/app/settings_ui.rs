@@ -58,6 +58,47 @@ impl AppModel {
                 self.core.window.show_context = true;
             }
             SettingsMessage::Edit(level, edit) => self.edit_settings(&level, edit),
+            SettingsMessage::ChooseFolder(key) => {
+                self.folder_error = None;
+                return cosmic::task::future(async move {
+                    let dialog = cosmic::dialog::file_chooser::open::Dialog::new()
+                        .title(fl!("shared-folder-choose-title"));
+                    let result = match dialog.open_folder().await {
+                        Ok(response) => response
+                            .url()
+                            .to_file_path()
+                            .ok()
+                            .and_then(|p| p.to_str().map(str::to_owned))
+                            // Not a local path, or not UTF-8: FreeRDP's
+                            // argument can't carry it.
+                            .ok_or_else(|| Some(fl!("shared-folder-unusable"))),
+                        Err(cosmic::dialog::file_chooser::Error::Cancelled) => Err(None),
+                        Err(e) => Err(Some(fl!(
+                            "shared-folder-chooser-failed",
+                            detail = e.to_string()
+                        ))),
+                    };
+                    Message::Settings(SettingsMessage::FolderChosen { key, result })
+                });
+            }
+            SettingsMessage::FolderChosen { key, result } => match result {
+                Ok(path) if crate::shared_folder::check_form(&path).is_ok() => {
+                    self.folder_error = None;
+                    let mut all = self.config.shared_folders.clone();
+                    all.insert(key, path);
+                    save_config!(self, shared_folders, set_shared_folders, all);
+                }
+                Ok(_) => self.folder_error = Some((key, fl!("shared-folder-unusable"))),
+                Err(Some(e)) => self.folder_error = Some((key, e)),
+                Err(None) => {}
+            },
+            SettingsMessage::StopSharingFolder(key) => {
+                self.folder_error = None;
+                let mut all = self.config.shared_folders.clone();
+                if all.remove(&key).is_some() {
+                    save_config!(self, shared_folders, set_shared_folders, all);
+                }
+            }
             SettingsMessage::AppTheme(i) => {
                 let value = u32::try_from(i).unwrap_or(0).min(2);
                 save_config!(self, app_theme, set_app_theme, Some(value));
@@ -320,7 +361,11 @@ impl AppModel {
             );
             any = true;
         }
-        let pin = any.then(|| security.into());
+        let mut last = widget::column::with_capacity(2).spacing(cosmic::theme::spacing().space_m);
+        last = last.push(self.shared_folder_section(key));
+        if any {
+            last = last.push(security);
+        }
         let (page, hint) = match account.map(|a| (a, a.resource(key).map(|r| r.kind))) {
             None => (Page::Desktop, fl!("connection-settings-hint")),
             Some((account, Some(ResourceKind::RemoteApp))) => (
@@ -334,11 +379,51 @@ impl AppModel {
         };
         let open = self.desks.running(key).is_some() || self.desks.launching(key).is_some();
         rows.view(
-            pin,
+            Some(last.into()),
             open_note(hint, open, true),
             page,
             Level::Desktop(key.to_owned()),
         )
+    }
+}
+
+impl AppModel {
+    /// The shared folder of a desktop or connection: which one, Choose…,
+    /// Stop sharing, and why a chosen one wasn't taken.
+    fn shared_folder_section(&self, key: &str) -> Element<'_, Message> {
+        let shared = self.config.shared_folders.get(key);
+        let space = cosmic::theme::spacing();
+        let mut controls = widget::row::with_capacity(2)
+            .spacing(space.space_xs)
+            .align_y(Alignment::Center)
+            .push(
+                widget::button::standard(fl!("shared-folder-choose")).on_press(Message::Settings(
+                    SettingsMessage::ChooseFolder(key.to_owned()),
+                )),
+            );
+        if shared.is_some() {
+            controls = controls.push(
+                widget::button::destructive(fl!("shared-folder-stop")).on_press(Message::Settings(
+                    SettingsMessage::StopSharingFolder(key.to_owned()),
+                )),
+            );
+        }
+        let mut section = widget::settings::section()
+            .title(fl!("settings-shared-folder"))
+            .add(
+                widget::settings::item::builder(fl!("setting-shared-folder"))
+                    .description(fl!("setting-shared-folder-desc"))
+                    .control(controls),
+            )
+            .add(widget::text::body(
+                shared
+                    .cloned()
+                    .unwrap_or_else(|| fl!("setting-shared-folder-none")),
+            ));
+        if let Some((_, e)) = self.folder_error.as_ref().filter(|(k, _)| k == key) {
+            section = section.add(widget::text::body(e.clone()));
+        }
+        section.into()
     }
 }
 

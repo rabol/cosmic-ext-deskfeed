@@ -463,6 +463,8 @@ pub enum ConnectionMessage {
         key: String,
         attempt: u64,
         result: Result<launcher::Session, String>,
+        /// The shared folder wasn't there, so it isn't shared this time.
+        folder_missing: bool,
     },
     /// An event from a running session.
     Session {
@@ -541,6 +543,16 @@ pub enum SettingsMessage {
     AppLogSize(u32),
     /// Appearance: index into `THEMES`.
     AppTheme(usize),
+    /// Opens the folder chooser for this desktop's or connection's shared
+    /// folder.
+    ChooseFolder(String),
+    /// The folder chooser's answer: a path, or why there is none (`None`:
+    /// cancelled).
+    FolderChosen {
+        key: String,
+        result: Result<String, Option<String>>,
+    },
+    StopSharingFolder(String),
 }
 
 /// Whose connection settings: built-in defaults → app → account →

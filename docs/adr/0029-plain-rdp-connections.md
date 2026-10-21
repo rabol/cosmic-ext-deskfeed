@@ -101,7 +101,7 @@ The owner compared the form with Remmina's RDP profile (2026-10-20). The first v
 
 | Remmina | FreeRDP | Why it needs a decision |
 |---|---|---|
-| Share folder | `/drive:name,path` | The remote machine can read and write a local folder. Off by default, a folder chosen per connection; AVD's device policy would still win for desktops. |
+| Share folder | `/drive:name,path` | **Built 2026-10-21** (below). |
 | Smartcard logon (and PIN) | `/smartcard-logon`, `/smartcard` | The spec excludes smartcard redirection (§3); it would need a card and reader to test. |
 | Restricted admin mode | `+restricted-admin` | Logs on without sending the password to the machine, but only for administrators and only where the machine allows it. Safer for admins, confusing for everyone else. |
 
@@ -117,4 +117,15 @@ The owner compared the form with Remmina's RDP profile (2026-10-20). The first v
 |---|---|
 | Server history | The Connections list is the history. |
 | Left-handed mouse, disable smooth scrolling | Remmina's own input handling. FreeRDP gets the pointer from XWayland with COSMIC's mouse settings already applied; to be checked once someone misses them. |
+
+### Shared folder (built 2026-10-21)
+
+The owner started it on 2026-10-21, as proposed above.
+
+- **Per desktop or saved connection, off by default** (spec §9): "Choose…" in its settings drawer opens COSMIC's folder chooser (the desktop portal, libcosmic's `xdg-portal` feature, already used for diagnostics), "Stop sharing" removes it. No app or account level: sharing a folder is a choice for one machine. Stored in `config.shared_folders` by key; removing a saved connection removes it.
+- **Read and write.** FreeRDP 3.32.2 has no read-only share; the setting's text says so.
+- **The administrator's policy wins** for AVD: only when the connection file has `drivestoredirect` with a value (`*`, `DynamicDrives`, a list). Without it the row says the folder isn't shared and why, like the camera. The file's own `drivestoredirect` still never reaches FreeRDP, so only the chosen folder is shared. A saved connection has no such policy.
+- **What FreeRDP can carry** (`client/common/cmdline.c`, `channels/drive/client/drive_main.c`): `/drive:` splits at commas and reads the path up to 260 bytes, so such paths are refused when chosen and again at launch. The share name is the folder's own name in letters, digits, `-` and `_` (FreeRDP would replace `:<>"/\|` and spaces anyway), "Deskfeed" when nothing is left.
+- **A missing folder** (deleted, a disk not plugged in) doesn't stop the connection: it connects without it and the row says so. The check touches the disk, so it runs with the launch, off the UI thread.
+- Checked: the real `xfreerdp3` 3.32.2 takes the argument (a path with a space) and loads its device channel (`rdpdr`). The local test server has no drive channel, so Windows showing the folder is manual test 24.
 

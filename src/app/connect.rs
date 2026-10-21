@@ -80,8 +80,9 @@ impl AppModel {
                 key,
                 attempt,
                 result,
+                folder_missing,
             } => {
-                return self.launched(&id, epoch, key, attempt, result);
+                return self.launched(&id, epoch, key, attempt, result, folder_missing);
             }
             ConnectionMessage::ConnectDeadline { key, attempt } => {
                 self.connect_deadline(&key, attempt);

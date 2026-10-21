@@ -90,6 +90,9 @@ pub struct LaunchSpec {
     pub pinned_certificate: Option<String>,
     /// Effective connection settings (account, then desktop overrides).
     pub settings: crate::settings::Effective,
+    /// A local folder shared with the desktop, already checked
+    /// (`shared_folder::share`) and allowed by the connection file.
+    pub shared_folder: Option<crate::shared_folder::Share>,
     /// Window title and Wayland app ID for FreeRDP's window, so the dock
     /// groups it with the app and "open on a new workspace" can find it.
     pub window_title: String,

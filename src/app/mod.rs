@@ -134,6 +134,9 @@ pub struct AppModel {
     /// The saved connections as list rows, in title order; rebuilt when
     /// they change (`rdp.rs`).
     connection_rows: Vec<ResourceView>,
+    /// Why the last folder chosen to share wasn't taken, for that desktop
+    /// or connection (key, text); shown in its settings.
+    folder_error: Option<(String, String)>,
     /// The tray, while background operation is on and a tray answers.
     tray: Option<crate::tray::Handle>,
     /// Why there is no tray, when background operation is on.
@@ -654,6 +657,7 @@ impl AppModel {
             search: String::new(),
             connection_form: ConnectionForm::default(),
             connection_rows: Vec::new(),
+            folder_error: None,
             tray: None,
             tray_unavailable: None,
             tray_menu: None,

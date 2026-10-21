@@ -48,6 +48,10 @@ pub struct Config {
     /// Saved plain RDP connections (ADR 0029; keys: `connections::new_id`).
     /// No passwords: those are in the keyring, opt-in.
     pub connections: BTreeMap<String, crate::connections::SavedConnection>,
+    /// A local folder shared with a desktop or saved connection (keys as
+    /// above; absolute paths). Off unless chosen (ADR 0029, compared with
+    /// Remmina).
+    pub shared_folders: BTreeMap<String, String>,
 }
 
 /// An account Deskfeed lists: who it is, for the sidebar and for signing

@@ -17,6 +17,7 @@ mod secrets;
 mod service;
 mod sessions;
 mod settings;
+mod shared_folder;
 mod single;
 #[cfg(test)]
 mod test_util;

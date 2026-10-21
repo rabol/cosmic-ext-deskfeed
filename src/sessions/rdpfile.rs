@@ -207,6 +207,9 @@ impl CameraPolicy {
 /// What the administrator allows for this computer's devices, besides
 /// cameras.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Each is a separate yes or no in the file; a bitflag type would only hide
+// that.
+#[allow(clippy::struct_excessive_bools)]
 pub struct DevicePolicy {
     /// `redirectclipboard:i:1`.
     pub clipboard: bool,
@@ -215,6 +218,10 @@ pub struct DevicePolicy {
     /// `audiomode:i:0` (or missing): the desktop's sound plays here. `1`
     /// leaves it on the host, `2` plays none.
     pub sound: bool,
+    /// `drivestoredirect:s:` with any value (`*`, `DynamicDrives`, a list
+    /// of drives): the administrator lets drives through, so a shared
+    /// folder may be. Empty or missing: none.
+    pub drives: bool,
 }
 
 impl DevicePolicy {
@@ -223,9 +230,14 @@ impl DevicePolicy {
         clipboard: false,
         microphone: false,
         sound: true,
+        drives: false,
     };
 
     fn read(&mut self, key: &str, kind: &str, value: &str) {
+        if key == "drivestoredirect" && kind == "s" {
+            self.drives = !value.trim().is_empty();
+            return;
+        }
         if kind != "i" {
             return;
         }
@@ -336,10 +348,12 @@ impl ConnectionFile {
             props,
             dropped: 0,
             cameras: CameraPolicy::All,
+            // A machine of the user's own: no administrator's policy.
             devices: DevicePolicy {
                 clipboard: true,
                 microphone: true,
                 sound: true,
+                drives: true,
             },
             refused: Vec::new(),
         }
@@ -590,12 +604,18 @@ mod tests {
             DevicePolicy {
                 clipboard: true,
                 microphone: true,
-                sound: true
+                sound: true,
+                drives: false,
             }
         );
         let off = policy("RedirectClipboard:i:0\r\naudiocapturemode:i:0\r\naudiomode:i:2\r\n");
         assert!(!off.clipboard && !off.microphone && !off.sound);
         assert!(!policy("audiomode:i:1\r\n").sound);
+        // Drives: any value lets them through; empty doesn't.
+        assert!(policy("drivestoredirect:s:*\r\n").drives);
+        assert!(policy("drivestoredirect:s:DynamicDrives\r\n").drives);
+        assert!(!policy("drivestoredirect:s:\r\n").drives);
+        assert!(!policy("drivestoredirect:i:1\r\n").drives);
         // Wrong type or value: the default stays.
         assert!(!policy("redirectclipboard:s:1\r\n").clipboard);
         assert!(!policy("redirectclipboard:i:x\r\n").clipboard);

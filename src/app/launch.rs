@@ -65,6 +65,7 @@ impl AppModel {
                 Limited::Sound => fl!("sound-not-allowed"),
             },
         ));
+        let folder = self.shared_folder_of(key, connection, &mut notes);
         self.desks.at(key).note = (!notes.is_empty()).then(|| notes.join(" · "));
         let spec = LaunchSpec {
             connection: (**connection).clone(),
@@ -74,6 +75,8 @@ impl AppModel {
             target,
             pinned_certificate: self.config.certificate_pins.get(key).cloned(),
             settings,
+            // Checked on the disk with the launch, off the UI thread.
+            shared_folder: None,
             window_title: window_title.clone(),
             app_id: <Self as cosmic::Application>::APP_ID.to_owned(),
         };
@@ -115,11 +118,16 @@ impl AppModel {
         let started = {
             let (owner, key) = (owner.to_owned(), key.to_owned());
             cosmic::task::future(async move {
-                let result = off_ui(
+                let (result, folder_missing) = off_ui(
                     move || {
                         let mut spec = spec;
                         spec.settings.scale = crate::display::resolve_percent(spec.settings.scale);
-                        launcher::launch(&spec, move |e| {
+                        // A folder that isn't there (deleted, a disk not
+                        // plugged in) doesn't stop the connection.
+                        let share = folder.map(|path| crate::shared_folder::share(&path));
+                        let folder_missing = matches!(share, Some(Err(_)));
+                        spec.shared_folder = share.and_then(Result::ok);
+                        let result = launcher::launch(&spec, move |e| {
                             let _ = tx.unbounded_send(e);
                         })
                         .map_err(|e| match e {
@@ -132,9 +140,10 @@ impl AppModel {
                                 crate::app_log!("FreeRDP didn't start: {other:?}");
                                 fl!("error-launch")
                             }
-                        })
+                        });
+                        (result, folder_missing)
                     },
-                    Err(fl!("error-generic")),
+                    (Err(fl!("error-generic")), false),
                 )
                 .await;
                 Message::Connection(ConnectionMessage::Launched {
@@ -143,6 +152,7 @@ impl AppModel {
                     key,
                     attempt,
                     result,
+                    folder_missing,
                 })
             })
         };
@@ -209,6 +219,28 @@ impl AppModel {
         Some((target, signed_in.identity.username.clone(), window_title))
     }
 
+    /// The folder chosen to share with row `key`, if the connection file
+    /// lets drives through and FreeRDP can take its path; otherwise a note
+    /// says why it isn't shared. Whether it is there is checked at launch.
+    pub(super) fn shared_folder_of(
+        &self,
+        key: &str,
+        connection: &ConnectionFile,
+        notes: &mut Vec<String>,
+    ) -> Option<String> {
+        let path = self.config.shared_folders.get(key)?;
+        if !connection.devices.drives {
+            crate::app_log!("shared folder: not allowed by the connection file");
+            notes.push(fl!("folder-not-allowed"));
+            return None;
+        }
+        if crate::shared_folder::check_form(path).is_err() {
+            notes.push(fl!("folder-unusable"));
+            return None;
+        }
+        Some(path.clone())
+    }
+
     /// "Open on a new workspace": waits for the session's window and moves
     /// it.
     pub(super) fn mover(
@@ -269,7 +301,23 @@ impl AppModel {
         key: String,
         attempt: u64,
         result: Result<launcher::Session, String>,
+        folder_missing: bool,
     ) -> Task<cosmic::Action<Message>> {
+        if folder_missing
+            && result.is_ok()
+            && self
+                .desks
+                .launching(&key)
+                .is_some_and(|l| l.start.attempt == attempt)
+        {
+            crate::app_log!("shared folder: not found, connecting without it");
+            let desk = self.desks.at(&key);
+            let missing = fl!("folder-missing");
+            desk.note = Some(match desk.note.take() {
+                Some(n) => format!("{n} · {missing}"),
+                None => missing,
+            });
+        }
         if self
             .desks
             .launching(&key)

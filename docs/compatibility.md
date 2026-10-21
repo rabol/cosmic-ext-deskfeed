@@ -12,6 +12,7 @@ What has been tested, on what, and what isn't supported (spec §4, item 8). Evid
 | RemoteApp on a Windows 11 Pro host (home lab, no AVD) | — | — | works | App windows, takeover by a second app, refused and missing apps ([ADR 0020](adr/0020-remoteapps.md)) |
 | Remembered Windows password | — | — | not tested | Needs a desktop that accepts password logon; the owner's refuses it (`0x52E`) |
 | Window size, color depth, network type (local test server, `xfreerdp3` 3.32.2, 2026-10-20) | — | — | works | The client asks for the chosen size (80 % → 3072×1728 on a 3840×2160 monitor), 16 bpp and WAN (type 5); the defaults stay 1024×768, 32 bpp, autodetect. With tiling on, COSMIC resizes the window at once and the desktop follows |
+| Shared folder (`/drive:`) | — | — | not tested | FreeRDP 3.32.2 takes the argument and loads its device channel; the local test server has no drive channel. Needs a Windows machine (manual test 24) |
 | Span as one screen (`+span`) | — | — | not tested | Needs two monitors. FreeRDP accepts it and connects (local test server, one monitor) |
 | HTTP proxy that needs a user name and password | works | **doesn't work** | — | FreeRDP 3.32.2 bug ([ADR 0008](adr/0008-http-and-crypto-crates.md) addendum) |
 | Administrator-provided registration | — | — | — | Not in v1 (owner's decision) |
