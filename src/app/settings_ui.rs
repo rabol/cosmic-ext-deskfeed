@@ -740,3 +740,41 @@ pub(super) fn toggle_text(t: Toggle) -> (String, String) {
         Toggle::Reconnect => (fl!("setting-reconnect"), fl!("setting-reconnect-desc")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The user guide's headings (`#### <name>`).
+    fn guide_headings() -> Vec<&'static str> {
+        include_str!("../../docs/user-guide.md")
+            .lines()
+            .filter_map(|l| l.strip_prefix("#### "))
+            .collect()
+    }
+
+    /// Every setting the app shows has a section in the user guide, under
+    /// the name the app gives it, so the guide can't fall behind a new
+    /// setting (owner, 2026-10-22).
+    #[test]
+    fn every_setting_is_in_the_user_guide() {
+        let headings = guide_headings();
+        let mut names: Vec<String> = Vec::new();
+        names.extend(Toggle::ALL.iter().map(|&t| toggle_text(t).0));
+        names.extend(Number::ALL.iter().map(|&n| number_text(n).0));
+        names.extend(Choice::ALL.iter().map(|&c| choice_text(c).0));
+        // The app-only and desktop-only ones outside the three lists.
+        names.extend([
+            fl!("setting-theme"),
+            fl!("setting-background"),
+            fl!("setting-autostart"),
+            fl!("setting-log-size"),
+            fl!("setting-shared-folder"),
+        ]);
+        let missing: Vec<_> = names
+            .iter()
+            .filter(|n| !headings.contains(&n.as_str()))
+            .collect();
+        assert!(missing.is_empty(), "not in docs/user-guide.md: {missing:?}");
+    }
+}

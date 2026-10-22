@@ -2,7 +2,7 @@
 
 Every value the app fixes in code, and where it belongs. The owner's rule (2026-10-18): anything that could matter to a user is a setting at **App → Account → Connection** (the desktop), each level overriding the one above. Internal values may stay fixed, but are listed here with the reason.
 
-Keep this list current when adding or changing a constant.
+Keep this list current when adding or changing a constant. Users read about the settings in the [user guide](user-guide.md); a test (`app::settings_ui::tests::every_setting_is_in_the_user_guide`) fails when a setting the app shows has no section there.
 
 Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (desktop). A saved plain RDP connection has no account: its settings are **A → C** (ADR 0029).
 
@@ -23,6 +23,8 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Color depth | 32-bit | A, Ac, C | `settings.rs` `Choice::ColorDepth` | Done (ADR 0029 follow-up) |
 | Network type | Automatic | A, Ac, C | `settings.rs` `Choice::Network` | Done (ADR 0029 follow-up) |
 | Span as one screen (with all monitors in full screen) | off | A, Ac, C | `settings.rs` `Toggle::SpanMonitors` | Done (ADR 0029 follow-up); not tested with two monitors |
+| Logon setting (Entra sign-in, password, empty domain, custom domain) | Entra sign-in when the desktop offers it | C | config `logon_settings`, saved connection `logon` | Done (ADR 0005); chosen in the password dialog, per desktop |
+| Restricted admin mode | off | C (saved connections only) | `connections.rs` `SavedConnection.restricted_admin` | Done (ADR 0029) |
 | Shared folder | none | C | `config.shared_folders`, `shared_folder.rs` | Done (ADR 0029, shared folder); per desktop or connection only, by choice: sharing a folder is a decision for one machine |
 | Keep the screen on in full screen | off | A, Ac, C | `settings.rs` `Toggle::KeepAwake`, `awake.rs` | Done (ADR 0019) |
 | Send shortcuts like Super and Alt+Tab to the desktop | on (`+grab-keyboard`) | A, Ac, C | `settings.rs` `Toggle::SystemShortcuts` | Done (ADR 0018) |
@@ -36,7 +38,8 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | Keep the offline desktop list for | 30 days (1–90) | A, Ac | `settings.rs` `Number::OfflineDays` | Done |
 | Log file size before it rotates | 1 MB (1–100) | A | `log.rs` `MAX_SIZE_MIB`, config `log_max_mib` | Done |
 | Printers, smart cards, serial ports, location, WebAuthn | off (forced in the `.rdp`) | A, Ac, C | `sessions/rdpfile.rs` `DEVICE_DEFAULTS` | Later: each needs FreeRDP research and a real-session test before it can be offered (spec §9) |
-| Drives, USB devices | off (feed's lists dropped) | A, Ac, C | `sessions/rdpfile.rs` | Later, as above |
+| Drives | off, except the one shared folder below | C | `sessions/rdpfile.rs`, `shared_folder.rs` | The feed's drive list is dropped; one chosen folder can be shared (Shared folder row) |
+| USB devices | off (feed's list dropped) | A, Ac, C | `sessions/rdpfile.rs` | Later, as above |
 | Microsoft cloud (public, government, China) | public Azure | Ac | `service/endpoint.rs`, `service/http.rs` | Later: needs each cloud's endpoints and client registration |
 | Display scaling | Automatic (the X11 scale from XSETTINGS); 100–300 % | A, Ac, C | `settings.rs` `Choice::Scale`, `display.rs` | Done (ADR 0015) |
 | Theme: match desktop, dark, light | match desktop | A | config `app_theme`, `app/settings_ui.rs` `apply_theme` | Done |

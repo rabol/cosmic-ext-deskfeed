@@ -17,7 +17,8 @@ Your work desktops on the COSMIC™ desktop. A native COSMIC app that **works wi
 - **All your desktops** from every workspace your accounts can use.
 - **Connect with Entra sign-in** (no Windows password) by default; host pools that need a Windows password get a native dialog that allows pasting.
 - **Windows machines by host name too:** **Add connection** saves a plain RDP connection (server, user name, optional domain and remembered password) next to your accounts. It connects directly with NLA, asks before trusting the machine's certificate, and shows up in the tray like a desktop.
-- **Settings for the app, overridden per account and again per desktop:** full screen or window, all monitors, open on a new COSMIC workspace, sound, microphone, camera, clipboard, and how long to wait for the desktop.
+- **Settings for the app, overridden per account and again per desktop:** full screen, window size, monitors, display scaling, opening on a new COSMIC workspace, sound, microphone, camera, clipboard, a shared folder, keyboard shortcuts, reconnecting, and more. Every one is explained in the [user guide](./docs/user-guide.md#settings).
+- **Runs in the background** with a tray icon if you like, and can start when you log in.
 - **Built for COSMIC:** libcosmic UI that follows the COSMIC design, the remote desktop groups under the app in the dock, light and dark themes.
 - **Checks its dependencies** at startup and tells you what to install.
 
@@ -59,6 +60,8 @@ This installs the app (`/usr/bin/cosmic-ext-deskfeed`), its sign-in helper (`/us
 6. **Sign out:** **Account → Sign out**, or **Sign out** in the account settings. This removes the account's saved sign-in and cookies from this computer.
 
 If something doesn't work, **View → Dependencies** shows what's missing, and **View → Open log folder** opens the log.
+
+The [user guide](./docs/user-guide.md) covers every feature and setting in detail.
 
 ## Known limitations
 

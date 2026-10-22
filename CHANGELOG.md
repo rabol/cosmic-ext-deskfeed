@@ -15,6 +15,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Added
 
+- A [user guide](docs/user-guide.md) covering every feature and setting. A test fails when a setting has no section in it.
 - Restricted admin mode for a saved connection (a switch in its form): your password logs you on but isn't handed to the machine. For administrators, on machines that allow it; when it can't be used, the row says so or that it is on (ADR 0029).
 - Shared folder: a desktop or saved connection can share one local folder, chosen in its settings (off by default). Windows shows it as a drive and can change what's in it. For Azure desktops it's shared only when the administrator allows drives; a missing folder doesn't stop the connection (ADR 0029).
 - New connection settings, for desktops and saved connections alike: window size when it opens (a share of the monitor), color depth, network type, and "Span as one screen" with all monitors in full screen. Their defaults keep FreeRDP's behaviour as before.
