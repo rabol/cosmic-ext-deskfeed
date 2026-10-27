@@ -54,6 +54,10 @@ const POLL: Duration = Duration::from_millis(200);
 const WATCH_POLL: Duration = Duration::from_secs(1);
 /// How long to wait for COSMIC to create a requested workspace.
 const CREATE_WAIT: Duration = Duration::from_secs(3);
+/// How long FreeRDP's start waits for the switch to an empty workspace
+/// ([`move_to_new_workspace`]): the window list (at most [`SETTLE_WAIT`])
+/// and COSMIC's switch (at most a second), with some room.
+pub const SWITCH_GATE: Duration = Duration::from_secs(2);
 /// How long [`settle`] waits for the window list after connecting. Measured
 /// arrival: 65–130 ms; with no windows at all the whole time is used.
 const SETTLE_WAIT: Duration = Duration::from_millis(500);
@@ -187,11 +191,20 @@ pub fn check() -> Result<(), String> {
 /// moment (owner, 2026-10-21, most visible with an Azure desktop). The
 /// sign-in page opens there too. If the window opens elsewhere anyway (the
 /// user switched meanwhile), it is moved as before.
+///
+/// `switched` is called once the switch is done or has failed; FreeRDP is
+/// started only then ([`SWITCH_GATE`]). Started together, a fast host's
+/// window opened before the switch and was moved: shown on the old
+/// workspace first (session check `nested_new_workspace_without_flash`,
+/// 2026-10-27: the local test server's window was there within 180 ms,
+/// while reading the window list took up to 130 ms). Returning early
+/// drops it uncalled, which also lets FreeRDP start.
 pub fn move_to_new_workspace(
     app_id: &str,
     title: &str,
     wait: Duration,
     cancel: &Arc<AtomicBool>,
+    switched: impl FnOnce(),
 ) -> Result<Placed, MoveError> {
     let (mut queue, mut state) = connect()?;
     if state.manager.manager.version() < 4 {
@@ -216,7 +229,9 @@ pub fn move_to_new_workspace(
     );
 
     // Not fatal: without it the window is moved once it is there.
-    let switched = match switch_first(&mut queue, &mut state) {
+    let first = switch_first(&mut queue, &mut state);
+    switched();
+    let switched = match first {
         Ok(s) => Some(s),
         Err(e) => {
             crate::app_log!("open on a new workspace: no switch first: {e}");
@@ -809,6 +824,117 @@ cctk::delegate_toplevel_info!(State);
 cctk::delegate_toplevel_manager!(State);
 cctk::delegate_workspace!(State);
 
+/// Read-only views of the running compositor for the checks in a nested
+/// COSMIC session (`src/sessions/launcher/nested.rs`).
+#[cfg(test)]
+pub(crate) mod observe {
+    use super::*;
+
+    /// One window as COSMIC reports it.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Window {
+        pub app_id: String,
+        pub title: String,
+        /// Names of the workspaces it is on.
+        pub workspaces: Vec<String>,
+        pub fullscreen: bool,
+        pub activated: bool,
+    }
+
+    /// What COSMIC reports at one moment.
+    #[derive(Debug, Clone)]
+    pub struct Look {
+        /// Name of the active workspace (the first group's).
+        pub active: Option<String>,
+        pub windows: Vec<Window>,
+        /// The first output's current mode, in pixels.
+        pub output: Option<(i32, i32)>,
+    }
+
+    impl Look {
+        pub fn window(&self, title: &str) -> Option<&Window> {
+            self.windows.iter().find(|w| w.title == title)
+        }
+    }
+
+    pub struct Observer {
+        queue: cctk::wayland_client::EventQueue<State>,
+        state: State,
+    }
+
+    impl Observer {
+        /// Connects and waits for the window list ([`settle`]).
+        pub fn new() -> Self {
+            let (mut queue, mut state) = connect().expect("COSMIC's protocols");
+            for _ in 0..2 {
+                queue.roundtrip(&mut state).unwrap();
+            }
+            settle(&mut queue, &mut state).unwrap();
+            Self { queue, state }
+        }
+
+        pub fn look(&mut self) -> Look {
+            self.queue.roundtrip(&mut self.state).unwrap();
+            let state = &self.state;
+            let name = |h: &ext_workspace_handle_v1::ExtWorkspaceHandleV1| {
+                state
+                    .workspaces
+                    .workspaces()
+                    .find(|w| w.handle == *h)
+                    .map(|w| w.name.clone())
+            };
+            let active = state
+                .workspaces
+                .workspace_groups()
+                .next()
+                .and_then(|g| active_in(state, g))
+                .and_then(|h| name(&h));
+            let windows = state
+                .info
+                .toplevels()
+                .map(|t| Window {
+                    app_id: t.app_id.clone(),
+                    title: t.title.clone(),
+                    workspaces: t.workspace.iter().filter_map(name).collect(),
+                    fullscreen: t
+                        .state
+                        .contains(&zcosmic_toplevel_handle_v1::State::Fullscreen),
+                    activated: t
+                        .state
+                        .contains(&zcosmic_toplevel_handle_v1::State::Activated),
+                })
+                .collect();
+            let output = state.outputs.outputs().next().and_then(|o| {
+                state
+                    .outputs
+                    .info(&o)?
+                    .modes
+                    .iter()
+                    .find(|m| m.current)
+                    .map(|m| m.dimensions)
+            });
+            Look {
+                active,
+                windows,
+                output,
+            }
+        }
+
+        /// Looks every 20 ms until `done` is true or `limit` has passed;
+        /// the last look either way.
+        pub fn until(&mut self, limit: Duration, done: impl Fn(&Look) -> bool) -> Look {
+            let until = Instant::now() + limit;
+            loop {
+                let look = self.look();
+                if done(&look) || Instant::now() > until {
+                    return look;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Candidate, Seen, pick_empty, settled};
@@ -943,6 +1069,7 @@ mod tests {
             &std::env::var("MOVE_TITLE").unwrap(),
             std::time::Duration::from_secs(10),
             &cancel,
+            || {},
         );
         println!("{placed:?}");
         placed.unwrap();

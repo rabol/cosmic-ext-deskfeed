@@ -14,11 +14,12 @@ Install the current build first (`just install`, or the package).
 
 - **To do:** can run on the owner's setup (an AVD account as a normal user, the Windows machine win-100, two monitors) and hasn't passed yet.
 - **Passed (date):** the owner ran it and it behaved as expected.
+- **Automated (date):** `just session-checks` covers it (real FreeRDP windows in a nested COSMIC session, against the local test server); the file says what isn't checked. In [automated/](automated/).
 - **Completed but not tested:** built and covered by automated tests as far as they reach, but the real check needs something the owner doesn't have: AVD administrator rights, administrator changes on Windows, extra hardware, or a desktop setup other than the owner's (3b and 3c need a keyring with an unlock prompt). Not counted as open. The file says what was checked and what wasn't; [compatibility.md](../compatibility.md) lists it as "not tested".
 
 When a test passes, set its status to "Passed (date)" in its file and here, and move the file to [passed/](passed/). Those stay as the list to run again after a COSMIC, FreeRDP or Deskfeed update; a later run goes in the file's notes. When one fails, note what happened in its file: it's a bug. Expectations must match the owner's setup: an unknown administrator policy is a step ("if the row says …, stop"), not an expected result.
 
-## To do (26)
+## To do (24)
 
 | # | Test | Area | Status |
 |---|---|---|---|
@@ -30,7 +31,6 @@ When a test passes, set its status to "Passed (date)" in its file and here, and 
 | 4d | [The sign-in helper after it stopped polling](04d-sign-in-helper-no-polling.md) | Sign-in and accounts | To do |
 | 4e | [The offline list while a sign-in has ended](04e-offline-list-sign-in-ended.md) | Sign-in and accounts | To do |
 | 4f | [Signed-out accounts stay listed](04f-signed-out-accounts-stay.md) | Sign-in and accounts | To do |
-| 6 | [Keep the screen on](06-keep-screen-on.md) | Desktop sessions | To do |
 | 7 | [Reconnect after a lost connection (AVD)](07-reconnect-avd.md) | Desktop sessions | To do |
 | 8 | [Display scaling](08-display-scaling.md) | How things look | To do |
 | 10 | [Favorites and "Updated"](10-favorites-and-updated.md) | How things look | To do |
@@ -43,11 +43,19 @@ When a test passes, set its status to "Passed (date)" in its file and here, and 
 | 20 | [Remove while connected](20-remove-while-connected.md) | Plain RDP connections | To do |
 | 21 | [Reconnect (plain RDP)](21-reconnect-rdp.md) | Plain RDP connections | To do |
 | 22 | [Tray and favorites (plain RDP)](22-tray-and-favorites-rdp.md) | Plain RDP connections | To do |
-| 23 | [Window size, color depth, network type](23-window-size-depth-network.md) | Desktop sessions | To do |
 | 24 | [Shared folder](24-shared-folder.md) | Desktop sessions | To do |
-| 27 | [No flash on a new workspace](27-new-workspace-no-flash.md) | Desktop sessions | To do |
+| 27 | [New workspace on the second monitor](27-new-workspace-second-monitor.md) | Desktop sessions | To do |
 | 33 | [Use all monitors, and Span as one screen](33-all-monitors-and-span.md) | Desktop sessions | To do |
 | 34 | [After the app ID change](34-new-app-id.md) | Background and tray | To do |
+
+## Automated
+
+Covered by `just session-checks` (CONTRIBUTING.md); run it after a COSMIC, FreeRDP or Deskfeed update.
+
+| # | Test | Area | Status |
+|---|---|---|---|
+| 6 | [Keep the screen on](automated/06-keep-screen-on.md) | Desktop sessions | Automated (2026-10-27) |
+| 23 | [Window size, color depth, network type](automated/23-window-size-depth-network.md) | Desktop sessions | Automated (2026-10-27) |
 
 ## Completed but not tested
 

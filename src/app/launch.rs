@@ -112,6 +112,11 @@ impl AppModel {
             deadline,
             stop: false,
         });
+        // "Open on a new workspace": FreeRDP starts once the switch to the
+        // empty workspace is done, so its window opens there
+        // (`workspace::move_to_new_workspace`).
+        let (switched, gate) = std::sync::mpsc::channel::<()>();
+        let gate = settings.new_workspace.then_some(gate);
         // Starting FreeRDP writes files and hands over the arguments: not on
         // the UI thread. Its events follow once it has started.
         let (tx, rx) = mpsc::unbounded();
@@ -120,6 +125,10 @@ impl AppModel {
             cosmic::task::future(async move {
                 let (result, folder_missing) = off_ui(
                     move || {
+                        if let Some(gate) = gate {
+                            // Done, given up (sender dropped) or too slow.
+                            let _ = gate.recv_timeout(crate::workspace::SWITCH_GATE);
+                        }
                         let mut spec = spec;
                         spec.settings.scale = crate::display::resolve_percent(spec.settings.scale);
                         // A folder that isn't there (deleted, a disk not
@@ -172,7 +181,7 @@ impl AppModel {
         if !settings.new_workspace {
             return session;
         }
-        Task::batch([session, self.mover(key, title, &settings)])
+        Task::batch([session, self.mover(key, title, &settings, switched)])
     }
 
     /// Where FreeRDP connects, as whom, and its window's title: a saved
@@ -251,6 +260,7 @@ impl AppModel {
         key: &str,
         title: String,
         settings: &crate::settings::Effective,
+        switched: std::sync::mpsc::Sender<()>,
     ) -> Task<cosmic::Action<Message>> {
         let stop = Arc::new(AtomicBool::new(false));
         self.desks.at(key).mover = Some(stop.clone());
@@ -267,6 +277,9 @@ impl AppModel {
                         &title,
                         wait,
                         &stop,
+                        move || {
+                            let _ = switched.send(());
+                        },
                     )
                     .map_err(|e| e.to_string())
                 },

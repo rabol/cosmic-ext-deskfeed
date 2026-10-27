@@ -75,6 +75,7 @@ Levels: **A** = App (View → Settings), **Ac** = Account, **C** = Connection (d
 | No FreeRDP action script (`/action-script:` to a missing file) | `sessions/launcher.rs` `build_args` | Spec §5: the app sets the session's keys, not `~/.config/freerdp/action.sh` |
 | Keep-screen-on check every 1 s | `workspace.rs` `WATCH_POLL` | Internal timing; a blank or lock comes after minutes |
 | Workspace move: poll 200 ms, wait 3 s for a new workspace | `workspace.rs` | Internal timing |
+| Workspace move: wait up to 500 ms for COSMIC's window list (looks every 20 ms); FreeRDP starts after the switch, at most 2 s later | `workspace.rs` `SETTLE_WAIT`, `SWITCH_GATE` | Internal timing; COSMIC 1.11 sends the list 65–130 ms after connecting |
 | Refresh check every 5 min (and after resume) | `app/mod.rs` `REFRESH_CHECK` | Internal; the refresh interval is a setting |
 | Log line 2 000 chars; redaction lists | `log.rs` | Internal; privacy |
 | FreeRDP log level `info` | `sessions/launcher.rs` `build_args` | Security: at `debug` FreeRDP logs every gateway HTTP header, including `Authorization: Bearer` (`libfreerdp/core/gateway/http.c`), and hex dumps of sign-in tickets (`nla.c`, `tsg.c`), which the log's redaction can't reliably catch (spec §12). View → Diagnostics is the place for more detail |

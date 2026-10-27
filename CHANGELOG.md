@@ -10,6 +10,7 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ### Fixed
 
+- "Open on a new workspace": FreeRDP now starts once COSMIC has switched to the empty workspace (at most 2 seconds later). Before, a machine that answers quickly could show its window on the old workspace for a moment.
 - "Open on a new workspace" works again with COSMIC 1.11: it now sends its window list a moment after Deskfeed asks, so every workspace looked empty and the desktop opened on the one in use. Deskfeed now waits for the list (up to half a second).
 - "Open on a new workspace" now also switches to that workspace; before, COSMIC could leave you on the old one with the desktop moved away (ADR 0011 addendum).
 - "Open on a new workspace" no longer shows the desktop's window on your current workspace first: Deskfeed switches to the empty workspace as the connection starts, and the window (and Microsoft's sign-in page) open there. If nothing opens, it switches back (ADR 0011, second addendum).

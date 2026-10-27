@@ -922,7 +922,50 @@ fn stopping_ends_the_whole_process_group() {
 
 /// The app's own launch with the real FreeRDP against a test host
 /// (`Target::Direct`), with `adjust` applied to the arguments.
-fn start_real(
+/// The two arguments research/rdp-test-server can't take: TLS instead of
+/// NLA, and (with `ignore_cert`) its self-signed certificate ignored.
+pub(super) fn for_test_server(ignore_cert: bool) -> impl FnOnce(Vec<String>) -> Vec<String> {
+    move |args| {
+        args.into_iter()
+            .map(|a| {
+                if a == "/sec:nla" {
+                    "/sec:tls".to_owned()
+                } else {
+                    a
+                }
+            })
+            .chain(ignore_cert.then(|| "/cert:ignore".to_owned()))
+            .collect()
+    }
+}
+
+/// A desktop on research/rdp-test-server at `socket` (its user and
+/// password are both "test"), with `title` and `settings`.
+pub(super) fn test_server_spec(
+    socket: &str,
+    title: &str,
+    settings: crate::settings::Effective,
+) -> LaunchSpec {
+    LaunchSpec {
+        connection: ConnectionFile::local_test(socket),
+        username: Some("test".into()),
+        password: Some(Secret::new("test".into())),
+        logon: LogonSetting::EmptyDomain,
+        target: Target::Direct {
+            restricted_admin: false,
+        },
+        pinned_certificate: None,
+        settings,
+        shared_folder: None,
+        window_title: title.into(),
+        app_id: TEST_APP_ID.into(),
+    }
+}
+
+/// The app ID the test sessions' windows get.
+pub(super) const TEST_APP_ID: &str = "dev.rabol.DeskfeedTest";
+
+pub(super) fn start_real(
     s: &LaunchSpec,
     dir: &Path,
     adjust: impl FnOnce(Vec<String>) -> Vec<String>,
@@ -1125,23 +1168,11 @@ fn local_test_server_session() {
             .unwrap_or_else(|_| "Deskfeed local test \u{2013} t\u{e9}st".into()),
         app_id: "dev.rabol.DeskfeedTest".into(),
     };
-    // The two arguments the test server can't take: TLS instead of
-    // NLA; and without a pin its self-signed certificate is ignored,
-    // unless `DESKFEED_TEST_CHECK_CERT=1`.
+    // Without a pin the test server's self-signed certificate is
+    // ignored, unless `DESKFEED_TEST_CHECK_CERT=1`.
     let ignore_cert =
         s.pinned_certificate.is_none() && std::env::var("DESKFEED_TEST_CHECK_CERT").is_err();
-    let (session, rx) = start_real(&s, dir, |args| {
-        args.into_iter()
-            .map(|a| {
-                if a == "/sec:nla" {
-                    "/sec:tls".to_owned()
-                } else {
-                    a
-                }
-            })
-            .chain(ignore_cert.then(|| "/cert:ignore".to_owned()))
-            .collect()
-    });
+    let (session, rx) = start_real(&s, dir, for_test_server(ignore_cert));
     if std::env::var("DESKFEED_TEST_CHECK_CERT").is_ok() {
         // Expect the refusal, ended by the launcher at once.
         let end = expect_end(&rx, session);

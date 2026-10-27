@@ -72,7 +72,7 @@ impl Drop for Stop {
     }
 }
 
-fn run(
+pub(crate) fn run(
     app_id: &str,
     titles: &[String],
     alive: &AtomicBool,

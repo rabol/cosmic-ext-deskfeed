@@ -32,6 +32,8 @@ use crate::auth::token::Secret;
 use crate::service::http::BearerToken;
 
 mod args;
+#[cfg(test)]
+mod nested;
 mod output;
 mod process;
 #[cfg(test)]

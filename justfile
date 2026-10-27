@@ -72,6 +72,13 @@ ci:
     just test
     cargo deny --locked check
 
+# Real FreeRDP windows in a nested COSMIC session against the local test
+# server (scripts/session-checks.sh): the automated part of the manual
+# tests. Needs a COSMIC session, xfreerdp3 and gcc.
+# Runs the session checks (all, or the ones named)
+session-checks *names:
+    scripts/session-checks.sh {{names}}
+
 # Developer-only: needs rustup's nightly toolchain and cargo-fuzz
 # (CONTRIBUTING.md, ADR 0028). New inputs go to
 # fuzz/target/corpus-<target>.
