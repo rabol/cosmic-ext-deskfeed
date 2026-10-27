@@ -21,3 +21,7 @@
 - The log (View → Open log folder) says "open on a new workspace: the window opened there".
 - When nothing opens: COSMIC switches back to the workspace you started from.
 - Two monitors: the switch and the desktop happen on the monitor where Deskfeed's window was focused; the other monitor keeps its workspace.
+
+## Notes
+
+2026-10-27 (COSMIC 1.11, after the window-list fix `b959664`): no flash; the window didn't show on the old workspace first. Still to check: steps 4 and 5 (switching back when nothing opens, and the second monitor), and step 3 if it wasn't done.
