@@ -24,4 +24,4 @@
 
 ## Notes
 
-2026-10-27 (COSMIC 1.11, after the window-list fix `b959664`): no flash; the window didn't show on the old workspace first. Still to check: steps 4 and 5 (switching back when nothing opens, and the second monitor), and step 3 if it wasn't done.
+2026-10-27 (COSMIC 1.11, after the window-list fix `b959664`): steps 2 and 3 passed: no flash with the AVD desktop or the saved win-100 connection. Still to check: steps 4 and 5 (switching back when nothing opens, and the second monitor).
