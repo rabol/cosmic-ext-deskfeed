@@ -3,7 +3,7 @@
 //! Checks with real FreeRDP windows in a nested COSMIC session, against
 //! research/rdp-test-server: `just session-checks` (scripts/session-checks.sh)
 //! starts both and runs each check by name. They took over the parts of
-//! manual tests 6, 23, 26 and 27 that don't need Microsoft, Windows or a
+//! manual tests 6, 21, 23, 26 and 27 that don't need Microsoft, Windows or a
 //! second monitor (docs/manualtest/README.md).
 //!
 //! They switch workspaces and open windows, so they refuse to run outside
@@ -42,8 +42,7 @@ fn nested() -> (String, PathBuf) {
 /// A connected session; ended when dropped.
 struct Running {
     session: Session,
-    /// Kept so the launcher can still send; not read after connecting.
-    _rx: std::sync::mpsc::Receiver<SessionEvent>,
+    rx: std::sync::mpsc::Receiver<SessionEvent>,
     _dir: tempfile::TempDir,
 }
 
@@ -57,9 +56,14 @@ impl Drop for Running {
 /// connected.
 fn connect(title: &str, settings: Effective) -> Running {
     let (socket, _) = nested();
+    connect_to(&socket, title, settings)
+}
+
+/// [`connect`] to the test server at `socket`.
+fn connect_to(socket: &str, title: &str, settings: Effective) -> Running {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("run")).unwrap();
-    let spec = test_server_spec(&socket, title, settings);
+    let spec = test_server_spec(socket, title, settings);
     let (session, rx) = start_real(&spec, dir.path(), for_test_server(true));
     let until = Instant::now() + CONNECT;
     loop {
@@ -72,7 +76,7 @@ fn connect(title: &str, settings: Effective) -> Running {
     }
     Running {
         session,
-        _rx: rx,
+        rx,
         _dir: dir,
     }
 }
@@ -244,6 +248,56 @@ fn nested_window_size_depth_network() {
     assert!(rest.starts_with("16 bpp, "), "{asked}");
     // MS-RDPBCGR `CONNECTION_TYPE_LAN`.
     assert!(rest.contains("connection type 6,"), "{asked}");
+}
+
+/// Test 21: when the machine goes away mid-session, FreeRDP's end is read
+/// as a lost connection, which is what the app reconnects after
+/// (`app/decide.rs` `reconnects`). Uses a test server of its own, stopped
+/// here, so the others' server keeps running.
+#[test]
+#[ignore = "inside the nested COSMIC session: just session-checks"]
+fn nested_lost_connection_is_recognised() {
+    nested();
+    let var = |name: &str| std::env::var(name).unwrap_or_else(|_| panic!("{name}"));
+    let port = 33898;
+    let socket = format!("/tmp/tfreerdp-server.{port}");
+    let _ = std::fs::remove_file(&socket);
+    let mut server = std::process::Command::new(var("DESKFEED_TEST_SERVER_BIN"))
+        .current_dir(var("DESKFEED_TEST_SERVER_DIR"))
+        .args([
+            "--local-only",
+            &format!("--port={port}"),
+            "--cert=test.crt",
+            "--key=test.key",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let until = Instant::now() + Duration::from_secs(5);
+    while !std::path::Path::new(&socket).exists() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let running = connect_to(&socket, "Lost connection", DEFAULTS);
+    server.kill().unwrap();
+    let _ = server.wait();
+    let ended = loop {
+        match running.rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(SessionEvent::Stage(_) | SessionEvent::Connected) => {}
+            other => break other,
+        }
+    };
+    println!("{ended:?}");
+    assert!(
+        matches!(
+            ended,
+            Ok(SessionEvent::Ended {
+                end: super::SessionEnd::ConnectionLost,
+                ..
+            })
+        ),
+        "{ended:?}"
+    );
 }
 
 /// The `org.freedesktop.ScreenSaver` cosmic-idle serves, on the nested

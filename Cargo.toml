@@ -81,8 +81,8 @@ rev = "e1f2cd2e52226aa50d59bb2cd6d43ffe290106ed"
 features = [
     # About widget for the app
     "about",
-    # Not "single-instance": its D-Bus path breaks on the "-" in the app ID
-    # and the app exits at start; src/single.rs does it instead.
+    # Not "single-instance": src/single.rs does it (ADR 0017). It was
+    # written when the app ID had a "-", which libcosmic's couldn't serve.
     # GPU-accelerated rendering
     "wgpu",
     # xdg portal dialogs on Linux

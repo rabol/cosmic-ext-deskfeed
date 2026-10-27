@@ -6,17 +6,20 @@
 # test server (research/rdp-test-server). `just session-checks [name...]`.
 #
 # The nested session is kept apart from yours: its own settings, state,
-# data and cache folders (cosmic-comp writes its outputs and some settings
-# there), and its own D-Bus session (it claims org.freedesktop.a11y.Manager,
-# and the keep-awake check serves org.freedesktop.ScreenSaver). Nested, it
-# leaves systemd's and D-Bus's environment alone: cosmic-comp updates them
-# only on real hardware (`src/lib.rs` `notify_ready`, at 8cb1802).
+# data, cache and runtime folders (cosmic-comp writes its outputs and some
+# settings there), and its own D-Bus session that can't start any service
+# (cosmic-comp claims org.freedesktop.a11y.Manager, and the keep-awake check
+# serves org.freedesktop.ScreenSaver; the default session setup would start
+# portals, the keyring daemon and gvfs, some with fixed paths in your
+# runtime folder). Nested, cosmic-comp leaves systemd's and D-Bus's
+# environment alone: it updates them only on real hardware (`src/lib.rs`
+# `notify_ready`, at 8cb1802).
 set -eu
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
-checks=${*:-"nested_new_workspace_without_flash nested_switch_back_when_nothing_opens nested_full_screen_follows_the_setting nested_window_size_depth_network nested_keep_awake"}
+checks=${*:-"nested_new_workspace_without_flash nested_switch_back_when_nothing_opens nested_full_screen_follows_the_setting nested_window_size_depth_network nested_keep_awake nested_lost_connection_is_recognised"}
 
 for tool in cosmic-comp dbus-run-session xfreerdp3 winpr-makecert3 gcc pkg-config; do
     command -v "$tool" >/dev/null || { echo "missing: $tool" >&2; exit 2; }
@@ -47,7 +50,24 @@ for line in sys.stdin:
 [ -x "$bin" ] || { echo "the test build failed: cargo test --release --no-run" >&2; exit 2; }
 
 tmp=$(mktemp -d /tmp/deskfeed-session-checks.XXXXXX)
-mkdir -p "$tmp/config" "$tmp/state" "$tmp/data" "$tmp/cache" "$tmp/server"
+mkdir -p "$tmp/config" "$tmp/state" "$tmp/data" "$tmp/cache" "$tmp/server" "$tmp/run" "$tmp/services"
+chmod 700 "$tmp/run"
+cat >"$tmp/bus.conf" <<EOF
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <keep_umask/>
+  <listen>unix:tmpdir=/tmp</listen>
+  <auth>EXTERNAL</auth>
+  <servicedir>$tmp/services</servicedir>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+EOF
 cp research/rdp-test-server/test_icon.bmp "$tmp/server/"
 (cd "$tmp/server" && winpr-makecert3 -rdp -silent -n test -path . >/dev/null)
 # A port of its own, so a test server started by hand can keep running.
@@ -65,6 +85,7 @@ failed=0
 for check in $checks; do
     if DESKFEED_NESTED=1 DESKFEED_TEST_SERVER=/tmp/tfreerdp-server.$port \
         DESKFEED_TEST_SERVER_LOG="$tmp/server.log" \
+        DESKFEED_TEST_SERVER_BIN="$root/$server" DESKFEED_TEST_SERVER_DIR="$tmp/server" \
         "$bin" --ignored --exact --nocapture --test-threads=1 \
         "sessions::launcher::nested::\$check" >"$tmp/\$check.log" 2>&1 &&
         grep -q 'test result: ok. 1 passed' "$tmp/\$check.log"; then
@@ -81,10 +102,15 @@ chmod +x "$tmp/inner.sh"
 
 echo "running in a nested COSMIC session (a window opens on your desktop)"
 status=0
-env -u COSMIC_SESSION_SOCK \
+# The parent compositor by full path, as the runtime folder changes.
+case $WAYLAND_DISPLAY in
+/*) parent=$WAYLAND_DISPLAY ;;
+*) parent=${XDG_RUNTIME_DIR:?}/$WAYLAND_DISPLAY ;;
+esac
+env -u COSMIC_SESSION_SOCK WAYLAND_DISPLAY="$parent" XDG_RUNTIME_DIR="$tmp/run" \
     XDG_CONFIG_HOME="$tmp/config" XDG_STATE_HOME="$tmp/state" \
     XDG_DATA_HOME="$tmp/data" XDG_CACHE_HOME="$tmp/cache" \
-    timeout 600 dbus-run-session -- cosmic-comp "$tmp/inner.sh" \
+    timeout 600 dbus-run-session --config-file="$tmp/bus.conf" -- cosmic-comp "$tmp/inner.sh" \
     >"$tmp/cosmic-comp.log" 2>&1 || status=$?
 
 echo
