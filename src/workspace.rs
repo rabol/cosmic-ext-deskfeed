@@ -54,6 +54,11 @@ const POLL: Duration = Duration::from_millis(200);
 const WATCH_POLL: Duration = Duration::from_secs(1);
 /// How long to wait for COSMIC to create a requested workspace.
 const CREATE_WAIT: Duration = Duration::from_secs(3);
+/// How long [`settle`] waits for the window list after connecting. Measured
+/// arrival: 65–130 ms; with no windows at all the whole time is used.
+const SETTLE_WAIT: Duration = Duration::from_millis(500);
+/// How often [`settle`] looks again.
+const SETTLE_POLL: Duration = Duration::from_millis(20);
 
 struct State {
     registry: RegistryState,
@@ -200,6 +205,15 @@ pub fn move_to_new_workspace(
     if !state.can_move {
         return Err(MoveError::Unsupported("move capability"));
     }
+    // Which workspaces are empty, and which screen is in use, come from
+    // the window list.
+    let started = Instant::now();
+    settle(&mut queue, &mut state)?;
+    crate::app_log!(
+        "open on a new workspace: {} windows known after {} ms",
+        state.info.toplevels().count(),
+        started.elapsed().as_millis()
+    );
 
     // Not fatal: without it the window is moved once it is there.
     let switched = match switch_first(&mut queue, &mut state) {
@@ -264,6 +278,63 @@ pub fn move_to_new_workspace(
         .manager
         .move_to_ext_workspace(&toplevel, &target, &output);
     show_moved(&mut queue, &mut state, &toplevel, &target, app_id, title).map(|()| Placed::Moved)
+}
+
+/// Reads from COSMIC until its window list has arrived.
+///
+/// cosmic-comp 1.11 (8cb1802, installed 2026-10-27) sends the window list
+/// 65–130 ms after connecting, not in reply to the first round trips;
+/// 1.10 (41497b4) sent it straight away. A look before it arrives sees no
+/// windows, so every workspace seemed empty and the one in use was chosen:
+/// no switch, and the desktop opened where the user was (owner,
+/// 2026-10-27; measured on the live session with a read-only probe).
+///
+/// No event says the list is complete, so it is taken as complete when
+/// [`settled`] says so. With no windows at all (started from the tray with
+/// nothing open) that never happens, and the empty list is used after
+/// [`SETTLE_WAIT`].
+fn settle(
+    queue: &mut cctk::wayland_client::EventQueue<State>,
+    state: &mut State,
+) -> Result<(), MoveError> {
+    let until = Instant::now() + SETTLE_WAIT;
+    let mut last = None;
+    loop {
+        queue.roundtrip(state).map_err(no_wayland)?;
+        let now: Vec<Seen> = state
+            .info
+            .toplevels()
+            .map(|t| Seen {
+                app_id: t.app_id.clone(),
+                title: t.title.clone(),
+                workspaces: t.workspace.len(),
+                managed: t.cosmic_toplevel.is_some(),
+            })
+            .collect();
+        if settled(last.as_deref(), &now) || Instant::now() > until {
+            return Ok(());
+        }
+        last = Some(now);
+        std::thread::sleep(SETTLE_POLL);
+    }
+}
+
+/// A window as [`settled`] sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Seen {
+    app_id: String,
+    title: String,
+    /// How many workspaces it is on; 0 until COSMIC has said.
+    workspaces: usize,
+    /// COSMIC's handle for it has arrived.
+    managed: bool,
+}
+
+/// The window list is complete: it has windows, each with its workspace and
+/// COSMIC's handle, and it didn't change since the previous look (the
+/// windows arrive together, but a late one would change it).
+fn settled(previous: Option<&[Seen]>, now: &[Seen]) -> bool {
+    !now.is_empty() && now.iter().all(|w| w.workspaces > 0 && w.managed) && previous == Some(now)
 }
 
 /// The empty workspace the window should open on, shown before it opens.
@@ -740,7 +811,52 @@ cctk::delegate_workspace!(State);
 
 #[cfg(test)]
 mod tests {
-    use super::{Candidate, pick_empty};
+    use super::{Candidate, Seen, pick_empty, settled};
+
+    fn seen(title: &str, workspaces: usize, managed: bool) -> Seen {
+        Seen {
+            app_id: "app".into(),
+            title: title.into(),
+            workspaces,
+            managed,
+        }
+    }
+
+    #[test]
+    fn no_windows_is_never_settled() {
+        // Either the list hasn't arrived or there are none: only the time
+        // limit tells, so it is waited out.
+        assert!(!settled(None, &[]));
+        assert!(!settled(Some(&[]), &[]));
+    }
+
+    #[test]
+    fn the_first_look_is_not_enough() {
+        assert!(!settled(None, &[seen("a", 1, true)]));
+    }
+
+    #[test]
+    fn the_same_complete_list_twice_is_settled() {
+        let list = vec![seen("a", 1, true), seen("b", 2, true)];
+        assert!(settled(Some(&list), &list));
+    }
+
+    #[test]
+    fn a_window_still_without_workspace_or_handle_waits() {
+        let missing_workspace = vec![seen("a", 1, true), seen("b", 0, true)];
+        assert!(!settled(Some(&missing_workspace), &missing_workspace));
+        let missing_handle = vec![seen("a", 1, false)];
+        assert!(!settled(Some(&missing_handle), &missing_handle));
+    }
+
+    #[test]
+    fn a_list_that_still_changes_waits() {
+        let before = vec![seen("a", 1, true)];
+        let after = vec![seen("a", 1, true), seen("b", 1, true)];
+        assert!(!settled(Some(&before), &after));
+        // So does a window's workspaces changing.
+        assert!(!settled(Some(&[seen("a", 1, true)]), &[seen("a", 2, true)]));
+    }
 
     fn ws(handle: u32, active: bool, empty: bool, position: u32) -> Candidate<u32> {
         Candidate {
@@ -777,6 +893,41 @@ mod tests {
         let all = vec![ws(1, true, false, 0), ws(2, false, false, 1)];
         assert_eq!(pick_empty(all), None);
         assert_eq!(pick_empty(Vec::<Candidate<u32>>::new()), None);
+    }
+
+    /// Prints which workspace "Open on a new workspace" would choose on the
+    /// running session, without switching: `cargo test --release
+    /// choose_on_the_real_session -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "reads the running COSMIC session's windows and workspaces"]
+    fn choose_on_the_real_session() {
+        use super::*;
+        let (mut queue, mut state) = connect().unwrap();
+        for _ in 0..2 {
+            queue.roundtrip(&mut state).unwrap();
+        }
+        let started = Instant::now();
+        settle(&mut queue, &mut state).unwrap();
+        println!(
+            "{} windows after {} ms",
+            state.info.toplevels().count(),
+            started.elapsed().as_millis()
+        );
+        let group = current_group(&state).expect("a workspace group");
+        let name = |h: &ext_workspace_handle_v1::ExtWorkspaceHandleV1| {
+            state
+                .workspaces
+                .workspaces()
+                .find(|w| w.handle == *h)
+                .map(|w| w.name.clone())
+        };
+        let active = active_in(&state, &group);
+        let chosen = empty_workspace(&state, &group);
+        println!(
+            "in use: {:?}, chosen: {:?}",
+            active.as_ref().and_then(name),
+            chosen.as_ref().and_then(name)
+        );
     }
 
     /// Moves a real window: `MOVE_APP_ID=… MOVE_TITLE=… cargo test --release
