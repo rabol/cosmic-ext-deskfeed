@@ -20,3 +20,8 @@ override_dh_auto_install:
 # vendor/ is part of the source; only the build output goes.
 override_dh_auto_clean:
 	rm -rf target
+
+# dh_clean deletes *.orig files, which would take the vendored crates'
+# Cargo.toml.orig and fail cargo's checksum check (release run, 2026-10-27).
+override_dh_clean:
+	dh_clean -XCargo.toml.orig
