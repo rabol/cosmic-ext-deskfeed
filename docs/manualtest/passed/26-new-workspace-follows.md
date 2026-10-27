@@ -4,7 +4,7 @@
 - **Area:** Desktop sessions
 - **Why it's manual:** Needs COSMIC's real workspaces.
 - **Needs:** Your AVD account (as a normal user) and a desktop to connect to. And a saved connection.
-- **Background:** [ADR 0011](../adr/0011-connection-settings-and-new-workspace.md)
+- **Background:** [ADR 0011](../../adr/0011-connection-settings-and-new-workspace.md)
 
 ## Steps
 

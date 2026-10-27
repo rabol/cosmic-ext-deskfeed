@@ -4,7 +4,7 @@
 - **Area:** Desktop sessions
 - **Why it's manual:** Needs the real keyboard, COSMIC and Windows.
 - **Needs:** Your AVD account (as a normal user) and a desktop to connect to. Or win-100.
-- **Background:** [ADR 0018](../adr/0018-system-shortcuts-through-xwayland-grab.md)
+- **Background:** [ADR 0018](../../adr/0018-system-shortcuts-through-xwayland-grab.md)
 
 ## Steps
 

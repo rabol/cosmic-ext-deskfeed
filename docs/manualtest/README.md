@@ -16,7 +16,7 @@ Install the current build first (`just install`, or the package).
 - **Passed (date):** the owner ran it and it behaved as expected.
 - **Completed but not tested:** built and covered by automated tests as far as they reach, but the real check needs something the owner doesn't have: AVD administrator rights, administrator changes on Windows, extra hardware, or a desktop setup other than the owner's (3b and 3c need a keyring with an unlock prompt). Not counted as open. The file says what was checked and what wasn't; [compatibility.md](../compatibility.md) lists it as "not tested".
 
-When a test passes, set its status to "Passed (date)" in its file and here. When one fails, note what happened in its file: it's a bug. Expectations must match the owner's setup: an unknown administrator policy is a step ("if the row says …, stop"), not an expected result.
+When a test passes, set its status to "Passed (date)" in its file and here, and move the file to [passed/](passed/). Those stay as the list to run again after a COSMIC, FreeRDP or Deskfeed update; a later run goes in the file's notes. When one fails, note what happened in its file: it's a bug. Expectations must match the owner's setup: an unknown administrator policy is a step ("if the row says …, stop"), not an expected result.
 
 ## To do (26)
 
@@ -64,13 +64,13 @@ Test 24 (shared folder) is To do on win-100; its AVD half is completed but not t
 
 | # | Test | Area | Status |
 |---|---|---|---|
-| 3 | [Connect from the tray with the window closed](03-connect-from-tray.md) | Background and tray | Passed (2026-10-21) |
-| 4b | [The tray on ksni](04b-tray-on-ksni.md) | Background and tray | Passed (2026-10-20) |
-| 5 | [System shortcuts](05-system-shortcuts.md) | Desktop sessions | Passed (2026-10-27) |
-| 17 | [Plain RDP connection](17-plain-rdp-connection.md) | Plain RDP connections | Passed (2026-10-21) |
-| 26 | [Open on a new workspace follows the window](26-new-workspace-follows.md) | Desktop sessions | Passed (2026-10-21) |
-| 28 | [Clipboard both ways](28-clipboard-both-ways.md) | Desktop sessions | Passed (2026-10-20) |
-| 29 | [Sign in again after reinstalling](29-sign-in-after-reinstall.md) | Sign-in and accounts | Passed (2026-10-20) |
-| 30 | [Every desktop connects after the stricter connection-file checks](30-connection-file-checks.md) | Desktop sessions | Passed (2026-10-20) |
-| 31 | [Tray menu lists the open desktop](31-tray-lists-open-desktop.md) | Background and tray | Passed (2026-10-19) |
-| 32 | ["Keep running in the background" from the quit dialog](32-keep-running-from-quit-dialog.md) | Background and tray | Passed (2026-10-19) |
+| 3 | [Connect from the tray with the window closed](passed/03-connect-from-tray.md) | Background and tray | Passed (2026-10-21) |
+| 4b | [The tray on ksni](passed/04b-tray-on-ksni.md) | Background and tray | Passed (2026-10-20) |
+| 5 | [System shortcuts](passed/05-system-shortcuts.md) | Desktop sessions | Passed (2026-10-27) |
+| 17 | [Plain RDP connection](passed/17-plain-rdp-connection.md) | Plain RDP connections | Passed (2026-10-21) |
+| 26 | [Open on a new workspace follows the window](passed/26-new-workspace-follows.md) | Desktop sessions | Passed (2026-10-21) |
+| 28 | [Clipboard both ways](passed/28-clipboard-both-ways.md) | Desktop sessions | Passed (2026-10-20) |
+| 29 | [Sign in again after reinstalling](passed/29-sign-in-after-reinstall.md) | Sign-in and accounts | Passed (2026-10-20) |
+| 30 | [Every desktop connects after the stricter connection-file checks](passed/30-connection-file-checks.md) | Desktop sessions | Passed (2026-10-20) |
+| 31 | [Tray menu lists the open desktop](passed/31-tray-lists-open-desktop.md) | Background and tray | Passed (2026-10-19) |
+| 32 | ["Keep running in the background" from the quit dialog](passed/32-keep-running-from-quit-dialog.md) | Background and tray | Passed (2026-10-19) |

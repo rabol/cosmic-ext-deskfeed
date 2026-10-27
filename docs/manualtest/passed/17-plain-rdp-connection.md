@@ -4,7 +4,7 @@
 - **Area:** Plain RDP connections
 - **Why it's manual:** Needs a real Windows machine.
 - **Needs:** Your Windows machine (win-100) with Remote Desktop on, and a saved connection to it in Deskfeed.
-- **Background:** [ADR 0029](../adr/0029-plain-rdp-connections.md)
+- **Background:** [ADR 0029](../../adr/0029-plain-rdp-connections.md)
 
 ## Steps
 

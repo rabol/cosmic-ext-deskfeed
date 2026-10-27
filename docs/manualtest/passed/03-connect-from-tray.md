@@ -4,7 +4,7 @@
 - **Area:** Background and tray
 - **Why it's manual:** Needs COSMIC's real panel tray and Microsoft's sign-in page.
 - **Needs:** Your AVD account (as a normal user) and a desktop to connect to.
-- **Background:** [ADR 0017](../adr/0017-background-operation-and-tray.md)
+- **Background:** [ADR 0017](../../adr/0017-background-operation-and-tray.md)
 
 ## Steps
 
