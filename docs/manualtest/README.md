@@ -18,7 +18,7 @@ Install the current build first (`just install`, or the package).
 
 When a test passes, set its status to "Passed (date)" in its file and here. When one fails, note what happened in its file: it's a bug. Expectations must match the owner's setup: an unknown administrator policy is a step ("if the row says …, stop"), not an expected result.
 
-## To do (27)
+## To do (26)
 
 | # | Test | Area | Status |
 |---|---|---|---|
@@ -30,7 +30,6 @@ When a test passes, set its status to "Passed (date)" in its file and here. When
 | 4d | [The sign-in helper after it stopped polling](04d-sign-in-helper-no-polling.md) | Sign-in and accounts | To do |
 | 4e | [The offline list while a sign-in has ended](04e-offline-list-sign-in-ended.md) | Sign-in and accounts | To do |
 | 4f | [Signed-out accounts stay listed](04f-signed-out-accounts-stay.md) | Sign-in and accounts | To do |
-| 5 | [System shortcuts](05-system-shortcuts.md) | Desktop sessions | To do |
 | 6 | [Keep the screen on](06-keep-screen-on.md) | Desktop sessions | To do |
 | 7 | [Reconnect after a lost connection (AVD)](07-reconnect-avd.md) | Desktop sessions | To do |
 | 8 | [Display scaling](08-display-scaling.md) | How things look | To do |
@@ -67,6 +66,7 @@ Test 24 (shared folder) is To do on win-100; its AVD half is completed but not t
 |---|---|---|---|
 | 3 | [Connect from the tray with the window closed](03-connect-from-tray.md) | Background and tray | Passed (2026-10-21) |
 | 4b | [The tray on ksni](04b-tray-on-ksni.md) | Background and tray | Passed (2026-10-20) |
+| 5 | [System shortcuts](05-system-shortcuts.md) | Desktop sessions | Passed (2026-10-27) |
 | 17 | [Plain RDP connection](17-plain-rdp-connection.md) | Plain RDP connections | Passed (2026-10-21) |
 | 26 | [Open on a new workspace follows the window](26-new-workspace-follows.md) | Desktop sessions | Passed (2026-10-21) |
 | 28 | [Clipboard both ways](28-clipboard-both-ways.md) | Desktop sessions | Passed (2026-10-20) |

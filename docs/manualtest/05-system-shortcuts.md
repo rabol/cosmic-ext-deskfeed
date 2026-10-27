@@ -1,6 +1,6 @@
 # 5. System shortcuts
 
-- **Status:** To do
+- **Status:** Passed (2026-10-27)
 - **Area:** Desktop sessions
 - **Why it's manual:** Needs the real keyboard, COSMIC and Windows.
 - **Needs:** Your AVD account (as a normal user) and a desktop to connect to. Or win-100.
