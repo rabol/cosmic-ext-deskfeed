@@ -13,7 +13,7 @@ Deskfeed is MIT-licensed ([LICENSE](./LICENSE)). This file lists the software it
 
 ## Rust crates (514)
 
-From `Cargo.lock`, for Linux, generated 2026-10-20. 492 are compiled into `cosmic-ext-deskfeed` or `cosmic-ext-deskfeed-signin`; the ones marked **build only** run while building (build scripts, the desktop-entry generator) and are not part of the programs. License expressions are as each crate declares them; where one says *OR*, either license may be chosen.
+From `Cargo.lock`, for Linux, generated 2026-10-27. 492 are compiled into `cosmic-ext-deskfeed` or `cosmic-ext-deskfeed-signin`; the ones marked **build only** run while building (build scripts, the desktop-entry generator) and are not part of the programs. License expressions are as each crate declares them; where one says *OR*, either license may be chosen.
 
 Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT: 49, MIT/Apache-2.0: 18, Unicode-3.0: 18, Apache-2.0: 15, MIT OR Apache-2.0 OR Zlib: 10, MPL-2.0: 6, ISC: 5, Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT: 5, BSD-3-Clause: 5, Unlicense OR MIT: 4, CC0-1.0: 3, BSD-2-Clause: 3, Zlib OR Apache-2.0 OR MIT: 3, Zlib: 3, Unlicense: 2, Apache-2.0/MIT: 2, MIT OR Zlib OR Apache-2.0: 2, BSD-3-Clause OR Apache-2.0: 2, Apache-2.0 OR ISC OR MIT: 2, Unlicense/MIT: 2, BSD-2-Clause OR Apache-2.0 OR MIT: 2, 0BSD OR MIT OR Apache-2.0: 1, MIT OR LGPL-3.0-or-later: 1, Apache-2.0 AND MIT: 1, Apache-2.0 / MIT: 1, Apache-2.0 AND ISC: 1, Apache-2.0 OR GPL-2.0-only: 1, (MIT OR Apache-2.0) AND Unicode-3.0: 1
 
@@ -35,7 +35,7 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | almost | 0.2.0 | CC0-1.0 |  | https://github.com/thomcc/almost |
 | apply | 0.3.0 | Unlicense ¹ |  | https://github.com/burtonageo/apply |
 | approx | 0.5.1 | Apache-2.0 |  | https://github.com/brendanzab/approx |
-| arc-swap | 1.9.2 | MIT OR Apache-2.0 |  | https://github.com/vorner/arc-swap |
+| arc-swap | 1.9.3 | MIT OR Apache-2.0 |  | https://github.com/vorner/arc-swap |
 | arrayref | 0.3.9 | BSD-2-Clause |  | https://github.com/droundy/arrayref |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 |  | https://github.com/bluss/arrayvec |
 | as-raw-xcb-connection | 1.0.1 | MIT OR Apache-2.0 |  | https://github.com/psychon/as-raw-xcb-connection |
@@ -79,7 +79,7 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | cairo-sys-rs | 0.22.9 | MIT |  | https://github.com/gtk-rs/gtk-rs-core |
 | calloop | 0.14.5 | MIT |  | https://github.com/Smithay/calloop |
 | calloop-wayland-source | 0.4.1 | MIT |  | https://github.com/smithay/calloop-wayland-source |
-| cc | 1.8.0 | MIT OR Apache-2.0 | yes | https://github.com/rust-lang/cc-rs |
+| cc | 1.10.0 | MIT OR Apache-2.0 | yes | https://github.com/rust-lang/cc-rs |
 | cfg-expr | 0.20.10 | MIT OR Apache-2.0 | yes | https://github.com/EmbarkStudios/cfg-expr |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |  | https://github.com/rust-lang/cfg-if |
 | cfg_aliases | 0.2.2 | MIT | yes | https://github.com/katharostech/cfg_aliases |
@@ -100,7 +100,7 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | cosmic-text | 0.19.0 | MIT OR Apache-2.0 |  | https://github.com/pop-os/cosmic-text |
 | cosmic-theme | 1.0.0 | MPL-2.0 ¹ |  |  |
 | cpufeatures | 0.3.1 | MIT OR Apache-2.0 |  | https://github.com/RustCrypto/utils |
-| crc32fast | 1.5.2 | MIT OR Apache-2.0 |  | https://github.com/srijs/rust-crc32fast |
+| crc32fast | 1.5.3 | MIT OR Apache-2.0 |  | https://github.com/srijs/rust-crc32fast |
 | crossbeam-queue | 0.3.14 | MIT OR Apache-2.0 |  | https://github.com/crossbeam-rs/crossbeam |
 | crossbeam-utils | 0.8.23 | MIT OR Apache-2.0 |  | https://github.com/crossbeam-rs/crossbeam |
 | cryoglyph | 0.1.0 | MIT OR Apache-2.0 OR Zlib |  | https://github.com/iced-rs/cryoglyph |
@@ -141,7 +141,7 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |  | https://github.com/image-rs/fdeflate |
 | field-offset | 0.3.6 | MIT OR Apache-2.0 |  | https://github.com/Diggsey/rust-field-offset |
 | find-crate | 0.6.3 | Apache-2.0 OR MIT |  | https://github.com/taiki-e/find-crate |
-| find-msvc-tools | 0.1.14 | MIT OR Apache-2.0 | yes | https://github.com/rust-lang/cc-rs |
+| find-msvc-tools | 0.1.15 | MIT OR Apache-2.0 | yes | https://github.com/rust-lang/cc-rs |
 | flate2 | 1.1.10 | MIT OR Apache-2.0 |  | https://github.com/rust-lang/flate2-rs |
 | float-cmp | 0.10.0 | MIT |  | https://github.com/mikedilger/float-cmp |
 | float-cmp | 0.9.0 | MIT |  | https://github.com/mikedilger/float-cmp |
@@ -227,13 +227,13 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | iced_wgpu | 0.14.0 | MIT |  | https://github.com/iced-rs/iced |
 | iced_widget | 0.14.2 | MIT |  | https://github.com/iced-rs/iced |
 | iced_winit | 0.14.0 | MIT |  | https://github.com/iced-rs/iced |
-| icu_collections | 2.3.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
-| icu_locale_core | 2.3.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
-| icu_normalizer | 2.3.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
-| icu_normalizer_data | 2.3.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
-| icu_properties | 2.3.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
-| icu_properties_data | 2.3.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
-| icu_provider | 2.3.1 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| icu_collections | 2.4.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| icu_locale_core | 2.4.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| icu_normalizer | 2.4.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| icu_normalizer_data | 2.4.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| icu_properties | 2.4.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| icu_properties_data | 2.4.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| icu_provider | 2.4.0 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
 | ident_case | 1.0.1 | MIT/Apache-2.0 |  | https://github.com/TedDriggs/ident_case |
 | idna | 1.1.0 | MIT OR Apache-2.0 |  | https://github.com/servo/rust-url/ |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT |  | https://github.com/hsivonen/idna_adapter |
@@ -273,13 +273,13 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | log | 0.4.34 | MIT OR Apache-2.0 |  | https://github.com/rust-lang/log |
 | lru | 0.16.4 | MIT |  | https://github.com/jeromefroe/lru-rs.git |
 | lyon | 1.0.19 | MIT OR Apache-2.0 |  | https://github.com/nical/lyon |
-| lyon_algorithms | 1.0.21 | MIT OR Apache-2.0 |  | https://github.com/nical/lyon |
-| lyon_geom | 1.0.19 | MIT OR Apache-2.0 |  | https://github.com/nical/lyon |
+| lyon_algorithms | 1.0.22 | MIT OR Apache-2.0 |  | https://github.com/nical/lyon |
+| lyon_geom | 1.0.20 | MIT OR Apache-2.0 |  | https://github.com/nical/lyon |
 | lyon_path | 1.0.19 | MIT OR Apache-2.0 |  | https://github.com/nical/lyon |
-| lyon_tessellation | 1.0.22 | MIT OR Apache-2.0 |  | https://github.com/nical/lyon |
+| lyon_tessellation | 1.0.23 | MIT OR Apache-2.0 |  | https://github.com/nical/lyon |
 | memchr | 2.8.3 | Unlicense OR MIT |  | https://github.com/BurntSushi/memchr |
 | memmap2 | 0.8.0 | MIT OR Apache-2.0 |  | https://github.com/RazrFalcon/memmap2-rs |
-| memmap2 | 0.9.11 | MIT OR Apache-2.0 |  | https://github.com/RazrFalcon/memmap2-rs |
+| memmap2 | 0.9.12 | MIT OR Apache-2.0 |  | https://github.com/RazrFalcon/memmap2-rs |
 | memoffset | 0.9.1 | MIT |  | https://github.com/Gilnaa/memoffset |
 | mime | 0.1.0 | MIT ¹ |  |  |
 | mime | 0.3.17 | MIT OR Apache-2.0 |  | https://github.com/hyperium/mime |
@@ -291,14 +291,14 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | mutate_once | 0.1.2 | BSD-2-Clause |  | https://github.com/kamadak/mutate_once-rs |
 | naga | 28.0.0 | MIT OR Apache-2.0 |  | https://github.com/gfx-rs/wgpu |
 | nom | 8.0.0 | MIT | yes | https://github.com/rust-bakery/nom |
-| notify | 8.2.0 | CC0-1.0 |  | https://github.com/notify-rs/notify.git |
+| notify | 8.2.1 | CC0-1.0 |  | https://github.com/notify-rs/notify.git |
 | notify-types | 2.1.0 | MIT OR Apache-2.0 |  | https://github.com/notify-rs/notify.git |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |  | https://github.com/rust-num/num-traits |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |  | https://github.com/matklad/once_cell |
-| open | 5.4.4 | MIT |  | https://github.com/Byron/open-rs |
-| openssl-probe | 0.2.1 | MIT OR Apache-2.0 |  | https://github.com/rustls/openssl-probe |
+| open | 5.4.5 | MIT |  | https://github.com/Byron/open-rs |
+| openssl-probe | 0.2.2 | MIT OR Apache-2.0 |  | https://github.com/rustls/openssl-probe |
 | option-ext | 0.2.0 | MPL-2.0 |  | https://github.com/soc/option-ext.git |
-| ordered-float | 5.5.0 | MIT |  | https://github.com/reem/rust-ordered-float |
+| ordered-float | 5.5.1 | MIT |  | https://github.com/reem/rust-ordered-float |
 | ordered-stream | 0.2.0 | MIT OR Apache-2.0 |  | https://github.com/danieldg/ordered-stream |
 | ouroboros | 0.18.5 | MIT OR Apache-2.0 |  | https://github.com/someguynamedjosh/ouroboros |
 | ouroboros_macro | 0.18.5 | MIT OR Apache-2.0 |  | https://github.com/someguynamedjosh/ouroboros |
@@ -358,12 +358,12 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |  | https://github.com/rust-lang/rustc-hash |
 | rustc_version | 0.4.1 | MIT OR Apache-2.0 | yes | https://github.com/djc/rustc-version-rs |
 | rustix | 0.38.44 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |  | https://github.com/bytecodealliance/rustix |
-| rustix | 1.1.5 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |  | https://github.com/bytecodealliance/rustix |
+| rustix | 1.1.6 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |  | https://github.com/bytecodealliance/rustix |
 | rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT |  | https://github.com/rustls/rustls |
 | rustls-native-certs | 0.8.5 | Apache-2.0 OR ISC OR MIT |  | https://github.com/rustls/rustls-native-certs |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |  | https://github.com/rustls/pki-types |
 | rustls-platform-verifier | 0.7.1 | MIT OR Apache-2.0 |  | https://github.com/rustls/rustls-platform-verifier |
-| rustls-webpki | 0.103.15 | ISC |  | https://github.com/rustls/webpki |
+| rustls-webpki | 0.103.16 | ISC |  | https://github.com/rustls/webpki |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |  | https://github.com/dtolnay/rustversion |
 | rustybuzz | 0.20.1 | MIT |  | https://github.com/harfbuzz/rustybuzz |
 | same-file | 1.0.6 | Unlicense/MIT |  | https://github.com/BurntSushi/same-file |
@@ -388,10 +388,10 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | skrifa | 0.44.0 | MIT OR Apache-2.0 |  | https://github.com/googlefonts/fontations |
 | slab | 0.4.12 | MIT |  | https://github.com/tokio-rs/slab |
 | slotmap | 1.1.1 | Zlib |  | https://github.com/orlp/slotmap |
-| smallvec | 1.16.3 | MIT OR Apache-2.0 |  | https://github.com/servo/rust-smallvec |
+| smallvec | 1.16.4 | MIT OR Apache-2.0 |  | https://github.com/servo/rust-smallvec |
 | smithay-client-toolkit | 0.20.0 | MIT |  | https://github.com/smithay/client-toolkit |
 | smithay-clipboard | 0.8.0 | MIT |  | https://github.com/smithay/smithay-clipboard |
-| smol_str | 0.3.6 | MIT OR Apache-2.0 |  | https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str |
+| smol_str | 0.3.7 | MIT OR Apache-2.0 |  | https://github.com/rust-lang/rust-analyzer/tree/master/lib/smol_str |
 | socket2 | 0.6.5 | MIT OR Apache-2.0 |  | https://github.com/rust-lang/socket2 |
 | softbuffer | 0.4.1 | MIT OR Apache-2.0 |  | https://github.com/rust-windowing/softbuffer |
 | soup3 | 0.9.0 | MIT |  | https://gitlab.gnome.org/World/Rust/soup3-rs |
@@ -410,7 +410,7 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | synstructure | 0.14.0 | MIT |  | https://github.com/mystor/synstructure |
 | sys-locale | 0.3.2 | MIT OR Apache-2.0 |  | https://github.com/1Password/sys-locale |
 | system-deps | 7.0.8 | MIT OR Apache-2.0 | yes | https://github.com/gdesmott/system-deps |
-| system-deps | 9.0.0 | MIT OR Apache-2.0 | yes | https://github.com/gdesmott/system-deps |
+| system-deps | 9.0.1 | MIT OR Apache-2.0 | yes | https://github.com/gdesmott/system-deps |
 | taffy | 0.9.2 | MIT |  | https://github.com/DioxusLabs/taffy |
 | target-lexicon | 0.13.5 | Apache-2.0 WITH LLVM-exception | yes | https://github.com/bytecodealliance/target-lexicon |
 | tempfile | 3.27.0 | MIT OR Apache-2.0 |  | https://github.com/Stebalien/tempfile |
@@ -423,9 +423,9 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | tiny-skia-path | 0.11.4 | BSD-3-Clause |  | https://github.com/RazrFalcon/tiny-skia/tree/master/path |
 | tiny-skia-path | 0.12.0 | BSD-3-Clause |  | https://github.com/linebender/tiny-skia/tree/master/path |
 | tiny-xlib | 0.2.5 | MIT OR Apache-2.0 OR Zlib |  | https://github.com/rust-windowing/tiny-xlib |
-| tinystr | 0.8.4 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| tinystr | 0.8.5 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
 | tinyvec | 1.13.3 | Zlib OR Apache-2.0 OR MIT |  | https://github.com/Lokathor/tinyvec |
-| tokio | 1.53.3 | MIT |  | https://github.com/tokio-rs/tokio |
+| tokio | 1.54.1 | MIT |  | https://github.com/tokio-rs/tokio |
 | tokio-macros | 2.7.2 | MIT |  | https://github.com/tokio-rs/tokio |
 | tokio-stream | 0.1.19 | MIT |  | https://github.com/tokio-rs/tokio |
 | toml | 0.5.11 | MIT/Apache-2.0 |  | https://github.com/toml-rs/toml |
@@ -455,13 +455,13 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | unicode-vo | 0.1.0 | MIT/Apache-2.0 |  | https://github.com/RazrFalcon/unicode-vo |
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |  | https://github.com/unicode-rs/unicode-width |
 | untrusted | 0.9.0 | ISC |  | https://github.com/briansmith/untrusted |
-| ureq | 3.4.2 | MIT OR Apache-2.0 |  | https://github.com/algesten/ureq |
-| ureq-proto | 0.6.4 | MIT OR Apache-2.0 |  | https://github.com/algesten/ureq-proto |
+| ureq | 3.5.0 | MIT OR Apache-2.0 |  | https://github.com/algesten/ureq |
+| ureq-proto | 0.6.5 | MIT OR Apache-2.0 |  | https://github.com/algesten/ureq-proto |
 | url | 2.5.8 | MIT OR Apache-2.0 |  | https://github.com/servo/rust-url |
 | usvg | 0.45.1 | Apache-2.0 OR MIT |  | https://github.com/linebender/resvg |
 | utf8-zero | 0.8.1 | MIT OR Apache-2.0 |  | https://github.com/algesten/utf8-zero |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT |  | https://github.com/hsivonen/utf8_iter |
-| uuid | 1.28.0 | Apache-2.0 OR MIT |  | https://github.com/uuid-rs/uuid |
+| uuid | 1.29.0 | Apache-2.0 OR MIT |  | https://github.com/uuid-rs/uuid |
 | version-compare | 0.2.1 | MIT | yes | https://gitlab.com/timvisee/version-compare |
 | version_check | 0.9.5 | MIT/Apache-2.0 | yes | https://github.com/SergioBenitez/version_check |
 | walkdir | 2.5.0 | Unlicense/MIT |  | https://github.com/BurntSushi/walkdir |
@@ -509,7 +509,7 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | xmlwriter | 0.1.0 | MIT |  | https://github.com/RazrFalcon/xmlwriter |
 | yansi | 1.0.1 | MIT OR Apache-2.0 |  | https://github.com/SergioBenitez/yansi |
 | yazi | 0.2.1 | Apache-2.0 OR MIT |  | https://github.com/dfrg/yazi |
-| yoke | 0.8.3 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| yoke | 0.8.4 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
 | yoke-derive | 0.8.4 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
 | zbus | 5.19.0 | MIT |  | https://github.com/z-galaxy/zbus/ |
 | zbus-lockstep | 0.5.2 | MIT |  | https://github.com/luukvanderduim/zbus-lockstep |
@@ -525,8 +525,8 @@ Compiled into the programs: MIT OR Apache-2.0: 182, MIT: 142, Apache-2.0 OR MIT:
 | zerofrom-derive | 0.1.8 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
 | zeroize | 1.9.1 | Apache-2.0 OR MIT |  | https://github.com/RustCrypto/utils |
 | zerotrie | 0.2.5 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
-| zerovec | 0.11.8 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
-| zerovec-derive | 0.11.6 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| zerovec | 0.11.9 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
+| zerovec-derive | 0.11.7 | Unicode-3.0 |  | https://github.com/unicode-org/icu4x |
 | zmij | 1.0.23 | MIT |  | https://github.com/dtolnay/zmij |
 | zune-core | 0.4.12 | MIT OR Apache-2.0 OR Zlib |  |  |
 | zune-core | 0.5.3 | MIT OR Apache-2.0 OR Zlib |  | https://github.com/etemesi254/zune-image |
