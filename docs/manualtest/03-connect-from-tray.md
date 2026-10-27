@@ -18,3 +18,7 @@
 - Microsoft's sign-in window appears (your organization asks for a sign-in on every connection).
 - Deskfeed's own window stays closed.
 - The desktop connects, and the tray menu shows it as connected.
+
+## Notes
+
+Passed again on 2026-10-27, with the new app ID (`dev.rabol.deskfeed`) and COSMIC 1.11.
