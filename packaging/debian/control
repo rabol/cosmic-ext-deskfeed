@@ -1,0 +1,34 @@
+Source: cosmic-ext-deskfeed
+Section: net
+Priority: optional
+Maintainer: Steen Rabol <cosmic-ext-avd@rabol.dev>
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo,
+ rustc (>= 1.93),
+ just,
+ pkgconf,
+ libgtk-4-dev (>= 4.10),
+ libwebkitgtk-6.0-dev (>= 2.42),
+ libxkbcommon-dev,
+ libwayland-dev,
+ desktop-file-utils,
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://github.com/rabol/cosmic-ext-deskfeed
+
+Package: cosmic-ext-deskfeed
+Architecture: amd64
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ freerdp-x11 (>= 3.32.2),
+ xdg-utils,
+Recommends:
+ gnome-keyring,
+Description: Your work desktops on COSMIC (unofficial)
+ Deskfeed lists the desktops your organization gives you in Azure Virtual
+ Desktop and Windows 365, and connects to them, or to your own Windows
+ machines, through FreeRDP. Made for the COSMIC desktop.
+ .
+ Unofficial community app; it is not a Microsoft product.

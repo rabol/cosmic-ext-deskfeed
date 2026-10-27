@@ -25,6 +25,14 @@ mod tray;
 mod workspace;
 
 fn main() -> cosmic::iced::Result {
+    // `--check`: the startup dependency check, printed, for packages'
+    // smoke tests and for reports; no window.
+    if std::env::args().skip(1).any(|a| a == deps::CHECK_ARG) {
+        let checks = deps::check_all();
+        print!("{}", deps::report(&checks));
+        std::process::exit(i32::from(!deps::required_ok(&checks)));
+    }
+
     // Get the system's preferred languages.
     let requested_languages = i18n_embed::DesktopLanguageRequester::requested_languages();
 

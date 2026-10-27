@@ -4,7 +4,7 @@ Only open work is listed here. What's done is in [CHANGELOG.md](../CHANGELOG.md)
 
 ## Before the first release
 
-- Tag `v0.1.0`, then fill in the AUR package checksum (review F14, F20).
+- Release 0.2.0 with packages ([ADR 0030](adr/0030-release-packages.md)): `just tag 0.2.0`, push the tag, publish the draft release. The AUR waits until it accepts new accounts again (review F14, F20).
 - AppStream screenshots.
 - The real-tenant checks in [manual tests](manualtest/README.md), including the stability run (spec §8, §13): several hours of use with idle time, audio device changes, a monitor plugged in, network changes, and suspend and resume.
 

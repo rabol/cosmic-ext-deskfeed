@@ -26,18 +26,32 @@ Your work desktops on the COSMIC™ desktop. A native COSMIC app that **works wi
 
 Native packages only; there is no Flatpak ([ADR 0010](./docs/adr/0010-native-only-and-dependency-check.md)). The app checks these at startup and under **View → Dependencies**.
 
-| Dependency | Minimum | Needed for | Arch Linux package |
-|---|---|---|---|
-| COSMIC desktop (cosmic-comp with window management v4) | Epoch 1 | The app itself; "Open on a new workspace" | `cosmic-session` |
-| FreeRDP with the X11 client (`xfreerdp3`), built with `WITH_AAD=ON` | 3.32.2 | Connecting to desktops, Entra sign-in to desktops (runs on COSMIC's XWayland) | `freerdp` |
-| WebKitGTK 6 and GTK 4 | WebKitGTK 2.42, GTK 4.10 | The Microsoft sign-in window. Keep WebKitGTK current: it shows Microsoft's pages | `webkitgtk-6.0`, `gtk4` |
-| A Secret Service (oo7, GNOME Keyring, …) | — | Staying signed in (optional) | `oo7` or `gnome-keyring` |
+| Dependency | Minimum | Needed for | Arch Linux | Fedora | Debian |
+|---|---|---|---|---|---|
+| COSMIC desktop (cosmic-comp with window management v4) | Epoch 1 | The app itself; "Open on a new workspace" | `cosmic-session` | COSMIC | COSMIC |
+| FreeRDP with the X11 client (`xfreerdp3` or `xfreerdp`), built with `WITH_AAD=ON` | 3.32.2 | Connecting to desktops, Entra sign-in to desktops (runs on COSMIC's XWayland) | `freerdp` | `freerdp` | `freerdp-x11` |
+| WebKitGTK 6 and GTK 4 | WebKitGTK 2.42, GTK 4.10 | The Microsoft sign-in window. Keep WebKitGTK current: it shows Microsoft's pages | `webkitgtk-6.0`, `gtk4` | `webkitgtk6.0`, `gtk4` | `libwebkitgtk-6.0-4`, `libgtk-4-1` |
+| A Secret Service (oo7, GNOME Keyring, …) | — | Staying signed in (optional) | `oo7` or `gnome-keyring` | `gnome-keyring` | `gnome-keyring` |
+
+FreeRDP 3.32.2 or newer is in Fedora 43 and newer, Debian testing and unstable, openSUSE Tumbleweed and Arch Linux. Ubuntu (so Pop!_OS) and Debian 13 don't have it yet ([ADR 0030](./docs/adr/0030-release-packages.md)). `cosmic-ext-deskfeed --check` prints what it finds.
 
 To build: Rust 1.93 or newer (the minimum libcosmic declares; developed and tested with Rust 1.99) and [`just`](https://github.com/casey/just). Building the sign-in helper needs the GTK 4 and WebKitGTK 6 development files (on Arch Linux they come with the packages above).
 
 See [Dependencies](#dependencies) for every library the app is built from.
 
 ## Installation
+
+### From a release
+
+Each [release](https://github.com/rabol/cosmic-ext-deskfeed/releases) has packages that pull in their dependencies:
+
+- **Fedora 43 and newer:** `sudo dnf install ./cosmic-ext-deskfeed-<version>-1.fc43.x86_64.rpm`
+- **Debian testing or unstable:** `sudo apt install ./cosmic-ext-deskfeed_<version>-1_amd64.deb`
+- **Arch Linux:** `sudo pacman -U cosmic-ext-deskfeed-<version>-1-x86_64.pkg.tar.zst`
+
+`SHA256SUMS` in the release lists their checksums (`sha256sum -c SHA256SUMS --ignore-missing`). These packages don't update themselves: install the next release's package the same way.
+
+### From source
 
 ```sh
 git clone https://github.com/rabol/cosmic-ext-deskfeed.git
@@ -115,7 +129,9 @@ Dependencies are kept to a minimum on purpose ([ADR 0003](./docs/adr/0003-essent
 
 ### Packaging
 
-Vendor the dependencies and build offline; use `rootdir` and `prefix` to choose where files go:
+Releases are built by [`.github/workflows/release.yml`](./.github/workflows/release.yml) when a `v<version>` tag is pushed ([ADR 0030](./docs/adr/0030-release-packages.md)): a source archive with every crate included, and packages from [`packaging/`](./packaging) (an rpm spec, a `debian/` folder and the Arch PKGBUILD), each installed and checked in a fresh container; then a draft GitHub release. `just tag <version>` sets the version in every file (`scripts/set-version.py`), commits and tags.
+
+To build offline yourself, vendor the dependencies; use `rootdir` and `prefix` to choose where files go:
 
 ```sh
 just vendor

@@ -1,5 +1,7 @@
 # AUR packages
 
+The AUR is closed for new accounts (2026-10-27), so these aren't published yet. Meanwhile the release workflow builds an Arch package from `cosmic-ext-deskfeed/PKGBUILD` for each release ([ADR 0030](../../docs/adr/0030-release-packages.md)); `just tag` sets its `pkgver`.
+
 | Package | Builds | Source |
 |---|---|---|
 | `cosmic-ext-deskfeed` | A tagged release | GitHub release tarball `v$pkgver` |

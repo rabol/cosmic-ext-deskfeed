@@ -18,6 +18,9 @@ use crate::sessions::launcher;
 /// The FreeRDP release whose behaviour the app is built and tested against
 /// (helper protocol, `/args-from`, ARM gateway; ADR 0004).
 pub const MIN_FREERDP: (u32, u32, u32) = (3, 32, 2);
+/// `cosmic-ext-deskfeed --check` prints [`report`] and exits: 0 when every
+/// required dependency is usable.
+pub const CHECK_ARG: &str = "--check";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_OUTPUT: u64 = 256 * 1024;
 
@@ -123,6 +126,41 @@ pub fn check_all() -> Vec<Check> {
             },
         },
     ]
+}
+
+/// One line per check, for `--check`: name, required or optional, status.
+/// English only: it is for package checks and bug reports.
+pub fn report(checks: &[Check]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for c in checks {
+        let status = match &c.status {
+            Status::Ok(what) if what.is_empty() => "ok".to_owned(),
+            Status::Ok(what) => format!("ok ({what})"),
+            Status::Missing => "missing".to_owned(),
+            Status::TooOld(v) => format!(
+                "too old ({v}; needs {}.{}.{})",
+                MIN_FREERDP.0, MIN_FREERDP.1, MIN_FREERDP.2
+            ),
+            Status::Broken(why) => format!("not usable ({why})"),
+        };
+        let kind = if c.dependency.required() {
+            "required"
+        } else {
+            "optional"
+        };
+        let _ = writeln!(out, "{:?} [{kind}]: {status}", c.dependency);
+    }
+    let _ = writeln!(
+        out,
+        "{}",
+        if required_ok(checks) {
+            "all required dependencies are usable"
+        } else {
+            "a required dependency is missing or not usable"
+        }
+    );
+    out
 }
 
 /// True when every required dependency was checked and is usable. A
@@ -236,6 +274,34 @@ fn run(bin: &Path, args: &[&str]) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_report_names_each_check_and_the_verdict() {
+        let all_ok: Vec<Check> = Dependency::ALL
+            .into_iter()
+            .map(|dependency| Check {
+                dependency,
+                status: Status::Ok(String::new()),
+            })
+            .collect();
+        let text = report(&all_ok);
+        assert_eq!(text.lines().count(), Dependency::ALL.len() + 1);
+        assert!(text.contains("FreeRdp [required]: ok\n"));
+        assert!(text.contains("SecretService [optional]: ok\n"));
+        assert!(text.ends_with("all required dependencies are usable\n"));
+
+        let mut old = all_ok.clone();
+        old[0].status = Status::TooOld("3.32.1".into());
+        let text = report(&old);
+        assert!(text.contains("FreeRdp [required]: too old (3.32.1; needs 3.32.2)\n"));
+        assert!(text.ends_with("a required dependency is missing or not usable\n"));
+        // An optional one missing doesn't fail it.
+        let mut optional = all_ok;
+        optional[3].status = Status::Missing;
+        assert!(report(&optional).ends_with("are usable\n"));
+        // Nothing checked is never "usable".
+        assert!(report(&[]).ends_with("not usable\n"));
+    }
 
     #[test]
     fn parses_freerdp_versions() {

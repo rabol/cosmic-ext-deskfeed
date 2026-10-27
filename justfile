@@ -114,7 +114,7 @@ licenses:
 # Vendor dependencies locally
 vendor:
     mkdir -p .cargo
-    cargo vendor | head -n -1 > .cargo/config.toml
+    cargo vendor --locked --versioned-dirs | head -n -1 > .cargo/config.toml
     echo 'directory = "vendor"' >> .cargo/config.toml
     tar pcf vendor.tar vendor
     rm -rf vendor
@@ -124,13 +124,16 @@ vendor-extract:
     rm -rf vendor
     tar pxf vendor.tar
 
-# The internal crate common/ keeps its version. The tag is
-# `v<version>`, which the AUR package downloads.
-# Sets the app's and the sign-in helper's version, commits and tags it
+# The internal crate common/ keeps its version. The tag is `v<version>`;
+# pushing it builds the packages and a draft GitHub release
+# (.github/workflows/release.yml, ADR 0030). scripts/set-version.py writes
+# the version into Cargo.toml, the rpm spec, debian/changelog, the
+# PKGBUILD, the AppStream metadata and CHANGELOG.md.
+# Sets the version everywhere, commits and tags it
 tag version:
-    sed -i '0,/^version/s/^version.*/version = "{{version}}"/' Cargo.toml signin/Cargo.toml
+    python3 -I scripts/set-version.py {{version}}
     cargo check --workspace
-    git add Cargo.toml signin/Cargo.toml Cargo.lock
+    git add Cargo.toml signin/Cargo.toml Cargo.lock CHANGELOG.md resources/app.metainfo.xml packaging/rpm/cosmic-ext-deskfeed.spec packaging/debian/changelog packaging/aur/cosmic-ext-deskfeed/PKGBUILD
     git commit -m 'release: {{version}}'
     git tag -a v{{version}} -m 'Deskfeed {{version}}'
 

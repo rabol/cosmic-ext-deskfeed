@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+# Built by .github/workflows/release.yml in a Debian testing container
+# (ADR 0030), from the source archive with every crate in vendor/, offline.
+# freerdp-x11 (>= 3.32.2) is the X11 client, `xfreerdp` (ADR 0004).
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	cargo build --frozen --release --workspace
+
+override_dh_auto_test:
+	desktop-file-validate target/xdgen/app.desktop
+
+override_dh_auto_install:
+	just rootdir=$(CURDIR)/debian/cosmic-ext-deskfeed prefix=/usr install
+	install -Dm644 THIRD-PARTY-LICENSES.md \
+		$(CURDIR)/debian/cosmic-ext-deskfeed/usr/share/doc/cosmic-ext-deskfeed/THIRD-PARTY-LICENSES.md
+
+# vendor/ is part of the source; only the build output goes.
+override_dh_auto_clean:
+	rm -rf target

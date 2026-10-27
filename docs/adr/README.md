@@ -33,5 +33,6 @@ Each significant decision is recorded as a short Markdown file, `NNNN-title.md`,
 | [0027](0027-desktop-sign-in-pre-selects-the-apps-account.md) | The desktop's sign-in pre-selects the app's account | Accepted |
 | [0028](0028-random-input-tests-with-optional-cargo-fuzz.md) | Random-input tests on stable Rust, with cargo-fuzz as an optional extra | Accepted |
 | [0029](0029-plain-rdp-connections.md) | Plain RDP connections ("Add connection") | Accepted |
+| [0030](0030-release-packages.md) | Release packages: .rpm, .deb, Arch package and a source archive | Accepted |
 
 Do not put tenant data (host names, tenant or workspace IDs, user names, feed URLs) in ADRs. Describe evidence in redacted form.
