@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.rabol.cosmic-ext-deskfeed</id>
+  <id>dev.rabol.deskfeed</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>Deskfeed</name>
@@ -18,14 +18,14 @@
       identity.
     </p>
   </description>
-  <developer id="io.github.rabol">
+  <developer id="dev.rabol">
     <name>Steen Rabol</name>
   </developer>
   <update_contact>cosmic-ext-avd@rabol.dev</update_contact>
-  <icon type="stock">io.github.rabol.cosmic-ext-deskfeed</icon>
+  <icon type="stock">dev.rabol.deskfeed</icon>
   <url type="homepage">https://github.com/rabol/cosmic-ext-deskfeed</url>
   <url type="vcs-browser">https://github.com/rabol/cosmic-ext-deskfeed</url>
-  <launchable type="desktop-id">io.github.rabol.cosmic-ext-deskfeed.desktop</launchable>
+  <launchable type="desktop-id">dev.rabol.deskfeed.desktop</launchable>
   <provides>
     <id>com.system76.CosmicApplication</id>
     <binary>cosmic-ext-deskfeed</binary>

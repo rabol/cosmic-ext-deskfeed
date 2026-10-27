@@ -2,7 +2,7 @@
 Name=Deskfeed
 Comment=Your work desktops on COSMIC™, working with Azure Virtual Desktop and Windows 365
 Type=Application
-Icon=io.github.rabol.cosmic-ext-deskfeed
+Icon=dev.rabol.deskfeed
 Exec=cosmic-ext-deskfeed
 Terminal=false
 StartupNotify=true

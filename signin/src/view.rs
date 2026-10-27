@@ -64,7 +64,7 @@ pub struct SignInView(Rc<Inner>);
 /// The app's ID, so COSMIC shows the sign-in window as part of Deskfeed
 /// (dock icon and grouping). Without an application GTK takes the program
 /// name, else "GTK Application" (GTK 4.24 `gdk/wayland/gdktoplevel-wayland.c`).
-const APP_ID: &str = "io.github.rabol.cosmic-ext-deskfeed";
+const APP_ID: &str = "dev.rabol.deskfeed";
 
 /// Starts GTK with the app's ID as the program name.
 pub fn init_gtk() -> Result<(), glib::BoolError> {

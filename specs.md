@@ -6,7 +6,7 @@ Status: proposed implementation specification. Created 2026-10-17.
 
 - Project, executable, Cargo package, and GitHub repository: `cosmic-ext-deskfeed` (the `cosmic-ext-` namespace the [COSMIC trademark policy](https://github.com/pop-os/cosmic-epoch/blob/master/TRADEMARK.md) asks third-party apps to use).
 - Display name: Deskfeed, described as "for the COSMIC™ desktop". Do not call it "Deskfeed" or otherwise imply official COSMIC status. In this document, "Deskfeed" means this application.
-- App ID: `io.github.rabol.cosmic-ext-deskfeed`. GitHub owner: `rabol`. Repository: `https://github.com/rabol/cosmic-ext-deskfeed`. Copyright holder: Steen Rabol.
+- App ID: `dev.rabol.deskfeed`. GitHub owner: `rabol`. Repository: `https://github.com/rabol/cosmic-ext-deskfeed`. Copyright holder: Steen Rabol.
 - Project directory: `/home/srabol/code/cosmic-ext-deskfeed`, its own Git repository.
 - License for original project code: MIT, with `SPDX-License-Identifier: MIT` where appropriate.
 - Platform: Linux, designed first for the COSMIC desktop on Wayland.

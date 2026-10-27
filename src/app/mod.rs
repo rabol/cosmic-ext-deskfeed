@@ -89,7 +89,7 @@ fn tray_events() -> impl cosmic::iced::futures::Stream<Item = crate::tray::TrayE
 }
 
 /// The app ID (also the tray item's ID and icon name).
-pub const APP_ID: &str = "io.github.rabol.cosmic-ext-deskfeed";
+pub const APP_ID: &str = "dev.rabol.deskfeed";
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 const APP_ICON: &[u8] = include_bytes!("../../resources/icons/hicolor/256x256/apps/icon.png");
 

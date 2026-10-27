@@ -23,7 +23,7 @@ libcosmic closes the app when its main window closes, unless the `multi-window` 
   - with desktops open, the quit dialog adds a third choice, "Keep running in the background".
 - The tray's Quit really quits. With desktops open, it shows the window and asks first, as usual.
 - A click on the tray icon, or starting Deskfeed again (single instance, D-Bus activation), opens the window again or focuses it. COSMIC's activation token is passed on so the window takes focus.
-- Single instance is done by Deskfeed (`src/single.rs`), not by libcosmic's `single-instance` feature. libcosmic serves at the app ID with only `.` replaced (`/io/github/rabol/cosmic-ext-deskfeed`), but `-` isn't allowed in a D-Bus object path, so the app exited at start, and a second start ran a second copy. Deskfeed claims its app ID as a bus name and serves `org.freedesktop.Application` at `/io/github/rabol/cosmic_ext_deskfeed` (that interface's rule: `-` becomes `_`). A second start calls `Activate` with its activation token and ends.
+- Single instance is done by Deskfeed (`src/single.rs`), not by libcosmic's `single-instance` feature. libcosmic serves at the app ID with only `.` replaced (`/io/github/rabol/cosmic-ext-deskfeed`), but `-` isn't allowed in a D-Bus object path, so the app exited at start, and a second start ran a second copy. Deskfeed claims its app ID as a bus name and serves `org.freedesktop.Application` at `/io/github/rabol/cosmic_ext_deskfeed` (that interface's rule: `-` becomes `_`). A second start calls `Activate` with its activation token and ends. Since 2026-10-27 the app ID is `dev.rabol.deskfeed` and the path `/dev/rabol/deskfeed` (ADR 0012 addendum); the own implementation stays.
 - The item registers again when the panel restarts (`NameOwnerChanged` for the watcher).
 - Desktop titles in the menu stay on the local session bus, as window titles do.
 
@@ -35,7 +35,7 @@ libcosmic closes the app when its main window closes, unless the `multi-window` 
 
 ## Addendum (2026-10-19): start when you log in
 
-- App settings → Background → "Start when you log in" writes an XDG autostart entry, `~/.config/autostart/io.github.rabol.cosmic-ext-deskfeed.desktop`, with `Exec=cosmic-ext-deskfeed --background`. Removing it turns the setting off; the file is the setting. COSMIC runs these entries at login.
+- App settings → Background → "Start when you log in" writes an XDG autostart entry, `~/.config/autostart/<app ID>.desktop` (now `dev.rabol.deskfeed.desktop`, ADR 0012 addendum), with `Exec=cosmic-ext-deskfeed --background`. Removing it turns the setting off; the file is the setting. COSMIC runs these entries at login.
 - `--background` starts without a window (libcosmic `no_main_window`). The window still opens when background operation is off, when no tray answers, or when a dependency is missing, so Deskfeed is never hidden without a way back.
 - Checked on the live session: with background on, `--background` showed only the tray icon, and a tray click opened the window. With it off, the window opened.
 

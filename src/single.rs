@@ -3,11 +3,14 @@
 //! One Deskfeed per user (ADR 0017). A second start asks the running one
 //! to show its window, then ends.
 //!
-//! libcosmic's `single-instance` can't be used: it serves at the app ID
-//! with only `.` replaced (`/io/github/rabol/cosmic-ext-deskfeed`), and `-`
-//! isn't allowed in a D-Bus object path, so it exits at start. This is
-//! the standard `org.freedesktop.Application` interface instead, at the
-//! path its specification gives (`-` becomes `_`).
+//! This is the standard `org.freedesktop.Application` interface, at the
+//! path its specification gives (the app ID with `.` replaced by `/`).
+//! It was written instead of libcosmic's `single-instance` while the app
+//! ID was `io.github.rabol.cosmic-ext-deskfeed`: libcosmic serves at the
+//! ID with only `.` replaced, and `-` isn't allowed in a D-Bus object
+//! path, so it exited at start (ADR 0017). The current ID,
+//! `dev.rabol.deskfeed`, has no `-`; this stays because it works and is
+//! tested, and libcosmic's hasn't been tried with it.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -15,7 +18,7 @@ use std::sync::{Mutex, OnceLock};
 use cosmic::iced::futures::channel::mpsc;
 use zbus::zvariant::{OwnedValue, Value};
 
-const PATH: &str = "/io/github/rabol/cosmic_ext_deskfeed";
+const PATH: &str = "/dev/rabol/deskfeed";
 const INTERFACE: &str = "org.freedesktop.Application";
 
 /// Activations for the app: the launcher's activation token, if any.
@@ -169,10 +172,8 @@ mod tests {
     #[test]
     fn path_is_a_valid_object_path() {
         assert!(zbus::zvariant::ObjectPath::try_from(PATH).is_ok());
-        // libcosmic's own path for this app ID isn't.
-        assert!(
-            zbus::zvariant::ObjectPath::try_from("/io/github/rabol/cosmic-ext-deskfeed").is_err()
-        );
+        // The specification's path: the app ID with `.` replaced by `/`.
+        assert_eq!(PATH, format!("/{}", crate::app::APP_ID.replace('.', "/")));
     }
 
     #[test]

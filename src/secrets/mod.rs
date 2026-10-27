@@ -35,7 +35,7 @@ const COLLECTION: &str = "org.freedesktop.Secret.Collection";
 const ITEM: &str = "org.freedesktop.Secret.Item";
 const PROMPT: &str = "org.freedesktop.Secret.Prompt";
 /// Identifies our items; the app ID.
-const APPLICATION: &str = "io.github.rabol.cosmic-ext-deskfeed";
+const APPLICATION: &str = "dev.rabol.deskfeed";
 const KIND: &str = "refresh-token";
 const PASSWORD_KIND: &str = "windows-password";
 /// A plain RDP connection's remembered password (ADR 0029).

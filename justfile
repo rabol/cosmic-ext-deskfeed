@@ -3,7 +3,7 @@ name := 'cosmic-ext-deskfeed'
 # The sign-in web view helper (ADR 0007).
 signin-name := 'cosmic-ext-deskfeed-signin'
 # The unique ID of the application.
-appid := 'io.github.rabol.cosmic-ext-deskfeed'
+appid := 'dev.rabol.deskfeed'
 
 # Path to root file system, which defaults to `/`.
 rootdir := ''

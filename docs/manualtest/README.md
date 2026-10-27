@@ -18,7 +18,7 @@ Install the current build first (`just install`, or the package).
 
 When a test passes, set its status to "Passed (date)" in its file and here. When one fails, note what happened in its file: it's a bug. Expectations must match the owner's setup: an unknown administrator policy is a step ("if the row says …, stop"), not an expected result.
 
-## To do (26)
+## To do (27)
 
 | # | Test | Area | Status |
 |---|---|---|---|
@@ -48,6 +48,7 @@ When a test passes, set its status to "Passed (date)" in its file and here. When
 | 24 | [Shared folder](24-shared-folder.md) | Desktop sessions | To do |
 | 27 | [No flash on a new workspace](27-new-workspace-no-flash.md) | Desktop sessions | To do |
 | 33 | [Use all monitors, and Span as one screen](33-all-monitors-and-span.md) | Desktop sessions | To do |
+| 34 | [After the app ID change](34-new-app-id.md) | Background and tray | To do |
 
 ## Completed but not tested
 

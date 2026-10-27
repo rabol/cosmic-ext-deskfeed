@@ -43,4 +43,4 @@ DESKFEED_TEST_SERVER=/tmp/tfreerdp-server.33892 \
   cargo test --release local_test_server_session -- --ignored
 ```
 
-While that runs, `MOVE_APP_ID=io.github.rabol.DeskfeedTest MOVE_TITLE="Deskfeed local test – tést" cargo test --release move_a_real_window -- --ignored` shows its window on a new workspace. Start it first (the session within 10 seconds): it switches to an empty workspace, the window opens there, and it prints `Ok(OpenedThere)`; started once the window is open, it moves it (`Ok(Moved)`).
+While that runs, `MOVE_APP_ID=dev.rabol.DeskfeedTest MOVE_TITLE="Deskfeed local test – tést" cargo test --release move_a_real_window -- --ignored` shows its window on a new workspace. Start it first (the session within 10 seconds): it switches to an empty workspace, the window opens there, and it prints `Ok(OpenedThere)`; started once the window is open, it moves it (`Ok(Moved)`).

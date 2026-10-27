@@ -118,11 +118,11 @@ fn a_chosen_password_logon_wins_over_the_files_entra_hint() {
 fn window_title_and_app_id() {
     let mut s = spec(LogonSetting::EntraSignIn, None, false);
     s.window_title = "Standard Desktop – anna@example.com\n/p:x".into();
-    s.app_id = "io.github.rabol.cosmic-ext-deskfeed".into();
+    s.app_id = "dev.rabol.deskfeed".into();
     let a = args(&s);
     // The line break is dropped, so nothing becomes a separate argument.
     assert!(a.contains(&"/title:Standard Desktop – anna@example.com/p:x".into()));
-    assert!(a.contains(&"/wm-class:io.github.rabol.cosmic-ext-deskfeed".into()));
+    assert!(a.contains(&"/wm-class:dev.rabol.deskfeed".into()));
     assert!(!a.iter().any(|x| x == "/p:x"));
     s.app_id = "bad id;x".into();
     assert!(!args(&s).iter().any(|x| x.starts_with("/wm-class:")));
@@ -982,7 +982,7 @@ fn windows_host_remote_app() {
         },
         shared_folder: None,
         window_title: "Deskfeed RemoteApp test".into(),
-        app_id: "io.github.rabol.DeskfeedTest".into(),
+        app_id: "dev.rabol.DeskfeedTest".into(),
     };
     // A test host's self-signed certificate.
     let (session, rx) = start_real(&s, dir, |mut args| {
@@ -1123,7 +1123,7 @@ fn local_test_server_session() {
         // `DESKFEED_TEST_TITLE`: another title, for two sessions at once.
         window_title: std::env::var("DESKFEED_TEST_TITLE")
             .unwrap_or_else(|_| "Deskfeed local test \u{2013} t\u{e9}st".into()),
-        app_id: "io.github.rabol.DeskfeedTest".into(),
+        app_id: "dev.rabol.DeskfeedTest".into(),
     };
     // The two arguments the test server can't take: TLS instead of
     // NLA; and without a pin its self-signed certificate is ignored,
