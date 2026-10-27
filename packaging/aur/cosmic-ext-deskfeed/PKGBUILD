@@ -1,7 +1,7 @@
 # Maintainer: Steen Rabol <cosmic-ext-avd@rabol.dev>
 
 pkgname=cosmic-ext-deskfeed
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Your work desktops on COSMIC, working with Azure Virtual Desktop and Windows 365 (unofficial)'
 arch=('x86_64')

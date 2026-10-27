@@ -1,3 +1,9 @@
+cosmic-ext-deskfeed (0.2.0-1) unstable; urgency=medium
+
+  * Release 0.2.0; see CHANGELOG.md.
+
+ -- Steen Rabol <cosmic-ext-avd@rabol.dev>  Tue, 27 Oct 2026 14:22:04 +0100
+
 cosmic-ext-deskfeed (0.1.0-1) unstable; urgency=medium
 
   * First package; see CHANGELOG.md.

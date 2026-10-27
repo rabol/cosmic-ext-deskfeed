@@ -4,6 +4,8 @@ All notable changes are listed here. The project uses [semantic versioning](http
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
 ### Changed
 
 - The app ID is now `dev.rabol.deskfeed` (was `io.github.rabol.cosmic-ext-deskfeed`). Accounts, saved connections, settings and saved sign-ins aren't carried over: sign in and set up again, and turn "Start when you log in" on again if you used it. Removing the old leftovers is described in ADR 0012's addendum.

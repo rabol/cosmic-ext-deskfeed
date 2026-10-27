@@ -1,6 +1,6 @@
 [package]
 name = "cosmic-ext-deskfeed"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # libcosmic declares 1.93; our own code needs 1.91 (Duration::from_mins).
 rust-version = "1.93"

@@ -6,7 +6,7 @@
 %global debug_package %{nil}
 
 Name:           cosmic-ext-deskfeed
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        Your work desktops on COSMIC: Azure Virtual Desktop, Windows 365 and RDP (unofficial)
 
@@ -67,5 +67,8 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/dev.rabol.deskfeed.de
 %{_datadir}/icons/hicolor/*/apps/dev.rabol.deskfeed.png
 
 %changelog
+* Tue Oct 27 2026 Steen Rabol <cosmic-ext-avd@rabol.dev> - 0.2.0-1
+- Release 0.2.0; see CHANGELOG.md
+
 * Sun Oct 18 2026 Steen Rabol <cosmic-ext-avd@rabol.dev> - 0.1.0-1
 - First package; see CHANGELOG.md
